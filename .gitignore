@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+
+# 虚拟环境
+venv/
+.env
+.venv
+
+# 数据
+chroma_db/
+models_cache/
+data
+
+# IDE
+.idea/
+.vscode/
