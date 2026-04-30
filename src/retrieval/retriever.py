@@ -64,8 +64,8 @@ def get_smart_retriever(question: str, db):
 
     retriever = db.as_retriever(
         search_kwargs={
-            "k": 3,
-            # "k": 8,
+            # "k": 3,
+            "k": 8,
             "filter": filter_dict if filter_dict else None
         }
     )
@@ -79,5 +79,5 @@ def get_smart_retriever(question: str, db):
     # return retriever.invoke(question)
     # return retriever
     # rerank精细排序 取出相似度最高的前三个
-    # docs = rerank_docs(question, docs, top_k=3)
+    docs = rerank_docs(question, docs, top_k=3)
     return docs

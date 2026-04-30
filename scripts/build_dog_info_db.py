@@ -6,9 +6,17 @@ from src.config import CHROMA_DB_DIR, DOG_MD_DATA_DIR
 
 reset_chroma(CHROMA_DB_DIR)
 docs = load_markdown_files(DOG_MD_DATA_DIR)
-# chunks = split_docs(docs)
+print(len(docs))
 chunks = split_markdown(docs)
+print(len(chunks))
 
 embeddings = get_embedding()
+vec = embeddings.embed_query("test")
+print("向量维度:", len(vec))
 
-build_vector_store(chunks, embeddings)
+db = build_vector_store(chunks, embeddings, CHROMA_DB_DIR)
+count = db._collection.count()
+print("写入数量:", count)
+
+if count == 0:
+    raise ValueError("❌ 向量库为空，构建失败")

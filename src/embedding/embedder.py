@@ -28,4 +28,4 @@ def get_embedding():
 
 
 if __name__ == "__main__":
-    get_embedding()
+    embedding = get_embedding()

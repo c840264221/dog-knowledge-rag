@@ -1,12 +1,13 @@
 from src.embedding.embedder import get_embedding
 from src.vectorstore.vector_store import load_vector_store
 from src.qa_chain import build_rag_chain
+from src.config import CHROMA_DB_DIR
 
 
 def chat():
     print("进入程序...")
     embedding = get_embedding()
-    db = load_vector_store(embedding)
+    db = load_vector_store(embedding, CHROMA_DB_DIR)
 
     rag_chain = build_rag_chain(db)
 
