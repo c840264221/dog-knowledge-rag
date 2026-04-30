@@ -1,8 +1,8 @@
 import time
-from crawler.akc_spider import (request_fetch, selenium_fetch, click_button,button_xpath,init_selenium_driver,
+from src.crawler.akc_spider import (request_fetch, selenium_fetch, click_button,button_xpath,init_selenium_driver,
                                 click_read_more_history_button, turn_to_soup)
-from crawler.parser import parse_list_page, parse_detail_page
-from crawler.pipeline import dict_to_markdown, save_markdown
+from src.crawler.parser import parse_list_page, parse_detail_page
+from src.crawler.pipeline import dict_to_markdown, save_markdown
 
 
 BASE_URL = "https://www.akc.org/dog-breeds/"
@@ -44,7 +44,7 @@ def run():
     #
     #     selenium_driver.quit()
     # 👉 分页
-    for i in range(1, 26):
+    for i in range(22, 26):
         selenium_driver = init_selenium_driver()
         list_links = []
         url = f"{BASE_URL}page/{i}/"

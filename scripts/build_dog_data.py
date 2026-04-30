@@ -23,4 +23,4 @@ if __name__ == "__main__":
     from src.config import DOG_MD_DATA_DIR
     files = os.listdir(DOG_MD_DATA_DIR)
     print(len(files))
-    # build()
+    build()

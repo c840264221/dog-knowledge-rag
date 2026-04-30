@@ -1,6 +1,6 @@
 import gradio as gr
 
-from src.service.recommender import recommend, parse_preferences
+from src.service.recommender import parse_preferences, recommend
 from src.service.dog_data_loader import load_dog_data  # 你需要自己实现
 
 

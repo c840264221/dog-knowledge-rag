@@ -1,5 +1,5 @@
 from bs4 import BeautifulSoup
-from crawler.pipeline import clean_text
+from src.crawler.pipeline import clean_text
 
 
 #  解析列表页
@@ -60,20 +60,79 @@ def parse_dog_basic_info(soup):
     return result
 
 def parse_dog_all_traits(soup):
-    result = {}
-    total_blocks = soup.find_all("div", class_="breed-trait-group__trait breed-trait-group__padded breed-trait-group__row-wrap")
-    for block in total_blocks:
-        block_tag = block.find("h4")
-        description_tag = block.find("p")
-        title = ""
-        description = ""
-        if block_tag:
-            title = block_tag.get_text(strip=True)
-        if description_tag:
-            description = description_tag.get_text(strip=True)
-        if title and description:
-            result[title] = description
-    return result
+    # result = {}
+    # CHOICE_TITLES = {"Coat Type", "Coat Length"}
+    #
+    #
+    # total_blocks = soup.find_all("div", class_="breed-trait-group__trait breed-trait-group__padded breed-trait-group__row-wrap")
+    # for block in total_blocks:
+    #     block_tag = block.find("h4")
+    #     description_tag = block.find_all("div",class_="breed-trait-score__score-unit breed-trait-score__score-unit--filled")
+    #     description = len(description_tag)
+    #     title = ""
+    #     if block_tag:
+    #         title = block_tag.get_text(strip=True)
+    #     if title:
+    #         if title in CHOICE_TITLES:
+    #             selected = block.find_all(
+    #                 "div",
+    #                 class_=lambda x: x and "breed-trait-score__choice--selected" in x
+    #             )
+    #
+    #             values = []
+    #             for item in selected:
+    #                 span = item.find("span")
+    #                 if span:
+    #                     values.append(span.get_text(strip=True))
+    #
+    #             traits[title] = values
+    #             continue
+    #     if title and description > 0:
+    #         result[title] = description
+    # return result
+    traits = {}
+
+    # 🎯 固定选择型字段
+    CHOICE_TITLES = {"Coat Type", "Coat Length"}
+
+    blocks = soup.find_all("div", class_="breed-trait-group__trait breed-trait-group__padded breed-trait-group__row-wrap")
+
+    for block in blocks:
+        title_tag = block.find("h4")
+        # title_tag = block.find("div", class_="breed-trait-group__title")
+        if not title_tag:
+            continue
+
+        title = title_tag.get_text(strip=True)
+
+        # =========================
+        # 🆕 选择型（只针对两个字段）
+        # =========================
+        if title in CHOICE_TITLES:
+            selected = block.find_all(
+                "div",
+                class_=lambda x: x and "breed-trait-score__choice--selected" in x
+            )
+
+            values = []
+            for item in selected:
+                span = item.find("span")
+                if span:
+                    values.append(span.get_text(strip=True))
+
+            traits[title] = values
+            continue
+
+        # =========================
+        # 普通评分型
+        # =========================
+        filled_units = block.find_all(
+            "div",
+            class_=lambda x: x and "breed-trait-score__score-unit--filled" in x
+        )
+
+        traits[title] = len(filled_units)
+    return traits
 
 def parse_dog_more_info(soup):
     result = {}
@@ -139,40 +198,41 @@ def parse_detail_page(soup):
     return merge_dog_info(all_data)
 
 if __name__ == '__main__':
-    from crawler.akc_spider import request_fetch, selenium_fetch, selenium_driver, click_button,button_xpath, click_read_more_history_button
+    from src.crawler.akc_spider import request_fetch, selenium_fetch, init_selenium_driver, click_button,button_xpath, click_read_more_history_button
     import time
 
+    selenium_driver = init_selenium_driver()
     base_url = "https://www.akc.org/dog-breeds/page/2"
     result_text = request_fetch(base_url)
     links = parse_list_page(result_text)
     print(links)
 
-    # selenium_fetch(links[0])
-    #
-    # click_button(selenium_driver, button_xpath['accept_cookies'])
-    # time.sleep(3)
-    #
-    # click_button(selenium_driver, button_xpath['read_more_about_breed'])
-    # time.sleep(1)
-    #
-    # click_read_more_history_button(selenium_driver)
-    # time.sleep(1)
-    #
-    # html = selenium_driver.page_source
-    # soup = BeautifulSoup(html, "html.parser")
+    selenium_fetch(selenium_driver, links[0])
+
+    click_button(selenium_driver, button_xpath['accept_cookies'])
+    time.sleep(3)
+
+    click_button(selenium_driver, button_xpath['read_more_about_breed'])
+    time.sleep(1)
+
+    click_read_more_history_button(selenium_driver)
+    time.sleep(1)
+
+    html = selenium_driver.page_source
+    soup = BeautifulSoup(html, "html.parser")
     # print(soup)
 
     # name = parse_dog_name(soup)
     # tage = parse_dog_tag(soup)
     # basic_info = parse_dog_basic_info(soup)
-    # all_traits = parse_dog_all_traits(soup)
+    all_traits = parse_dog_all_traits(soup)
     # more_info = parse_dog_more_info(soup)
     # attention = parse_dog_attention(soup)
     # history = parse_dog_history(soup)
     # print(name)
     # print(tage)
     # print(basic_info)
-    # print(all_traits)
+    print(all_traits)
     # print(more_info)
     # print(attention)
     # print(history)
