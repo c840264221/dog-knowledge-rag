@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DOG_MD_DATA_DIR = os.path.join(BASE_DIR,os.getenv("DOG_MD_DATA_DIR", "data/markdown"))
+DOG_MD_DATA_DIR = os.path.join(BASE_DIR,os.getenv("DOG_MD_DATA_DIR", "data/dog_markdown"))
 LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "qwen:1.8b")
 CHROMA_DB_DIR = os.path.join(BASE_DIR,os.getenv("CHROMA_DB_DIR", "chroma_db"))
 HF_TOKEN = os.getenv("HF_TOKEN", "")
@@ -16,6 +16,7 @@ CACHE_DIR = os.path.join(BASE_DIR,"models_cache")
 
 DOG_NAME_JSON_PATH = os.path.join(BASE_DIR, "data", "dog_names.json")
 DOG_NAME_ALIAS_JSON_PATH = os.path.join(BASE_DIR, "data", "alias_dog_name.json")
+DOG_DATA_JSON_PATH = os.path.join(BASE_DIR, "data", "dogs.json")
 
 
 if __name__ == "__main__":
