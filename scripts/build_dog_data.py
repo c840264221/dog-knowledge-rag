@@ -1,12 +1,12 @@
 import json
 from pathlib import Path
 
-from src.service.dog_data_loader import load_dog_data
+from src.service.dog_data_loader import load_mddata_to_json
 from src.config import DOG_DATA_JSON_PATH
 
 
 def build():
-    dogs = load_dog_data()
+    dogs = load_mddata_to_json()
 
     # 创建目录
     Path(DOG_DATA_JSON_PATH).parent.mkdir(parents=True, exist_ok=True)

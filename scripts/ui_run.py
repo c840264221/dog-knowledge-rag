@@ -1,10 +1,10 @@
 import gradio as gr
 
 from src.service.recommender import parse_preferences, recommend
-from src.service.dog_data_loader import load_dog_data  # 你需要自己实现
+from src.service.dog_data_loader import load_mddata_to_json
 
 
-dogs = load_dog_data()
+dogs = load_mddata_to_json()
 
 
 def recommend_fn(query):

@@ -2,31 +2,36 @@ import re
 import os
 
 
+# 根据md的一级标题##来提取狗狗的名称
 def extract_name(md_text: str, file_path: str = None) -> str:
     """
     提取狗狗名称（优先级：标题 > 文件名 > 第一行）
     """
-
+    # print("debug:",repr(md_text[:50]))
     # 1️⃣ 标题提取
     match = re.search(r"^#+\s+(.+)", md_text, re.MULTILINE)
     if match:
         name = match.group(1).strip()
-        return clean_name(name)
+        print("标题提取成功，name:",name)
+        # return clean_name(name)
+        return name
 
     # 2️⃣ 文件名 fallback
     if file_path:
         name = os.path.basename(file_path).replace(".md", "")
+        print("文件名提取成功")
         return clean_name(name)
 
     # 3️⃣ 第一行 fallback
     for line in md_text.splitlines():
         line = line.strip()
         if line:
+            print("第一行提取成功")
             return clean_name(line)
 
     return "Unknown"
 
-
+# 清理名称中的不必要字符
 def clean_name(name: str) -> str:
     """
     清洗名称
@@ -40,6 +45,7 @@ def clean_name(name: str) -> str:
 
     return name.strip()
 
+# 根据字段名提取相对应的参数的数据
 def extract_field(md_text: str, field_name: str) -> str:
     """
     更鲁棒版本：支持不同级别标题 & 模糊匹配
@@ -59,6 +65,7 @@ def extract_field(md_text: str, field_name: str) -> str:
 
     return ""
 
+# 祛除数据中的不必要字符
 def clean_text(text: str) -> str:
     """
     清洗 Markdown 内容
@@ -79,7 +86,7 @@ FIELD_MAP = {
     "height": "身高",
 }
 
-
+# 提取所有字段对应的数据 并输出为json格式
 def extract_all_fields(md_text: str):
     result = {}
 
@@ -88,6 +95,7 @@ def extract_all_fields(md_text: str):
 
     return result
 
+# 提取身高信息
 def extract_height_avg(text: str, field_name):
     # 1️⃣ 只匹配 “- 身高: xxx” 这一行
     pattern = rf"-\s*{re.escape(field_name)}:\s*(.+)"

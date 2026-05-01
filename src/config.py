@@ -17,6 +17,7 @@ CACHE_DIR = os.path.join(BASE_DIR,"models_cache")
 DOG_NAME_JSON_PATH = os.path.join(BASE_DIR, "data", "dog_names.json")
 DOG_NAME_ALIAS_JSON_PATH = os.path.join(BASE_DIR, "data", "alias_dog_name.json")
 DOG_DATA_JSON_PATH = os.path.join(BASE_DIR, "data", "dogs.json")
+FILTER_RULES_PATH = os.path.join(BASE_DIR, "data", "filter_rules.json")
 
 
 if __name__ == "__main__":

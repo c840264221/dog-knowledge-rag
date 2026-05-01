@@ -1,8 +1,10 @@
 from langchain_chroma import Chroma
+from langchain_core.documents import Document
 import shutil
 import os
 
 
+# 创建向量数据库
 def build_vector_store(docs, embedding, db_path):
     print(f"创建数据库   路径为{db_path}")
     print(f"创建数据库: {db_path}")
@@ -28,6 +30,7 @@ def build_vector_store(docs, embedding, db_path):
 
     return db
 
+# 载入向量数据库
 def load_vector_store(embedding, db_path):
     print("载入向量数据库...")
     print(f"加载路径为：{db_path}")
@@ -41,6 +44,47 @@ def reset_chroma(db_dir):
     if os.path.exists(db_dir):
         shutil.rmtree(db_dir)
         print("🗑️ 已删除旧数据库")
+
+def build_documents(chunks, dog_map):
+    new_docs = []
+    current_title = None
+
+    for doc in chunks:
+
+        # 从metadata的title中提取名字
+        if "title" in doc.metadata:
+            current_title = doc.metadata["title"].strip()
+
+        # 如果没有title就用上一次保存的title作为name
+        name = current_title
+        print("doc_name:",name)
+
+        if len(name) == 0:
+            print("❌️ 未正确提取到狗狗名字！")
+            continue
+
+        text = doc.page_content
+
+        meta = dog_map.get(name, {})
+
+        # 类型转换
+        metadata = {
+            "name": name,
+            "trainability": int(float(meta.get("trainability", 0))),
+            "barking": int(float(meta.get("barking", 0))),
+            "shedding": int(float(meta.get("shedding", 0))),
+            "height":float(meta.get("height", 0)),
+            "section": doc.metadata.get("section", "")
+        }
+
+        new_doc = Document(
+            page_content=text,
+            metadata=metadata
+        )
+
+        new_docs.append(new_doc)
+
+    return new_docs
 
 
 if __name__ == "__main__":
