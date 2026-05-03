@@ -26,7 +26,7 @@ def detect_dog(question):
     return None
 
 def detect_section(question):
-    sections = ["性格", "标签", "基本信息", "关于", "历史", "指南"]
+    sections = []
 
     for section in sections:
         if section.lower() in question.lower():
@@ -39,6 +39,7 @@ from src.config import FILTER_RULES_PATH
 with open(FILTER_RULES_PATH, "r", encoding="utf-8") as f:
     FILTER_RULES = json.load(f)
 
+# 根据问题提取关键字段 然后创建filed用于精确过滤
 def detect_filters(question):
     filters = {}
 
@@ -51,6 +52,24 @@ def detect_filters(question):
                 break
 
     return filters
+
+# 根据问题提取intent  然后返回intent结合prompt  用于控制LLM的输出
+def detect_intent(question: str) -> str:
+    q = question.lower()
+
+    if "性格" in q or "temperament" in q:
+        return "temperament"
+
+    if "训练" in q or "train" in q:
+        return "trainability"
+
+    if "掉毛" in q or "shedding" in q:
+        return "shedding"
+
+    if "叫" in q or "bark" in q:
+        return "barking"
+
+    return "general"
 
 from src.models.reranker import get_reranker
 
@@ -73,6 +92,7 @@ def rerank_docs(question, docs, top_k=3):
 
 # 添加过滤功能  更精准匹配数据
 def get_smart_retriever(question: str, db):
+    intent = detect_intent(question)
     section = detect_section(question)
     dog_name = detect_dog(question)
 
@@ -82,6 +102,8 @@ def get_smart_retriever(question: str, db):
         filter_dict["section"] = section
     if dog_name:
         filter_dict["name"] = dog_name
+
+    print("filter_dict:",filter_dict)
 
     retriever = db.as_retriever(
         search_kwargs={
@@ -104,7 +126,16 @@ def get_smart_retriever(question: str, db):
     # return retriever
     # rerank精细排序 取出相似度最高的前三个
     docs = rerank_docs(question, docs, top_k=3)
-    return docs
+    print("结果：",{
+        "docs": docs,
+        "question": question,
+        "intent": intent
+    })
+    return {
+        "docs": docs,
+        "question": question,
+        "intent": intent
+    }
 
 
 if __name__ == "__main__":
