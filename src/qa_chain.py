@@ -18,6 +18,7 @@ def build_rag_chain(db):
 3. 不要重复内容
 4. 控制在5点以内
 5. 用清晰条目输出
+6.如果intent不是general，只回答该intent方面的内容
 
 intent:{intent}
 

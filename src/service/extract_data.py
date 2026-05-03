@@ -55,7 +55,7 @@ def extract_field(md_text: str, field_name: str) -> str:
         return str(height)
 
     # pattern = rf"-+\s*{re.escape(field_name)}.*?(.*?)(?=\n#+|\Z)"
-    pattern = rf"-\s*{re.escape(field_name)}\s*:\s*(.*?)(?=\n-\s|\Z)"
+    pattern = rf"-\s*{re.escape(field_name)}\s*:\s*(.*?)(?=\n-\s|#|\Z)"
 
     match = re.search(pattern, md_text, re.IGNORECASE | re.DOTALL)
 
@@ -83,7 +83,22 @@ FIELD_MAP = {
     "trainability": "Trainability Level",
     "shedding": "Shedding Level",
     "barking": "Barking Level",
+    "affectionate_with_family": "Affectionate With Family",
+    "good_with_young_children": "Good With Young Children",
+    "good_with_other_dogs": "Good With Other Dogs",
+    "coat_grooming_frequency": "Coat Grooming Frequency",
+    "drooling": "Drooling Level",
+    "coat_type": "Coat Type",
+    "coat_length": "Coat Length",
+    "openness_to_strangers": "Openness To Strangers",
+    "playfulness": "Playfulness Level",
+    "watchdog": "Watchdog/Protective Nature",
+    "adaptability": "Adaptability Level",
+    "energy": "Energy Level",
+    "mental_stimulation_needs": "Mental Stimulation Needs",
     "height": "身高",
+    "weight": "体重",
+    "life": "寿命",
 }
 
 # 提取所有字段对应的数据 并输出为json格式
