@@ -19,6 +19,7 @@ def build_rag_chain(db):
 4. 控制在5点以内
 5. 用清晰条目输出
 6.如果intent不是general，只回答该intent方面的内容
+7.必须使用提供数据中的字段name作为狗狗的名称且用中文
 
 intent:{intent}
 

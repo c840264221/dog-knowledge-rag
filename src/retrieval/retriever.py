@@ -1,5 +1,9 @@
 import json
+
+from PIL.features import features
+
 from src.retrieval.filter_by_tags import filter_by_tags
+from src.parser.query_parser import parse_query_with_llm
 
 
 def get_retriever(db):
@@ -87,6 +91,14 @@ def detect_intent_and_tags(question: str):
                 }
     return {"intent": "general", "tags": [], "field": None}
 
+# chroma不支持顶层多个操作符  所以进行统一处理
+def handle_filters(filters):
+    new_filters = []
+    for k, v in filters.items():
+        new_filters.append({k:v})
+    return {"$and": new_filters}
+
+
 from src.models.reranker import get_reranker
 
 # rerank重新将向量数据库返回的数据进行一次精准排序
@@ -125,13 +137,34 @@ def rerank_docs(question, docs, intent, top_k=3):
 # 添加过滤功能  更精准匹配数据
 def get_smart_retriever(question: str, db):
     section = detect_section(question)
-    dog_name = detect_dog(question)
+    # dog_name = detect_dog(question)
+    #
+    # parsed = detect_intent_and_tags(question)
+    # intent = parsed["intent"]
+    # tags = parsed["tags"]
 
-    parsed = detect_intent_and_tags(question)
-    intent = parsed["intent"]
-    tags = parsed["tags"]
+    print("开始调用llm解析问题......")
+    parse_data = parse_query_with_llm(question)
+    print("llm解析问题完成，结果为：", parse_data)
+
+    intent = parse_data.get("intent","")
+    filters = parse_data.get("filters",{})
+    tags = parse_data.get("tags",[])
+    features = parse_data.get("features",[])
+    dog_name = parse_data.get("dog_name","")
+
+    if not dog_name:
+        print("llm未获取到狗狗名称，尝试原方法获取......")
+        dog_name = detect_dog(question)
+
+    if not intent or not tags:
+        print("llm未获取到intent或tags，尝试原方法获取......")
+        parsed = detect_intent_and_tags(question)
+        intent = parsed["intent"] if not intent else "general"
+        tags = parsed["tags"] if not tags else ["general"]
 
     filter_dict = detect_filters(question)
+    filter_dict.update(filters)
 
     print("intent:", intent)
     print("tags:", tags)
@@ -144,11 +177,18 @@ def get_smart_retriever(question: str, db):
 
     print("filter_dict:",filter_dict)
 
+    if len(filter_dict) > 1:
+        final_filters = handle_filters(filter_dict)
+    else:
+        final_filters = filter_dict
+    print("final_filters:",final_filters)
+
     retriever = db.as_retriever(
         search_kwargs={
             # "k": 3,
             "k": 8,
-            "filter": filter_dict if filter_dict else None
+            # "filter": filter_dict if filter_dict else None
+            "filter": final_filters
         }
     )
     docs = retriever.invoke(question)

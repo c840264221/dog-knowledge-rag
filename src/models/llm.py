@@ -1,4 +1,4 @@
-from langchain_community.chat_models import ChatOllama
+from langchain_ollama import ChatOllama
 
 _llm_instance = None
 
@@ -9,7 +9,8 @@ def get_llm():
         print("🚀 初始化 LLM...", flush=True)
 
         _llm_instance = ChatOllama(
-            model="qwen2:7b",
+            # model="qwen2:7b",
+            model="deepseek-r1:latest",
             temperature=0
         )
 
