@@ -9,11 +9,11 @@ def filter_node(state):
 
     filter_dict = {}
 
-    # ✅ 数值过滤（直接透传）
+    # 数值过滤（直接透传）
     for k, v in filters.items():
         filter_dict[k] = v
 
-    # ✅ 品种过滤（如果识别到了）
+    # 品种过滤（如果识别到了）
     if dog_name:
         filter_dict["name"] = dog_name
 

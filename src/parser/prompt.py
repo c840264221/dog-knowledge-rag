@@ -8,6 +8,21 @@ QUERY_PARSE_PROMPT = PromptTemplate(
     template="""
 你是一个查询解析器，请将用户问题解析为结构化 JSON。
 
+【重要规则】
+如果用户没有输入任何有效问题，或者问题为空：
+
+必须返回：
+{{
+  "intent": "ask_info",
+  "filters": {{}},
+  "tags": [],
+  "features": [],
+  "dog_name": None
+}}
+
+禁止猜测用户意图。
+禁止生成默认推荐。
+
 【严格要求】
 
 1️⃣ intent：

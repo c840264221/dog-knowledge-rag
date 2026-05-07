@@ -1,3 +1,5 @@
+from src.retrieval.retriever import handle_filters
+
 class RetrieveNode:
 
     def __init__(self, db):
@@ -7,6 +9,7 @@ class RetrieveNode:
         print("调用RetrieveNode......")
         question = state["question"]
         filter_dict = state.get("filters", {})
+        filter_dict = handle_filters(filter_dict)
         print("filter_dict为：", filter_dict)
 
         retriever = self.db.as_retriever(

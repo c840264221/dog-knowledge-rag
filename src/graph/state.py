@@ -11,8 +11,14 @@ class DogState(TypedDict):
     features: List[str]
     dog_name: str
 
+    # 检索策略
+    strategy: str
+
     # 中间结果
     docs: List[Any]
+
+    # 重试次数
+    retry_count:int
 
     # 输出
     answer: str

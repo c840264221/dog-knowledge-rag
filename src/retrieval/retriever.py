@@ -93,10 +93,13 @@ def detect_intent_and_tags(question: str):
 
 # chroma不支持顶层多个操作符  所以进行统一处理
 def handle_filters(filters):
-    new_filters = []
-    for k, v in filters.items():
-        new_filters.append({k:v})
-    return {"$and": new_filters}
+    if len(filters) > 1:
+        new_filters = []
+        for k, v in filters.items():
+            new_filters.append({k:v})
+        return {"$and": new_filters}
+    else:
+        return filters
 
 
 from src.models.reranker import get_reranker
