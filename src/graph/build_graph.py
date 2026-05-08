@@ -4,7 +4,7 @@ from src.graph.state import DogState
 from src.graph.nodes.parse_node import parse_node
 from src.graph.nodes.router_node import strategy_router_node
 from src.graph.nodes.filter_node import filter_node
-from src.graph.nodes.retrieve_node import RetrieveNode
+from src.graph.nodes.retrieve_node import retrieve_node
 from src.graph.nodes.tag_filter_node import tag_filter_node
 from src.graph.nodes.rerank_node import rerank_node
 from src.graph.nodes.generate_node import generate_node
@@ -24,12 +24,12 @@ def build_graph(db):
 
     # 推荐流
     graph.add_node("filter", filter_node)
-    graph.add_node("retrieve", RetrieveNode(db))
+    graph.add_node("retrieve", retrieve_node(db))
     graph.add_node("tag_filter", tag_filter_node)
     graph.add_node("rerank", rerank_node)
 
     # QA流
-    graph.add_node("retrieve_qa", RetrieveNode(db))
+    graph.add_node("retrieve_qa", retrieve_node(db))
 
     # 注册评估检索节点
     graph.add_node("evaluate_retrieval", evaluate_retrieval_node)

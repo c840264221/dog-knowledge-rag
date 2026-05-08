@@ -1,5 +1,7 @@
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
+from src.embedding.embedder import get_embedding
+from src.config import CHROMA_DB_DIR
 import shutil
 import os
 import json
@@ -195,6 +197,7 @@ def build_documents(chunks, dog_map):
 
     return new_docs
 
+db = load_vector_store(get_embedding(), CHROMA_DB_DIR)
 
 if __name__ == "__main__":
     from src.config import CHROMA_DB_DIR

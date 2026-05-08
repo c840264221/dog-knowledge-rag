@@ -26,9 +26,10 @@ def generate_node(state):
     print("开始generate_node......")
     print("当前state为：", state)
     context = build_context(state["docs"])
+    print("context:", context)
 
     prompt = ChatPromptTemplate.from_template("""
-你是一个严谨的狗狗推荐助手。
+你是一个严谨的狗狗百科助手。
 
 【任务】
 根据 intent 决定行为：
@@ -40,8 +41,9 @@ def generate_node(state):
 2. 严禁使用“品种一/二”等编号
 3. 只能基于提供数据，不得编造
 4. 每条推荐必须包含名称 + 原因
-5. 控制在3条以内
+5. 至少3条数据，但最多不超过5条
 6. 如果intent不是general，只回答该intent相关内容
+
 
 intent: {intent}
 
@@ -52,7 +54,7 @@ intent: {intent}
 {question}
 
 输出规则：
-- 如果是推荐：最多3个，名称+原因
+- 如果是推荐：最多5个，名称+原因
 - 如果是问答：直接回答，不要推荐
 """)
 
@@ -62,7 +64,6 @@ intent: {intent}
         "context": context,
         "question": state["question"]
     })
-    print("prompt为：", prompt)
     print("generate_node结束，结果为：", answer)
     print("当前state为：", state)
 

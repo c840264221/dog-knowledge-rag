@@ -1,26 +1,24 @@
 from src.retrieval.retriever import handle_filters
+from src.service.create_retriever import retriever_service
 
-class RetrieveNode:
 
-    def __init__(self, db):
-        print("初始化RetrieveNode,指定db......")
-        self.db = db
-    def __call__(self,state):
-        print("调用RetrieveNode......")
-        question = state["question"]
-        filter_dict = state.get("filters", {})
-        filter_dict = handle_filters(filter_dict)
-        print("filter_dict为：", filter_dict)
+def retrieve_node(state):
+    print("retrieve_node......")
+    question = state["question"]
 
-        retriever = self.db.as_retriever(
-            search_kwargs={
-                "k": 8,
-                "filter": filter_dict if filter_dict else None
-            }
-        )
+    filter_dict = state.get("filters", {})
+    # 如果有具体的狗狗名字 则放弃其他筛选条件 改为查询该狗狗的所有信息
+    if "name" in filter_dict.keys():
+        filter_dict = {"name": filter_dict["name"]}
+    filter_dict = handle_filters(filter_dict)
 
-        docs = retriever.invoke(question)
-        print("retriever返回的数据为：", docs)
-        print("当前state为:", state)
+    top_k = state.get("top_k", 5)
+    print("filter_dict为：", filter_dict)
 
-        return {"docs": docs}
+    docs = retriever_service.retrieve(question, filter_dict, top_k)
+
+    # docs = retriever.invoke(question)
+    print("retriever返回的数据为：", docs)
+    print("当前state为:", state)
+
+    return {"docs": docs}
