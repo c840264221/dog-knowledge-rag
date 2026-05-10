@@ -38,3 +38,9 @@ class DogState(TypedDict, total=False):
 
     # 搜索结果取前几项
     top_k: int
+
+    # 存储用户对交互问题的回答
+    user_feedback: Optional[str]
+
+    # 是否询问过用户  此字段防止重复询问
+    has_asked_user: bool

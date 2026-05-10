@@ -6,7 +6,7 @@ from src.graph.nodes.parse_node import parse_node
 from src.graph.nodes.router_node import strategy_router_node
 
 from src.graph.sub_graphs.recommend_subgraph import (
-    build_recommendation_subgraph
+    build_recommendation_subgraph, build_recommendation_subgraph_with_human
 )
 
 from src.graph.sub_graphs.exact_search_subgraph import (
@@ -23,7 +23,8 @@ from src.graph.routes.route_by_strategy import route_by_strategy
 
 def build_main_graph():
 
-    recommendation_graph = build_recommendation_subgraph()
+    # recommendation_graph = build_recommendation_subgraph()
+    recommendation_graph = build_recommendation_subgraph_with_human()
     exact_graph = build_exact_search_graph()
     general_graph = build_general_qa_graph()
 
@@ -59,5 +60,5 @@ def build_main_graph():
             "semantic": "general"
         }
     )
-
-    return graph.compile()
+    from langgraph.checkpoint.memory import MemorySaver
+    return graph.compile(checkpointer=MemorySaver())

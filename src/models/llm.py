@@ -9,8 +9,8 @@ def get_llm():
         print("🚀 初始化 LLM...", flush=True)
 
         _llm_instance = ChatOllama(
-            # model="qwen2:7b",
-            model="deepseek-r1:latest",
+            # model="deepseek-r1:latest",
+            model="deepseek-r1:14b",
             temperature=0
         )
 
