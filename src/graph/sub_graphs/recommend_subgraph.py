@@ -10,7 +10,6 @@ from src.graph.nodes.retrieval_retry_node import retrieval_retry_node
 from src.graph.nodes.ask_user_node import ask_user_node
 from src.graph.routes.route_after_ask_user import route_after_ask_user
 from src.graph.nodes.modify_filter_node import modify_filter_node
-from langgraph.checkpoint.memory import MemorySaver
 
 
 def route_after_evaluate(state):
@@ -120,8 +119,7 @@ def build_recommendation_subgraph_with_human():
     # modify_filter 节点完成后回到 retrieve（重新检索）
     graph.add_edge("modify_filter", "retrieve")
 
-    # 关键：编译时传入 checkpoint才支持断点和恢复
+    # 关键：编译时传入 checkpoint才支持断点和恢复 但是子图中不要添加checkpoint 主图中添加就行了
     # MemorySaver 用于测试 生产可用 SqliteSaver
-    checkpointer = MemorySaver()
 
-    return graph.compile(checkpointer=checkpointer)
+    return graph.compile()

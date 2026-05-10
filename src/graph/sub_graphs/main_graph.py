@@ -14,7 +14,7 @@ from src.graph.sub_graphs.exact_search_subgraph import (
 )
 
 from src.graph.sub_graphs.qa_subgraph import (
-    build_general_qa_graph
+    build_general_qa_graph, build_general_qa_subgraph
 )
 from src.graph.routes.route_by_strategy import route_by_strategy
 
@@ -26,7 +26,8 @@ def build_main_graph():
     # recommendation_graph = build_recommendation_subgraph()
     recommendation_graph = build_recommendation_subgraph_with_human()
     exact_graph = build_exact_search_graph()
-    general_graph = build_general_qa_graph()
+    # general_graph = build_general_qa_graph()
+    general_graph = build_general_qa_subgraph()
 
     def recommendation_node(state):
         return recommendation_graph.invoke(state)
@@ -57,7 +58,8 @@ def build_main_graph():
         {
             "filtered": "recommendation",
             "exact": "exact",
-            "semantic": "general"
+            "semantic": "general",
+            "direct": "general"
         }
     )
     from langgraph.checkpoint.memory import MemorySaver

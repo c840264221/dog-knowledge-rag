@@ -33,7 +33,7 @@ def run_main_graph_with_stream(question: str) -> str:
         "has_asked_user": False,
         "docs": [],
         "filters": {},
-        "answers": ""
+        "answer": ""
     }
     config = {"configurable": {"thread_id": uuid.uuid4().hex}}
 
@@ -60,10 +60,10 @@ def run_main_graph_with_stream(question: str) -> str:
                 # 取第一个中断的消息
                 prompt_message = interrupts[0].value  # 这就是 interrupt(question) 中的 question
             else:
-                prompt_message = "请做出选择（1/2/3）："
+                prompt_message = "请做出选择："
         else:
             # 备用：从状态中的某个字段获取（但这需要你在 ask_user_node 中额外保存）
-            prompt_message = "请做出选择（1/2/3）："
+            prompt_message = "请做出选择："
 
         # 显示从节点中提取的提示，而不是硬编码
         print("\n" + prompt_message)

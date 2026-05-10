@@ -1,4 +1,4 @@
-from typing import TypedDict, List, Optional
+from typing import TypedDict, List, Optional, Dict, Any
 from langchain_core.documents import Document
 
 
@@ -44,3 +44,10 @@ class DogState(TypedDict, total=False):
 
     # 是否询问过用户  此字段防止重复询问
     has_asked_user: bool
+
+    # ===== 工具调用新增字段 =====
+    tool_calls: List[Dict[str, Any]]  # 存储解析出的工具调用请求 [{name, args}]
+    tool_results: List[str]  # 存储工具执行的结果文本
+    need_tool: bool  # 当前是否需要执行工具
+    tool_round: int  # 已执行的工具轮次（防止无限循环）
+    pending_prompt: str  # 保留之前人机交互用
