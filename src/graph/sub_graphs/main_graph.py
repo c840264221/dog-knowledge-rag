@@ -1,3 +1,4 @@
+from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import StateGraph
 
 from src.graph.state import DogState
@@ -17,7 +18,7 @@ from src.graph.sub_graphs.qa_subgraph import (
     build_general_qa_graph, build_general_qa_subgraph
 )
 from src.graph.routes.route_by_strategy import route_by_strategy
-
+import sqlite3
 
 
 
@@ -62,5 +63,9 @@ def build_main_graph():
             "direct": "general"
         }
     )
-    from langgraph.checkpoint.memory import MemorySaver
-    return graph.compile(checkpointer=MemorySaver())
+    from src.config import CHECKPOINTS_DB_PATH
+    conn = sqlite3.connect(CHECKPOINTS_DB_PATH, check_same_thread=False)
+    checkpointer = SqliteSaver(conn)
+    # from langgraph.checkpoint.memory import MemorySaver
+    # return graph.compile(checkpointer=MemorySaver())
+    return graph.compile(checkpointer=checkpointer)

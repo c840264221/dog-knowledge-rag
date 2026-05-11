@@ -25,7 +25,7 @@ def run_main_graph(question: str):
     })
     return result["answer"]
 
-def run_main_graph_with_stream(question: str) -> str:
+def run_main_graph_with_stream(question: str, user_id:str="default_user") -> str:
     from langgraph.types import Command
     state = {
         "question": question,
@@ -33,9 +33,14 @@ def run_main_graph_with_stream(question: str) -> str:
         "has_asked_user": False,
         "docs": [],
         "filters": {},
-        "answer": ""
+        "answer": "",
+        "dog_name":None,
+        "strategy":None
     }
-    config = {"configurable": {"thread_id": uuid.uuid4().hex}}
+    # 使用uuid作为线程id 每次对话创建一个新的id
+    # config = {"configurable": {"thread_id": uuid.uuid4().hex}}
+    # 用user_id作为线程的id 每次对话都可以根据线程id来获取之前对话历史  达到记忆目的
+    config = {"configurable": {"thread_id": "my_test_user"}}
 
     # 第一次调用，可能因中断而提前结束迭代
     events = list(app_2.stream(state, config, stream_mode="values"))

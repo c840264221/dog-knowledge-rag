@@ -1,5 +1,6 @@
 from typing import TypedDict, List, Optional, Dict, Any
 from langchain_core.documents import Document
+from langchain_core.messages import BaseMessage
 
 
 class DogState(TypedDict, total=False):
@@ -51,3 +52,5 @@ class DogState(TypedDict, total=False):
     need_tool: bool  # 当前是否需要执行工具
     tool_round: int  # 已执行的工具轮次（防止无限循环）
     pending_prompt: str  # 保留之前人机交互用
+
+    messages: List[BaseMessage]  # 存储对话历史

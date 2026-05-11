@@ -1,3 +1,5 @@
+from langchain_core.messages import HumanMessage
+
 from src.parser.query_parser import parse_query_with_llm
 from src.retrieval.alias_loader import get_alias_dict
 
@@ -6,6 +8,10 @@ alias_dict = get_alias_dict()
 def parse_node(state):
     print("parse_node开始......")
     print("当前state为:", state)
+
+    messages = state.get("messages",[])
+    messages.append(HumanMessage(content=state["question"]))
+
     result = parse_query_with_llm(state["question"])
     dog_name = result.get("dog_name", None)
     if dog_name:
@@ -22,4 +28,5 @@ def parse_node(state):
         "tags": result["tags"],
         "features": result["features"],
         "dog_name": dog_name,
+        "messages": messages,
     }

@@ -78,6 +78,10 @@ def build_general_qa_subgraph():
             "no_call_tool": "answer_gen"
         }
     )
+    graph.add_conditional_edges(
+        "execute_tool",
+        lambda s: "tool_parse" if s.get("need_tool") else "answer_gen",
+    )
     graph.add_edge("execute_tool", "answer_gen")
 
     return graph.compile()

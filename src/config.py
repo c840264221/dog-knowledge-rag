@@ -4,7 +4,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+os.makedirs(os.path.join(BASE_DIR,"data/checkpoints_db"), exist_ok=True)
+
 DOG_MD_DATA_DIR = os.path.join(BASE_DIR,os.getenv("DOG_MD_DATA_DIR", "data/dog_markdown"))
 LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "qwen:1.8b")
 CHROMA_DB_DIR = os.path.join(BASE_DIR,os.getenv("CHROMA_DB_DIR", "chroma_db"))
@@ -20,6 +24,8 @@ DOG_DATA_JSON_PATH = os.path.join(BASE_DIR, "data", "dogs.json")
 FILTER_RULES_PATH = os.path.join(BASE_DIR, "data", "filter_rules.json")
 INTENT_RULES_PATH = os.path.join(BASE_DIR, "data", "intent_rules.json")
 TAG_RULES_PATH = os.path.join(BASE_DIR, "data", "tag_rules.json")
+
+CHECKPOINTS_DB_PATH = os.path.join(BASE_DIR, "data/checkpoints_db", "checkpoints.db")
 
 if __name__ == "__main__":
     print(DOG_MD_DATA_DIR)
