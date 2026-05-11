@@ -20,10 +20,11 @@ from src.graph.sub_graphs.qa_subgraph import (
 from src.graph.routes.route_by_strategy import route_by_strategy
 import sqlite3
 
+from src.logger import logger
 
 
 def build_main_graph():
-
+    logger.info(f"主图构建中......")
     # recommendation_graph = build_recommendation_subgraph()
     recommendation_graph = build_recommendation_subgraph_with_human()
     exact_graph = build_exact_search_graph()
@@ -63,9 +64,11 @@ def build_main_graph():
             "direct": "general"
         }
     )
+    logger.info(f"主图构建完成...")
     from src.config import CHECKPOINTS_DB_PATH
     conn = sqlite3.connect(CHECKPOINTS_DB_PATH, check_same_thread=False)
     checkpointer = SqliteSaver(conn)
+    logger.info(f"checkpointer已就绪")
     # from langgraph.checkpoint.memory import MemorySaver
     # return graph.compile(checkpointer=MemorySaver())
     return graph.compile(checkpointer=checkpointer)

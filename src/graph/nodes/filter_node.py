@@ -1,9 +1,10 @@
+from src.logger import logger
+
 def filter_node(state):
     """
     构建数据库可用的 filter_dict
     """
-    print("filter_node开始......")
-    print("当前state为:", state)
+    logger.info(f"进入filter_node节点  state: {state}")
     filters = state.get("filters", {})
     dog_name = state.get("dog_name")
 
@@ -17,8 +18,7 @@ def filter_node(state):
     if dog_name:
         filter_dict["name"] = dog_name
 
-    print("filter_node结束，结果为：", filter_dict)
-    print("当前state为:", state)
+    logger.debug(f"filter_node节点执行完毕 filter_dict: {filter_dict}")
     return {
         "filters": filter_dict
     }

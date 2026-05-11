@@ -10,23 +10,26 @@ from src.graph.nodes.retrieval_retry_node import retrieval_retry_node
 from src.graph.nodes.ask_user_node import ask_user_node
 from src.graph.routes.route_after_ask_user import route_after_ask_user
 from src.graph.nodes.modify_filter_node import modify_filter_node
-
+from src.logger import logger
 
 def route_after_evaluate(state):
-
+    logger.info(f"进入route_after_evaluate路由，检验retrieval_ok字段的值，state为：<UNK>{state}")
+    logger.debug(f"重试次数retry_cnt为：{state.get("retry_count", 0)}")
     if state["retrieval_ok"]:
+        logger.debug('state["retrieval_ok"]为True，数据合格，返回good')
         return "good"
     retry_cnt = state.get("retry_count", 0)
 
     if retry_cnt >= 3:
+        logger.info(f"进入route_after_evaluate路由，retry_cnt重试次数大于等于3，放弃继续重试，返回give up")
         return "give_up"
     # 如果已经重试过至少一次，且还不是彻底放弃，就先去询问用户
     # 避免无限循环问用户，所以只问一次（可根据需求调整）
-    print("retry_cnt:", retry_cnt)
-    print("has_asked_user:", state.get("has_asked_user", False))
+    logger.debug(f"检查has_asked_user字段{state.get("has_asked_user", False)}，避免无限循环询问用户。")
     if retry_cnt >= 1 and state.get("has_asked_user", False) is False:
+        logger.info(f"满足询问用户条件，返回ask_user")
         return "ask_user"
-
+    logger.info("数据不满足且不需要询问用户，直接返回retry")
     return "retry"
 
 def build_recommendation_subgraph():

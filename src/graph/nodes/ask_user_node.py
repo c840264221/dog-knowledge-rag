@@ -1,11 +1,13 @@
 from src.graph.state import DogState
 from langgraph.types import interrupt
+from src.logger import logger
 
 def ask_user_node(state: DogState) -> dict:
     """
     节点功能：当检索结果不够好时，中断并询问用户，等待输入后再继续。
     返回：更新 state 中的 user_feedback。
     """
+    logger.info(f"进入ask_user_node节点，state为：{state}")
     # 构建给用户的消息
     question = (
         f"当前找到 {len(state.get('docs', []))} 条狗狗资料，数量较少。\n"
@@ -17,7 +19,8 @@ def ask_user_node(state: DogState) -> dict:
     )
 
     # 关键：interrupt() 会暂停整个图，并返回用户输入
+    logger.info(f"ask_user_node中断，等待用户输入后恢复执行")
     user_input = interrupt(question)
-
+    logger.info(f"ask_user_node恢复运行，user_input为：{user_input}")
     # 将用户输入存入状态，供后续节点判断
     return {"user_feedback": user_input, "has_asked_user": True}

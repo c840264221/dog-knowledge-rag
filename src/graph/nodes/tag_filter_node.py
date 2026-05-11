@@ -1,7 +1,8 @@
 from src.retrieval.filter_by_tags import filter_by_tags
+from src.logger import logger
 
 def tag_filter_node(state):
-    print("开始根据tags进行过滤......")
+    logger.info(f"进入tag_filter_node节点，state：{state}")
     docs = state["docs"]
     tags = state["tags"]
 
@@ -9,5 +10,5 @@ def tag_filter_node(state):
         return {"docs": docs}
 
     filtered = filter_by_tags(docs, tags)
-    print("过滤完成，结果为：", filtered)
+    logger.debug(f"tag_filter_node结束  过滤后的结果为：{filtered}")
     return {"docs": filtered}

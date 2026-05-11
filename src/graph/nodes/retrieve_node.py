@@ -1,9 +1,10 @@
 from src.retrieval.retriever import handle_filters
 from src.service.create_retriever import retriever_service
+from src.logger import logger
 
 
 def retrieve_node(state):
-    print("retrieve_node......")
+    logger.info(f"进入retrieve_node节点 state：{state}")
     question = state["question"]
 
     filter_dict = state.get("filters", {})
@@ -13,12 +14,11 @@ def retrieve_node(state):
     filter_dict = handle_filters(filter_dict)
 
     top_k = state.get("top_k", 5)
-    print("filter_dict为：", filter_dict)
+    logger.debug(f"filter_dict:{filter_dict}")
 
     docs = retriever_service.retrieve(question, filter_dict, top_k)
 
     # docs = retriever.invoke(question)
-    print("retriever返回的数据为：", docs)
-    print("当前state为:", state)
+    logger.info(f"retrieve_node节点执行完毕 返回数据docs  docs长度为:{len(docs)}")
 
     return {"docs": docs}
