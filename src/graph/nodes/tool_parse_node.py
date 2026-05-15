@@ -1,6 +1,6 @@
 from src.graph.state import DogState
 from langchain_core.messages import HumanMessage, SystemMessage
-from src.models.llm import get_llm
+from src.models.llm import get_llm, safe_llm_invoke
 
 llm = get_llm()
 def tool_parse_node(state: DogState) -> dict:
@@ -27,7 +27,10 @@ TOOL: get_weather|北京|2025-03-15
         SystemMessage(content=system_prompt),
         HumanMessage(content=state["question"]),
     ]
-    response = llm.invoke(messages).content
+    # response = llm.invoke(messages).content
+
+    # 采用更安全的llm
+    response = safe_llm_invoke(llm=llm, prompt=messages, fallback_response="调用LLM失败").content
     print(f"[DEBUG] tool_parse_node 输出: {response[:200]}")  # 调试打印
 
     # 解析是否有 TOOL 标记

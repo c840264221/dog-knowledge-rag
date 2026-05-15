@@ -20,6 +20,9 @@ def respond_and_process(question: str, history: list, state: dict, request: gr.R
         # 确保 config 中的 thread_id 与当前会话一致
         state["config"]["configurable"]["thread_id"] = session_id
 
+    # 将用户问题也添加到聊天框中
+    history.append({"role": "user", "content": question})
+
     # 调用 Agent
     result = run_main_graph_with_stream(question, user_id=session_id)
 
@@ -48,6 +51,10 @@ def resume_agent(confirm_value: str, history: list, state: dict, request: gr.Req
         # 没有等待确认的任务
         history.append({"role": "assistant", "content": "没有待确认的操作。"})
         return history, state, gr.update(visible=False), ""
+
+    # 将用户的确认输入作为用户消息添加到历史
+    history.append({"role": "user", "content": f"确认选择：{confirm_value}"})
+
     # 构造恢复消息
     resume_msg = f"RESUME:{confirm_value}"
     # 调用 Agent（会继续执行直到结束或再次中断）

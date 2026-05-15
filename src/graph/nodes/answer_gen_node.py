@@ -1,6 +1,7 @@
 from src.graph.state import DogState
-from src.models.llm import get_llm
+from src.models.llm import get_llm, safe_llm_invoke
 from langchain_core.messages import HumanMessage
+
 
 llm = get_llm()
 def answer_gen_node(state: DogState) -> dict:
@@ -24,5 +25,11 @@ def answer_gen_node(state: DogState) -> dict:
     if tool_results:
         base_prompt = f"工具结果：{tool_results}\n" + base_prompt
 
-    response = llm.invoke(base_prompt).content
-    return {"answer": response}
+    # response = llm.invoke(base_prompt).content
+    # 采用更安全版本的llm
+    response = safe_llm_invoke(
+        llm=llm,
+        prompt=base_prompt,
+        fallback_response="模型暂时不可用"
+    )
+    return {"answer": response.content}

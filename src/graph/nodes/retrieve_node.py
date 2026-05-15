@@ -1,8 +1,10 @@
 from src.retrieval.retriever import handle_filters
 from src.service.create_retriever import retriever_service
 from src.logger import logger
+from src.common.decorators.state_validation import validate_state
 
 
+@validate_state(["question","filters"])
 def retrieve_node(state):
     logger.info(f"进入retrieve_node节点 state：{state}")
     question = state["question"]

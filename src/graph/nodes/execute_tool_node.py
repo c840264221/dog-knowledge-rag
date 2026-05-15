@@ -1,8 +1,12 @@
 from src.graph.state import DogState
 from src.graph.tools.tools import TOOL_FUNCTIONS
 import asyncio
+from src.common.decorators.state_validation import validate_state
+from src.graph.tools.runtime.tool_executor import safe_execute_tool
+from src.logger import logger
 
 
+@validate_state(["tool_calls"])
 def execute_tool_node(state: DogState) -> dict:
     """
 
@@ -17,18 +21,27 @@ def execute_tool_node(state: DogState) -> dict:
     name = tc["name"]
     args = tc["args"]
 
+    logger.debug(f"tool_name: {name}...tool_args: {args}")
+
     func = TOOL_FUNCTIONS.get(name)
     if not func:
         result = f"未知工具: {name}"
     else:
-        try:
-            if asyncio.iscoroutinefunction(func):
-                # 在同步环境中运行异步函数（注意：外部事件循环需已存在，这里简单用 asyncio.run）
-                result = asyncio.run(func(args)) if args else asyncio.run(func())
-            else:
-                result = func(args) if args else func()
-        except Exception as e:
-            result = f"{name} 执行失败: {str(e)}"
+        # try:
+        #     if asyncio.iscoroutinefunction(func):
+        #         # 在同步环境中运行异步函数（注意：外部事件循环需已存在，这里简单用 asyncio.run）
+        #         result = asyncio.run(func(args)) if args else asyncio.run(func())
+        #     else:
+        #         result = func(args) if args else func()
+        # except Exception as e:
+        #     result = f"{name} 执行失败: {str(e)}"
+
+        # 抽离执行层 让node内更干净 也方便以后对tools的扩展 例如重试 统计 日志 fallback等
+        result = safe_execute_tool(
+            func=func,
+            args=args,
+            timeout=5
+        )
     new_results = state.get("tool_results", []) + [f"{name}: {result}"]
     remaining_calls = tool_calls[1:]  # 剩余未执行的工具
 

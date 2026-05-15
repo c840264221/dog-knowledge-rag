@@ -7,7 +7,7 @@ from src.config import CHROMA_DB_DIR
 from src.graph.sub_graphs.main_graph import build_main_graph
 import uuid
 from src.logger import logger
-
+from src.graph.tools.runtime.graph_stream_runtime import safe_stream_graph
 
 # embedding = get_embedding()
 # db = load_vector_store(embedding, CHROMA_DB_DIR)
@@ -68,13 +68,20 @@ def run_main_graph_with_stream(question: str, user_id:str="default_user") -> str
         }
         # 使用uuid作为线程id 每次对话创建一个新的id
         # config = {"configurable": {"thread_id": uuid.uuid4().hex}}
-        try:
+
         # 第一次调用，可能因中断而提前结束迭代
-            events = list(app_2.stream(state, config, stream_mode="values"))
-            logger.debug(f"图执行产生 {len(events)} 个状态快照")
-        except Exception as e:
-            logger.exception(f"图执行异常: {e}")
-            raise
+        #     events = list(app_2.stream(state, config, stream_mode="values"))
+        #     改成safe_stream_graph方式调用 将运行和业务逻辑解耦 并添加上错误处理
+        events = list(
+            safe_stream_graph(
+                graph=app_2,
+                state=state,
+                config=config,
+                stream_mode="values"
+            )
+        )
+        logger.debug(f"图执行产生 {len(events)} 个状态快照")
+
         # 检查最后的事件中是否有 answer
         for ev in reversed(events):
             if "answer" in ev and ev["answer"]:

@@ -2,11 +2,12 @@
 from gradio.themes.builder_app import history
 from langchain_core.messages import AIMessage
 
-from src.models.llm import get_llm
+from src.models.llm import get_llm, safe_llm_invoke
 import json
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import HumanMessage
+from langchain_core.runnables import RunnableLambda
 from src.logger import logger
 
 
@@ -71,12 +72,29 @@ intent: {intent}
     history_text = "\n".join([f"用户: {m.content}" if isinstance(m, HumanMessage) else f"助手: {m.content}" for m in state["messages"]])
     logger.debug(f"history_text<UNK>{history_text}")
 
-    answer = (prompt | llm | StrOutputParser()).invoke({
+    safe_llm = RunnableLambda(
+        lambda x: safe_llm_invoke(
+            llm=llm,
+            prompt=x,
+            fallback_response="模型暂时不可用"
+        )
+    )
+
+    # answer = (prompt | llm | StrOutputParser()).invoke({
+    #     "intent": state["intent"],
+    #     "context": context,
+    #     "question": state["question"],
+    #     "history_text": history_text
+    # })
+
+    # 采用更安全的llm调用 支持降级和重试
+    answer = (prompt | safe_llm | StrOutputParser()).invoke({
         "intent": state["intent"],
         "context": context,
         "question": state["question"],
         "history_text": history_text
     })
+
     messages = state.get("messages",[])
     logger.debug(f"messages<UNK>{messages}")
     messages.append(AIMessage(content=answer))

@@ -1,7 +1,9 @@
 import aiohttp
 import asyncio
+from src.common.decorators.safe_llm_invoke import retry_async
 
 
+@retry_async(max_attempts=3, delay=1, backoff=2, exceptions=(ConnectionError,TimeoutError))
 async def get_weather_by_city(city: str) -> str:
     """根据城市名获取实时天气"""
     # 1. 地理编码：将城市名转换为经纬度
