@@ -2,9 +2,18 @@ from src.retrieval.filter_by_tags import filter_by_tags
 from src.logger import logger
 
 def tag_filter_node(state):
-    logger.info(f"进入tag_filter_node节点，state：{state}")
-    docs = state["docs"]
-    tags = state["tags"]
+    print("tag_filter_node", state)
+
+    logger.info(f"进入tag_filter_node节点，state："
+        f"question:{state['question']}, "
+        f"intent:{state['intent']}, "
+        f"strategy:{state['strategy']}, "
+        f"filters:{state['filters']}, "
+        f"tags:{state['tags']}, "
+        f"dog_name:{state['dog_name']}, "
+        f"docs len:{len(state['docs'])}, ")
+    docs = state.get("docs",[])
+    tags = state.get("tags",[])
 
     if not tags:
         return {"docs": docs}

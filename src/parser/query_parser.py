@@ -2,10 +2,11 @@ from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.runnables import  RunnableLambda
 from src.parser.schema import QueryParseResult
 from src.parser.prompt import QUERY_PARSE_PROMPT
-from src.models.llm import get_llm, safe_llm_invoke
+from src.models.llm import get_instance_llm, safe_llm_invoke, get_chinese_llm
 from src.parser.schema import Intent
 
-llm = get_llm()
+# llm = get_instance_llm()
+llm = get_chinese_llm()
 parser = PydanticOutputParser(pydantic_object=QueryParseResult)
 
 
@@ -30,7 +31,7 @@ def parse_query_with_llm(query: str):
 
         # fallback
         return QueryParseResult(
-            intent=Intent.GENERAL,
+            intent=Intent.GENERAL.value,
             filters={},
             tags=["general"],
             features=["general"],

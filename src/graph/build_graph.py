@@ -1,5 +1,5 @@
 from langgraph.graph import StateGraph
-from src.graph.state import DogState
+from src.graph.states.state import DogState
 
 from src.graph.nodes.parse_node import parse_node
 from src.graph.nodes.router_node import strategy_router_node

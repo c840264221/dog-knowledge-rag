@@ -5,11 +5,11 @@ def route_after_parse(state):
     intent = state.get("intent")
     dog_name = state.get("dog_name")
 
-    if intent == Intent.RECOMMEND:
+    if intent == Intent.RECOMMEND.value:
         print("进入recommend分流......")
         return "recommend"
 
-    if intent == Intent.ASK_INFO:
+    if intent == Intent.ASK_INFO.value:
         if dog_name:
             print("进入qa_with_name分流......")
             return "qa_with_name"

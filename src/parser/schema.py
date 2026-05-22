@@ -16,7 +16,7 @@ class Intent(str, Enum):
     # TOOL_CALL = "tool_call"
 
 class QueryParseResult(BaseModel):
-    intent: Intent = Intent.ASK_INFO
+    intent: str = Field(default_factory=Intent.GENERAL.value)
 
     filters: dict = Field(default_factory=dict)
 

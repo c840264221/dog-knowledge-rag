@@ -13,7 +13,7 @@ QUERY_PARSE_PROMPT = PromptTemplate(
 
 必须返回：
 {{
-  "intent": "ask_info",
+  "intent": "",
   "filters": {{}},
   "tags": [],
   "features": [],
@@ -26,9 +26,11 @@ QUERY_PARSE_PROMPT = PromptTemplate(
 【严格要求】
 
 1️⃣ intent：
-必须是以下之一：
+必须是以下之一，并且当"filters"和"dog_name"均为空时"intent"一定返回"general",其余情况经过分析后返回：
 - "recommend"
 - "ask_info"
+- "general"
+
 
 2️⃣ filters（非常重要）：
 - 必须使用比较操作符："$gte" 或 "$lte"或"$gt"或"$lt"

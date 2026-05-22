@@ -1,5 +1,5 @@
 from src.logger import logger
-
+from src.core.errors.base import DogAgentError
 
 def safe_stream_graph(graph,state,config,stream_mode="values",fallback=None):
 
@@ -11,16 +11,23 @@ def safe_stream_graph(graph,state,config,stream_mode="values",fallback=None):
         ):
             yield chunk
 
-    except Exception as e:
-        logger.exception(
-            f"Graph stream执行失败: {e}"
+    except DogAgentError as e:
+
+        logger.warning(
+            f"Agent错误: {e.message}"
         )
 
-        if fallback:
-            yield fallback(state,e)
+        if e.recoverable:
+
+            yield {
+                "error": e.message,
+                "recoverable": True
+            }
 
         else:
+
             yield {
-                "error": str(e),
+                "error": e.message,
+                "recoverable": False,
                 "graph_failed": True
             }

@@ -1,29 +1,61 @@
 from langchain_ollama import ChatOllama
 from src.logger import logger
+from langchain_openai import ChatOpenAI
+from dotenv import load_dotenv
+import os
 
 _llm_instance = None
-_llm_backup = ChatOllama(
-            # model="deepseek-r1:latest",
-            model="qwen2:7b",
-            temperature=0
-        )
+_llm_backup = None
+_llm_chinese = None
 
-def get_llm():
+def get_instance_llm():
     global _llm_instance
 
     if _llm_instance is None:
-        logger.info("🚀  初始化LLM......")
+        logger.info("🚀  初始化instance LLM......")
 
-        _llm_instance = ChatOllama(
-            # model="deepseek-r1:latest",
-            model="deepseek-r1:14b",
-            temperature=0
+        # _llm_instance = ChatOllama(
+        #     # model="deepseek-r1:latest",
+        #     model="deepseek-r1:14b",
+        #     temperature=0
+        # )
+        _llm_instance = ChatOpenAI(
+            model="deepseek-v4-pro",
+            openai_api_key=os.getenv("DEEPSEEK_API_KEY"),
+            openai_api_base=os.getenv("DEEPSEEK_BASE_URL"),
+            temperature=0,
         )
-
-
     return _llm_instance
 
-def safe_llm_invoke(llm, prompt, backup_llm=_llm_backup, fallback_response=None, max_attempts=3):
+def get_chinese_llm():
+    global _llm_chinese
+    if _llm_chinese is None:
+        logger.info("🚀  初始化_llm_chinese......")
+        _llm_chinese = ChatOllama(
+            model="qwen2.5:7b",
+            # model="qwen2:7b",
+            temperature=0
+        )
+    return _llm_chinese
+
+def get_backup_llm():
+    global _llm_backup
+    if _llm_backup is None:
+        logger.info("🚀  初始化back up LLM......")
+        # _llm_backup = ChatOllama(
+        #     # model="deepseek-r1:latest",
+        #     model="qwen2:7b",
+        #     temperature=0
+        # )
+        _llm_backup = ChatOpenAI(
+            model="deepseek-v4-flash",
+            openai_api_key=os.getenv("DEEPSEEK_API_KEY"),
+            openai_api_base=os.getenv("DEEPSEEK_BASE_URL"),
+            temperature=0,
+        )
+    return _llm_backup
+
+def safe_llm_invoke(llm, prompt, backup_llm=get_backup_llm(), fallback_response=None, max_attempts=3):
     """
        安全调用 LLM，支持重试和降级响应
        :param backup_llm: 降级的LLM模型

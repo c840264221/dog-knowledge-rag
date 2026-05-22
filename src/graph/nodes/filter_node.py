@@ -4,7 +4,18 @@ def filter_node(state):
     """
     构建数据库可用的 filter_dict
     """
-    logger.info(f"进入filter_node节点  state: {state}")
+    print("filter_node", state)
+
+    logger.info(
+        f"进入filter_node节点  "
+        f"state: "
+        f"question:{state['question']}, "
+        f"intent:{state['intent']}, "
+        f"strategy:{state['strategy']}, "
+        f"filters:{state['filters']}, "
+        f"tags:{state['tags']}, "
+        f"dog_name:{state['dog_name']}, "
+    )
     filters = state.get("filters", {})
     dog_name = state.get("dog_name")
 

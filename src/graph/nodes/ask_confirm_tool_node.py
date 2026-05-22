@@ -1,13 +1,13 @@
 from langgraph.types import interrupt
 
-from src.graph.state import DogState
+from src.graph.states.state import DogState
 
 
 def ask_confirm_tool_node(state: DogState) -> dict:
     """在 execute_tool 之前询问用户是否真的要执行"""
     tool_calls = state.get("tool_calls", [])
     if not tool_calls:
-        return {"need_tool": False, "answer": "没有工具需要确认。"}
+        return {"need_tool": False, "tool_results": "没有工具需要确认。"}
 
     tc = tool_calls[0]  # 简单场景只取第一个工具
     prompt = f"即将执行工具：【{tc['name']}】，参数：【{tc['args']}】。是否继续？(y/n)"
@@ -21,6 +21,6 @@ def ask_confirm_tool_node(state: DogState) -> dict:
         # 用户拒绝
         return {
             "need_tool": False,
-            "answer": "用户取消了工具调用。",
+            "tool_results": "用户取消了工具调用。",
             "tool_calls": []  # 清空，防止后续误执行
         }

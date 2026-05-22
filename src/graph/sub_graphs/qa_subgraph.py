@@ -1,6 +1,6 @@
 from langgraph.graph import StateGraph
 
-from src.graph.state import DogState
+from src.graph.states.state import DogState
 
 from src.graph.nodes.retrieve_node import retrieve_node
 from src.graph.nodes.evaluate_node import evaluate_retrieval_node

@@ -29,6 +29,10 @@ CHECKPOINTS_DB_PATH = os.path.join(BASE_DIR, "data/checkpoints_db", "checkpoints
 
 LOG_PATH = os.path.join(BASE_DIR, "logs")
 
+MEMORY_DB_PATH = os.path.join(BASE_DIR, "data/memory_db", "memory.db")
+
+USER_FILE = os.path.join(BASE_DIR, "data/user", "user.json")
+
 if __name__ == "__main__":
     print(DOG_MD_DATA_DIR)
     print(CHROMA_DB_DIR)

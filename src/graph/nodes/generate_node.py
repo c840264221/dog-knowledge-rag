@@ -2,7 +2,7 @@
 from gradio.themes.builder_app import history
 from langchain_core.messages import AIMessage
 
-from src.models.llm import get_llm, safe_llm_invoke
+from src.models.llm import get_instance_llm, safe_llm_invoke
 import json
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
@@ -10,8 +10,11 @@ from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableLambda
 from src.logger import logger
 
+# 导入记忆模块  用历史记忆注入prompt
+from src.memory.memory_retrieve import retrieve_user_memory
 
-llm = get_llm()
+
+llm = get_instance_llm()
 
 def build_context(docs):
     context = []
@@ -31,12 +34,33 @@ def build_context(docs):
     return json.dumps(context, ensure_ascii=False, indent=2)
 
 def generate_node(state):
-    logger.info(f"进入generate_node节点，state为：{state}")
+    print("generate_node", state)
+
+    logger.info(f"进入generate_node节点，state为："
+        f"state: "
+        f"question:{state['question']}, "
+        f"intent:{state['intent']}, "
+        f"strategy:{state['strategy']}, "
+        f"filters:{state['filters']}, "
+        f"tags:{state['tags']}, "
+        f"dog_name:{state['dog_name']}, "
+        f"docs len:{len(state['docs'])},"
+        f"user_id:{state['user_id']} "
+                )
+
+    # 记忆检索
+    memory_text = retrieve_user_memory(user_id=state['user_id'])
+
     context = build_context(state["docs"])
     logger.debug(f"context<UNK>{context}")
 
     prompt = ChatPromptTemplate.from_template("""
 你是一个严谨的狗狗百科助手。
+
+
+# 用户长期记忆（Memory）
+{memory_text}
+
 
 【任务】
 根据 intent 决定行为：
@@ -70,7 +94,7 @@ intent: {intent}
 
     # answer = llm.invoke(prompt)
     history_text = "\n".join([f"用户: {m.content}" if isinstance(m, HumanMessage) else f"助手: {m.content}" for m in state["messages"]])
-    logger.debug(f"history_text<UNK>{history_text}")
+    logger.debug(f"history_text:{history_text}")
 
     safe_llm = RunnableLambda(
         lambda x: safe_llm_invoke(
@@ -89,6 +113,7 @@ intent: {intent}
 
     # 采用更安全的llm调用 支持降级和重试
     answer = (prompt | safe_llm | StrOutputParser()).invoke({
+        "memory_text": memory_text,
         "intent": state["intent"],
         "context": context,
         "question": state["question"],

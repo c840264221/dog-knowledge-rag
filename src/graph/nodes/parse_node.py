@@ -2,7 +2,7 @@ from langchain_core.messages import HumanMessage
 
 from src.parser.query_parser import parse_query_with_llm
 from src.retrieval.alias_loader import get_alias_dict
-from src.common.decorators.validation import validate_question
+from src.common.decorators.validation_input import validate_question
 from src.common.decorators.state_validation import validate_state
 from src.common.decorators.validate_llm_output import validate_llm_output, validate_query_parse_result, default_parse_result
 from src.common.decorators.safe_node import safe_node
@@ -26,7 +26,7 @@ def parse_node(state):
     messages = state.get("messages",[])
     messages.append(HumanMessage(content=state["question"]))
     result = QueryParseResult(
-            intent=Intent.GENERAL,
+            intent=Intent.GENERAL.value,
             filters={},
             tags=["general"],
             features=["general"],

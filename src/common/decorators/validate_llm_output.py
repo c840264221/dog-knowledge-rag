@@ -13,7 +13,7 @@ def validate_query_parse_result(parsed):
     if parsed["intent"] not in VALID_INTENTS:
 
         raise LLMOutputValidationError(
-            f"非法 intent: {parsed.intent}"
+            f"非法 intent: {parsed["intent"]}"
         )
 
     if not isinstance(parsed["filters"], dict):

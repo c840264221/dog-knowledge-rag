@@ -30,3 +30,133 @@ def strategy_router_node(state):
     return {"strategy": strategy,
             "top_k": top_k
             }
+
+from langchain_core.messages import HumanMessage
+
+from src.graph.routes.agent_type import AgentType
+
+from src.parser.schema import (
+    QueryParseResult,
+    Intent
+)
+
+from src.parser.query_parser import (
+    parse_query_with_llm
+)
+
+from src.logger import logger
+
+from src.common.decorators.safe_node import (
+    safe_node
+)
+
+from src.common.decorators.validation_input import (
+    validate_question
+)
+
+from src.common.decorators.state_validation import (
+    validate_state
+)
+
+from src.common.decorators.validate_llm_output import (
+    validate_llm_output, validate_query_parse_result, default_parse_result
+)
+
+@safe_node(
+    fallback=lambda state, e: {
+        "next_agent": AgentType.GENERAL_QA.value
+    }
+)
+@validate_question
+@validate_state(["question"])
+@validate_llm_output(
+    validator=validate_query_parse_result,
+    fallback_factory=default_parse_result
+)
+def semantic_router_node(state):
+    print("semantic_router_node", state)
+    question = state["question"]
+
+    logger.info(
+        f"进入语义路由节点: {question}"
+    )
+
+    messages = state.get(
+        "messages",
+        []
+    )
+
+    messages.append(
+        HumanMessage(content=question)
+    )
+
+    # 默认结果
+    result = QueryParseResult(
+        intent=Intent.GENERAL.value,
+        filters={},
+        tags=["general"],
+        features=["general"],
+        dog_name=None
+    )
+
+    try:
+
+        result = parse_query_with_llm(
+            question
+        )
+
+    except Exception as e:
+
+        logger.exception(
+            f"LLM解析失败: {e}"
+        )
+
+    parsed = result.model_dump()
+    logger.debug(f"语义节点解析完毕，parsed为：{parsed}")
+
+    intent = parsed["intent"]
+
+    # ========= 核心升级 =========
+    # semantic routing
+    # ==========================
+
+    if intent == Intent.RECOMMEND.value:
+
+        next_agent = (
+            AgentType.RECOMMENDATION.value
+        )
+
+    elif intent == Intent.ASK_INFO.value:
+
+        next_agent = (
+            AgentType.EXACT_SEARCH.value
+        )
+
+    else:
+
+        next_agent = (
+            AgentType.GENERAL_QA.value
+        )
+
+    logger.info(
+        f"路由到Agent: {next_agent}"
+    )
+
+    return {
+
+        "intent": parsed["intent"],
+
+        "filters": parsed["filters"],
+
+        "tags": parsed["tags"],
+
+        "features": parsed["features"],
+
+        "dog_name": parsed["dog_name"],
+
+        "messages": messages,
+
+        "next_agent": next_agent,
+
+        "current_agent": "semantic_router"
+    }

@@ -3,11 +3,7 @@ import asyncio
 from src.logger import logger
 
 
-def safe_execute_tool(
-    func,
-    args=None,
-    timeout=5
-):
+def safe_execute_tool(func,args=None,timeout=5):
     logger.debug(f"args: {args}, args_type:{type(args)},args is not None---{args is not None}")
     try:
 
@@ -46,3 +42,115 @@ def safe_execute_tool(
         )
 
         return f"工具执行失败: {str(e)}"
+
+
+import time
+import traceback
+
+from src.graph.tools.registry.tool_registry import (
+    registry
+)
+
+from src.graph.tools.runtime.tool_context import (
+    ToolContext
+)
+
+from src.graph.tools.runtime.middleware.logging_middleware import (
+    LoggingMiddleware
+)
+
+from src.graph.tools.runtime.middleware.retry_middleware import (
+    RetryMiddleware
+)
+
+from src.graph.tools.runtime.middleware.timeout_middleware import (
+    TimeoutMiddleware
+)
+
+from src.graph.tools.schemas.tool_result_schema import (
+    ToolResult
+)
+
+from src.graph.tools.runtime.tool_context import (
+    ToolContext
+)
+
+from src.graph.tools.runtime.middleware.async_middleware import AsyncMiddleware
+
+from src.logger import logger
+
+
+class ToolExecutor:
+
+    def __init__(self):
+
+        self.logging = LoggingMiddleware()
+
+        self.retry = RetryMiddleware()
+
+        self.timeout = TimeoutMiddleware()
+
+        self.async_runner = AsyncMiddleware()
+
+    def execute(self,tool_name,args):
+
+        tool = registry.get_tool(tool_name)
+
+        if not tool:
+            logger.error(f"工具不存在: {tool_name}")
+            raise Exception(
+                f"工具不存在: {tool_name}"
+            )
+
+        ctx = ToolContext(
+            tool,
+            args
+        )
+
+        self.logging.before(ctx)
+
+        try:
+
+            result = self.retry.run(
+
+                lambda:
+                    self.timeout.execute(
+                        lambda:
+                            self.async_runner.execute(
+                            tool,
+                            args
+                            ),
+
+                        timeout=tool.metadata.timeout
+                ),
+
+                retries=tool.metadata.retries
+            )
+
+            ctx.result = result
+
+            self.logging.after(ctx)
+
+            return ToolResult(
+
+                success=True,
+
+                tool_name=tool_name,
+
+                content=result,
+
+                latency=ctx.latency,
+
+                retry_count=ctx.retry_count
+            )
+
+        except Exception as e:
+
+            ctx.error = str(e)
+
+            self.logging.on_error(
+                ctx,
+                e
+            )
+
+            raise e

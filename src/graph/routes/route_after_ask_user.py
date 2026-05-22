@@ -1,4 +1,4 @@
-from src.graph.state import DogState
+from src.graph.states.state import DogState
 from src.logger import logger
 
 def route_after_ask_user(state: DogState) -> str:

@@ -1,9 +1,9 @@
-from src.graph.state import DogState
-from src.models.llm import get_llm, safe_llm_invoke
+from src.graph.states.state import DogState
+from src.models.llm import get_instance_llm, safe_llm_invoke
 from langchain_core.messages import HumanMessage
 
 
-llm = get_llm()
+llm = get_instance_llm()
 def answer_gen_node(state: DogState) -> dict:
     tool_results = state.get("tool_results", [])
     question = state["question"]

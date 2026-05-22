@@ -1,4 +1,4 @@
-from src.graph.state import DogState
+from src.graph.states.state import DogState
 from langgraph.types import interrupt
 from src.logger import logger
 
@@ -7,6 +7,8 @@ def ask_user_node(state: DogState) -> dict:
     节点功能：当检索结果不够好时，中断并询问用户，等待输入后再继续。
     返回：更新 state 中的 user_feedback。
     """
+    print("ask_user_node", state)
+
     logger.info(f"进入ask_user_node节点，state为：{state}")
     # 构建给用户的消息
     question = (

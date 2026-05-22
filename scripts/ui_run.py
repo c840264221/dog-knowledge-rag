@@ -24,7 +24,7 @@ def respond_and_process(question: str, history: list, state: dict, request: gr.R
     history.append({"role": "user", "content": question})
 
     # 调用 Agent
-    result = run_main_graph_with_stream(question, user_id=session_id)
+    result = run_main_graph_with_stream(question, thread_id=session_id)
 
     # 判断是否中断
     if result.startswith("__INTERRUPT__:"):
@@ -58,7 +58,7 @@ def resume_agent(confirm_value: str, history: list, state: dict, request: gr.Req
     # 构造恢复消息
     resume_msg = f"RESUME:{confirm_value}"
     # 调用 Agent（会继续执行直到结束或再次中断）
-    result = run_main_graph_with_stream(resume_msg, user_id=session_id)
+    result = run_main_graph_with_stream(resume_msg, thread_id=session_id)
     if result.startswith("__INTERRUPT__:"):
         # 理论上恢复后不应该立即又中断，但为了健壮性处理
         prompt = result[len("__INTERRUPT__:"):].strip()

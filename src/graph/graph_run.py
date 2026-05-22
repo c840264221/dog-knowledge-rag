@@ -8,6 +8,8 @@ from src.graph.sub_graphs.main_graph import build_main_graph
 import uuid
 from src.logger import logger
 from src.graph.tools.runtime.graph_stream_runtime import safe_stream_graph
+from src.user.user_manager import get_user_id
+
 
 # embedding = get_embedding()
 # db = load_vector_store(embedding, CHROMA_DB_DIR)
@@ -28,14 +30,56 @@ def run_main_graph(question: str):
     })
     return result["answer"]
 
-def run_main_graph_with_stream(question: str, user_id:str="default_user") -> str:
+
+def create_initial_state(question: str):
+
+    return {
+
+        "question": question,
+
+        "messages": [],
+
+        "filters": {},
+
+        "tags": [],
+
+        "docs": [],
+
+        "answer": "",
+
+        "intent": "",
+
+        "retry_count": 0,
+
+        "retrieval_ok": "",
+
+        "user_feedback": "",
+
+        "current_agent": "",
+
+        "next_agent": "",
+
+        "has_asked_user": False,
+
+        "dog_name": None,
+
+        "strategy": None,
+
+        "user_id": get_user_id()
+    }
+
+
+def run_main_graph_with_stream(question: str, thread_id:str="default_user") -> str:
     if isinstance(question, list) and len(question) > 0 and "text" in question[0]:
         question = question[0]["text"]
 
-    logger.info(f"收到用户 [{user_id}] 问题: {question}")
+    # 初始化state
+    state = create_initial_state(question)
+
+    logger.info(f"收到用户 [{state["user_id"]}] 问题: {question}")
 
     # 用user_id作为线程的id 每次对话都可以根据线程id来获取之前对话历史  达到记忆目的
-    config = {"configurable": {"thread_id": user_id},
+    config = {"configurable": {"thread_id": thread_id},
               "run_name": f"query_{question[:20]}",  # LangSmith 显示的名称
               "tags": ["dog_agent", "memory_test"],
               }
@@ -56,16 +100,7 @@ def run_main_graph_with_stream(question: str, user_id:str="default_user") -> str
         else:
             return current.values.get("answer","无答案")
     else:
-        state = {
-            "question": question,
-            "retry_count": 0,
-            "has_asked_user": False,
-            "docs": [],
-            "filters": {},
-            "answer": "",
-            "dog_name":None,
-            "strategy":None
-        }
+
         # 使用uuid作为线程id 每次对话创建一个新的id
         # config = {"configurable": {"thread_id": uuid.uuid4().hex}}
 
@@ -77,7 +112,8 @@ def run_main_graph_with_stream(question: str, user_id:str="default_user") -> str
                 graph=app_2,
                 state=state,
                 config=config,
-                stream_mode="values"
+                # stream_mode="values"
+                stream_mode="updates"
             )
         )
         logger.debug(f"图执行产生 {len(events)} 个状态快照")
