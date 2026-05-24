@@ -1,13 +1,9 @@
-class BaseMiddleware:
+from abc import ABC
+from abc import abstractmethod
 
-    def before(self, ctx):
 
+class BaseMiddleware(ABC):
+
+    @abstractmethod
+    async def process(self,ctx,next_func):
         pass
-
-    def after(self, ctx):
-
-        pass
-
-    def on_error(self, ctx, e):
-
-        raise e

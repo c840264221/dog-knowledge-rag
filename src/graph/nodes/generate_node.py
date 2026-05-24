@@ -34,7 +34,6 @@ def build_context(docs):
     return json.dumps(context, ensure_ascii=False, indent=2)
 
 def generate_node(state):
-    print("generate_node", state)
 
     logger.info(f"进入generate_node节点，state为："
         f"state: "

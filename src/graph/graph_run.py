@@ -32,7 +32,7 @@ def run_main_graph(question: str):
 
 
 def create_initial_state(question: str):
-
+    logger.info("初始化state...")
     return {
 
         "question": question,

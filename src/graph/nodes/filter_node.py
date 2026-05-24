@@ -4,7 +4,6 @@ def filter_node(state):
     """
     构建数据库可用的 filter_dict
     """
-    print("filter_node", state)
 
     logger.info(
         f"进入filter_node节点  "

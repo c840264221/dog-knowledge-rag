@@ -2,6 +2,7 @@ import time
 import uuid
 from typing import Any
 from typing import Optional, Dict
+import asyncio
 
 
 class ToolContext:
@@ -11,7 +12,7 @@ class ToolContext:
         self.tool = tool
 
         # 工具参数
-        self.args: Dict[str, Any] = {}
+        self.args: Dict[str, Any] = args
 
         # 开始时间
         self.start_time: float = time.time()
@@ -32,3 +33,14 @@ class ToolContext:
 
         # 耗时
         self.latency: Optional[float] = None
+
+    async def invoke(self):
+        if asyncio.iscoroutinefunction(self.tool.run):
+            return await self.tool.run(
+                self.args
+            )
+        else:
+            return await asyncio.to_thread(
+                self.tool.run,
+                self.args
+            )

@@ -1,11 +1,22 @@
 import time
 
+import asyncio
+
 from src.logger import logger
 
+from src.graph.tools.errors.base import (
+    BaseRuntimeError
+)
 
-class RetryMiddleware:
+from src.graph.tools.runtime.middleware.base_middleware import (
+    BaseMiddleware
+)
 
-    def run(self,func,retries):
+class RetryMiddleware(BaseMiddleware):
+
+    async def process(self,ctx,next_func):
+
+        retries = ctx.tool.metadata.retries
 
         last_error = None
 
@@ -13,13 +24,55 @@ class RetryMiddleware:
 
             try:
 
-                return func()
+                ctx.retry_count = i
 
-            except Exception as e:
+                return await next_func()
+
+            except BaseRuntimeError as e:
 
                 last_error = e
 
-                logger.info(f'重试{i+1}次')
+                ctx.error = str(e)
+
+                if not e.retryable:
+                    raise e
+
+                logger.warning(
+                    f"重试中 "
+                    f"{i + 1}/{retries}"
+                )
+
+                await asyncio.sleep(1)
+
+        raise last_error
+
+    def run(self,ctx,func,retries=3):
+
+        last_error = None
+
+        for i in range(retries):
+
+            try:
+
+                ctx.retry_count = i
+
+                return func()
+
+            except BaseRuntimeError as e:
+
+                last_error = e
+
+                ctx.error = str(e)
+
+                if not e.retryable:
+                    raise e
+
+                logger.warning(
+                    f"重试中 "
+                    f"{i + 1}/{retries} "
+                    f"error={e.message}"
+                )
+
 
                 time.sleep(1)
 

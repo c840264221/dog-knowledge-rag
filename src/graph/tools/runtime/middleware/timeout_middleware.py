@@ -3,10 +3,39 @@ from concurrent.futures import (
     TimeoutError
 )
 
+from src.graph.tools.runtime.middleware.base_middleware import (
+    BaseMiddleware
+)
 
-class TimeoutMiddleware:
+from src.graph.tools.errors.tool_errors import ToolTimeoutError
 
-    def execute(self,func,timeout):
+import asyncio
+
+
+class TimeoutMiddleware(BaseMiddleware):
+
+    async def process(self,ctx,next_func):
+
+        timeout = ctx.tool.metadata.timeout
+
+        # 同步运行下的超时设置
+        # with ThreadPoolExecutor(max_workers=1) as executor:
+        #
+        #     future = executor.submit(next_func)
+
+        try:
+            return await asyncio.wait_for(
+                next_func(),
+                timeout=timeout
+            )
+
+        except asyncio.TimeoutError:
+
+            raise ToolTimeoutError(
+                ctx.tool.metadata.name
+            )
+
+    def execute(self,ctx, func,timeout):
 
         with ThreadPoolExecutor(max_workers=1) as executor:
 
@@ -19,7 +48,7 @@ class TimeoutMiddleware:
                 )
 
             except TimeoutError:
-
-                raise Exception(
-                    "工具执行超时"
+                ctx.error = "timeout"
+                raise ToolTimeoutError(
+                    ctx.tool.metadata.name
                 )

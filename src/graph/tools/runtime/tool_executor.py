@@ -51,10 +51,6 @@ from src.graph.tools.registry.tool_registry import (
     registry
 )
 
-from src.graph.tools.runtime.tool_context import (
-    ToolContext
-)
-
 from src.graph.tools.runtime.middleware.logging_middleware import (
     LoggingMiddleware
 )
@@ -77,6 +73,13 @@ from src.graph.tools.runtime.tool_context import (
 
 from src.graph.tools.runtime.middleware.async_middleware import AsyncMiddleware
 
+from src.graph.tools.errors.tool_errors import (
+    ToolNotFoundError,
+    ToolExecutionError
+)
+
+from src.graph.tools.runtime.middleware_pipeline import MiddlewarePipeline
+
 from src.logger import logger
 
 
@@ -84,22 +87,27 @@ class ToolExecutor:
 
     def __init__(self):
 
-        self.logging = LoggingMiddleware()
+        self.middlewares = [
+            LoggingMiddleware(),
 
-        self.retry = RetryMiddleware()
+            RetryMiddleware(),
 
-        self.timeout = TimeoutMiddleware()
+            TimeoutMiddleware(),
 
-        self.async_runner = AsyncMiddleware()
+            AsyncMiddleware()
+        ]
 
-    def execute(self,tool_name,args):
+        self.pipeline = MiddlewarePipeline(self.middlewares)
+
+    async def execute(self,tool_name,args):
 
         tool = registry.get_tool(tool_name)
 
         if not tool:
             logger.error(f"工具不存在: {tool_name}")
-            raise Exception(
-                f"工具不存在: {tool_name}"
+
+            raise ToolNotFoundError(
+                f"{tool_name}"
             )
 
         ctx = ToolContext(
@@ -107,29 +115,34 @@ class ToolExecutor:
             args
         )
 
-        self.logging.before(ctx)
+        async def final_func():
+            return await ctx.invoke()
+
+        # self.logging.before(ctx)
 
         try:
 
-            result = self.retry.run(
+            # result = self.retry.run(
+            #     ctx,
+            #     lambda:
+            #         self.timeout.execute(
+            #             ctx,
+            #             lambda:
+            #                 self.async_runner.execute(
+            #                     ctx
+            #                 ),
+            #
+            #             timeout=tool.metadata.timeout
+            #     ),
+            #
+            #     retries=tool.metadata.retries
+            # )
+            #
+            # ctx.result = result
 
-                lambda:
-                    self.timeout.execute(
-                        lambda:
-                            self.async_runner.execute(
-                            tool,
-                            args
-                            ),
+            # self.logging.after(ctx)
 
-                        timeout=tool.metadata.timeout
-                ),
-
-                retries=tool.metadata.retries
-            )
-
-            ctx.result = result
-
-            self.logging.after(ctx)
+            result = await self.pipeline.run(ctx,final_func)
 
             return ToolResult(
 
@@ -148,9 +161,8 @@ class ToolExecutor:
 
             ctx.error = str(e)
 
-            self.logging.on_error(
-                ctx,
-                e
-            )
+            # self.logging.on_error(ctx,e)
 
-            raise e
+            raise ToolExecutionError(
+                str(e)
+            )

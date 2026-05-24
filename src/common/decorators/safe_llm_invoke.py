@@ -4,7 +4,7 @@ from functools import wraps
 from src.logger import logger
 
 
-def retry_async(max_attempts: int=3, delay:int=1, backoff:float=2, exceptions=(Exception,)):
+def retry_async(max_attempts: int=2, delay:int=1, backoff:float=2, exceptions=(Exception,)):
     def decorator(func):
         @wraps(func)
         async def async_wrapper(*args, **kwargs):
