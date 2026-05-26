@@ -4,8 +4,8 @@ from src.logger import logger
 from src.common.decorators.state_validation import validate_state
 
 
-@validate_state(["question","filters"])
-def retrieve_node(state):
+# @validate_state(["question","filters"])
+async def retrieve_node(state):
 
     logger.info(f"进入retrieve_node节点 state：{state}")
     question = state["question"]
@@ -19,7 +19,7 @@ def retrieve_node(state):
     top_k = state.get("top_k", 5)
     logger.debug(f"filter_dict:{filter_dict}")
 
-    docs = retriever_service.retrieve(question, filter_dict, top_k)
+    docs = await retriever_service.retrieve(question, filter_dict, top_k)
 
     # docs = retriever.invoke(question)
     logger.info(f"retrieve_node节点执行完毕 返回数据docs  docs长度为:{len(docs)}")

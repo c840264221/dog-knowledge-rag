@@ -2,6 +2,10 @@ import asyncio
 
 from src.logger import logger
 
+import time
+
+import src.runtime.trace.trace_ctx as trace_ctx
+
 
 def safe_execute_tool(func,args=None,timeout=5):
     logger.debug(f"args: {args}, args_type:{type(args)},args is not None---{args is not None}")
@@ -63,6 +67,10 @@ from src.graph.tools.runtime.middleware.timeout_middleware import (
     TimeoutMiddleware
 )
 
+from src.graph.tools.runtime.middleware.trace_middleware import (
+    TraceMiddleware
+)
+
 from src.graph.tools.schemas.tool_result_schema import (
     ToolResult
 )
@@ -82,6 +90,8 @@ from src.graph.tools.runtime.middleware_pipeline import MiddlewarePipeline
 
 from src.logger import logger
 
+from src.runtime.trace.init import trace_manager
+
 
 class ToolExecutor:
 
@@ -89,6 +99,8 @@ class ToolExecutor:
 
         self.middlewares = [
             LoggingMiddleware(),
+
+            TraceMiddleware(),
 
             RetryMiddleware(),
 
@@ -110,9 +122,12 @@ class ToolExecutor:
                 f"{tool_name}"
             )
 
+        trace_id = trace_ctx.get_trace_id()
+
         ctx = ToolContext(
-            tool,
-            args
+            tool=tool,
+            args=args,
+            trace_id=trace_id
         )
 
         async def final_func():
@@ -144,6 +159,7 @@ class ToolExecutor:
 
             result = await self.pipeline.run(ctx,final_func)
 
+
             return ToolResult(
 
                 success=True,
@@ -152,7 +168,7 @@ class ToolExecutor:
 
                 content=result,
 
-                latency=ctx.latency,
+                latency=ctx.current_span.latency if ctx.current_span else None,
 
                 retry_count=ctx.retry_count
             )

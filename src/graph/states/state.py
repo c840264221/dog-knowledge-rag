@@ -68,3 +68,5 @@ class DogState(TypedDict, total=False):
     next_agent:str
 
     user_id:str
+
+    trace_id: str

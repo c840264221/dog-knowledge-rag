@@ -2,7 +2,7 @@ from langchain_core.runnables import RunnableLambda
 
 from src.graph.states.state import DogState
 from langchain_core.messages import HumanMessage, SystemMessage
-from src.models.llm import get_instance_llm, safe_llm_invoke
+from src.models.llm import get_instance_llm, safe_llm_ainvoke
 
 from src.logger import logger
 
@@ -29,7 +29,7 @@ parser = PydanticOutputParser(
     pydantic_object=ToolParseResult
 )
 
-def tool_parse_node(state: DogState) -> dict:
+async def tool_parse_node(state: DogState) -> dict:
     if state.get("tool_calls"):
         return {}
 
@@ -104,18 +104,21 @@ TOOL: get_weather|北京|2025-03-15
     ]
     # response = llm.invoke(messages).content
 
-    # 采用更安全的llm
-    safe_llm = RunnableLambda(
-        lambda x: safe_llm_invoke(
+    async def create_async_safe_llm_ainvoke(x):
+        return await safe_llm_ainvoke(
             llm=llm,
             prompt=x,
-            fallback_response="模型暂时不可用"
+            fallback_response="调用LLM失败"
         )
+
+    # 采用更安全的llm
+    safe_llm = RunnableLambda(
+        create_async_safe_llm_ainvoke
     )
 
     chain = prompt | safe_llm | parser
     try:
-        response = chain.invoke({
+        response = await chain.ainvoke({
             "question": state["question"],
             "format_instructions": parser.get_format_instructions()
         })

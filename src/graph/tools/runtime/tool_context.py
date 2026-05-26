@@ -3,11 +3,13 @@ import uuid
 from typing import Any
 from typing import Optional, Dict
 import asyncio
+from src.runtime.trace.init import trace_manager
+from src.runtime.trace import trace_ctx
 
 
 class ToolContext:
 
-    def __init__(self,tool,args):
+    def __init__(self,tool,args, trace_id: Optional[str] = None):
         # 工具对象
         self.tool = tool
 
@@ -15,12 +17,16 @@ class ToolContext:
         self.args: Dict[str, Any] = args
 
         # 开始时间
-        self.start_time: float = time.time()
+        self.start_time = time.time()
 
         # trace id
-        self.trace_id: str = str(
-            uuid.uuid4()
-        )
+        self.trace_id = trace_id
+        # 为了保持 trace_manager 的一致性，也应该创建根 span
+
+        # self.trace_id, root_span = trace_manager.create_trace()
+
+        # 当前节点
+        self.current_span = None
 
         # 重试次数
         self.retry_count: int = 0
@@ -32,7 +38,10 @@ class ToolContext:
         self.error: Optional[str] = None
 
         # 耗时
-        self.latency: Optional[float] = None
+        # self.latency: Optional[float] = None
+
+        # 同时将 trace_id 设置到 contextvar（确保覆盖）
+        trace_ctx.set_trace_id(self.trace_id)
 
     async def invoke(self):
         if asyncio.iscoroutinefunction(self.tool.run):

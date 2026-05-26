@@ -1,10 +1,10 @@
 from src.logger import logger
 from src.core.errors.base import DogAgentError
 
-def safe_stream_graph(graph,state,config,stream_mode="values",fallback=None):
+async def safe_stream_graph(graph,state,config,stream_mode="values",fallback=None):
 
     try:
-        for chunk in graph.stream(
+        async for chunk in graph.astream(
             state,
             config,
             stream_mode=stream_mode

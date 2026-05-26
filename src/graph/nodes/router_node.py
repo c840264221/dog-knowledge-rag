@@ -73,8 +73,7 @@ from src.common.decorators.validate_llm_output import (
     validator=validate_query_parse_result,
     fallback_factory=default_parse_result
 )
-def semantic_router_node(state):
-    print("semantic_router_node", state)
+async def semantic_router_node(state):
     question = state["question"]
 
     logger.info(
@@ -101,7 +100,7 @@ def semantic_router_node(state):
 
     try:
 
-        result = parse_query_with_llm(
+        result = await parse_query_with_llm(
             question
         )
 

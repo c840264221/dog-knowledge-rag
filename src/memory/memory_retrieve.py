@@ -5,7 +5,7 @@ from src.memory.sqlite_memory_store import (
 memory_store = SQLiteMemoryStore()
 
 
-def retrieve_user_memory(user_id: str) -> str:
+async def retrieve_user_memory(user_id: str) -> str:
 
     memories = memory_store.get_memories(
         user_id

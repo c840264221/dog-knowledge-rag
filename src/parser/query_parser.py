@@ -2,7 +2,7 @@ from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.runnables import  RunnableLambda
 from src.parser.schema import QueryParseResult
 from src.parser.prompt import QUERY_PARSE_PROMPT
-from src.models.llm import get_instance_llm, safe_llm_invoke, get_chinese_llm
+from src.models.llm import get_instance_llm, safe_llm_ainvoke, get_chinese_llm
 from src.parser.schema import Intent
 
 # llm = get_instance_llm()
@@ -10,18 +10,30 @@ llm = get_chinese_llm()
 parser = PydanticOutputParser(pydantic_object=QueryParseResult)
 
 
-def parse_query_with_llm(query: str):
-    safe_llm = RunnableLambda(
-        lambda x: safe_llm_invoke(
+async def parse_query_with_llm(query: str):
+
+
+    async def create_async_safe_llm_ainvoke(x):
+        return await safe_llm_ainvoke(
             llm=llm,
             prompt=x,
             fallback_response="调用LLM失败"
         )
-    )
+
+
+    # safe_llm = RunnableLambda(
+    #         afunc=lambda x: safe_llm_ainvoke(
+    #         llm=llm,
+    #         prompt=x,
+    #         fallback_response="调用LLM失败"
+    #     )
+    # )
+    safe_llm = RunnableLambda(create_async_safe_llm_ainvoke)
+
     chain = QUERY_PARSE_PROMPT | safe_llm | parser
 
     try:
-        result = chain.invoke({"query": query})
+        result = await chain.ainvoke({"query": query})
         # return result.dict()
         # 新版后用model_dump()输出
         return result

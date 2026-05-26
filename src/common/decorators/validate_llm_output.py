@@ -39,11 +39,11 @@ def validate_llm_output(validator,fallback_factory):
     def decorator(func):
 
         @wraps(func)
-        def wrapper(*args, **kwargs):
+        async def wrapper(*args, **kwargs):
 
             try:
 
-                result = func(*args, **kwargs)
+                result = await func(*args, **kwargs)
 
                 validated = validator(result)
 

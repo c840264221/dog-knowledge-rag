@@ -1,7 +1,8 @@
 from src.graph.tools.base.base_tool import BaseTool
 from src.graph.tools.schemas.tool_metadata import ToolMetadata
 from src.graph.tools.schemas.weather_args import WeatherArgs
-from src.logger import logger
+
+import aiohttp
 
 
 class WeatherTool(BaseTool):
@@ -15,15 +16,7 @@ class WeatherTool(BaseTool):
 
     args_schema = WeatherArgs
 
-    def run(self, args):
-
-        if not isinstance(args, dict):
-
-            logger.error( f"weather args必须是dict，当前是: {type(args)}")
-
-            raise Exception(
-                f"weather args必须是dict，当前是: {type(args)}"
-            )
+    async def run(self, args):
 
         validated_args = self.args_schema(
             **args
@@ -31,4 +24,78 @@ class WeatherTool(BaseTool):
 
         city = validated_args.city
 
-        return f"{city}今天晴天"
+        # ========= 地理编码 =========
+
+        geocode_url = (
+            "https://geocoding-api.open-meteo.com/"
+            f"v1/search?name={city}"
+            "&count=1"
+            "&language=zh"
+            "&format=json"
+        )
+
+        async with aiohttp.ClientSession() as session:
+
+            async with session.get(
+                    geocode_url
+            ) as resp:
+                geo_data = await resp.json()
+
+        if not geo_data.get("results"):
+            raise Exception(
+                f"未找到城市: {city}"
+            )
+
+        result = geo_data["results"][0]
+
+        lat = result["latitude"]
+
+        lon = result["longitude"]
+
+        city_name = result["name"]
+
+        country = result["country"]
+
+        # ========= 天气接口 =========
+
+        weather_url = (
+            "https://api.open-meteo.com/v1/forecast"
+            f"?latitude={lat}"
+            f"&longitude={lon}"
+            "&current_weather=true"
+            "&timezone=auto"
+        )
+
+        async with aiohttp.ClientSession() as session:
+
+            async with session.get(
+                    weather_url
+            ) as resp:
+                weather_data = await resp.json()
+
+        current = weather_data.get(
+            "current_weather",
+            {}
+        )
+
+        if not current:
+            raise Exception(
+                f"{city}天气查询失败"
+            )
+
+        temp = current.get(
+            "temperature"
+        )
+
+        wind_speed = current.get(
+            "windspeed"
+        )
+
+        return (
+
+            f"{city_name}，{country}，"
+
+            f"温度 {temp}°C，"
+
+            f"风速 {wind_speed} km/h"
+        )

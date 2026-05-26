@@ -2,7 +2,7 @@
 from gradio.themes.builder_app import history
 from langchain_core.messages import AIMessage
 
-from src.models.llm import get_instance_llm, safe_llm_invoke
+from src.models.llm import get_instance_llm, safe_llm_ainvoke
 import json
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
@@ -33,7 +33,7 @@ def build_context(docs):
 
     return json.dumps(context, ensure_ascii=False, indent=2)
 
-def generate_node(state):
+async def generate_node(state):
 
     logger.info(f"进入generate_node节点，state为："
         f"state: "
@@ -48,10 +48,12 @@ def generate_node(state):
                 )
 
     # 记忆检索
-    memory_text = retrieve_user_memory(user_id=state['user_id'])
+    memory_text = await retrieve_user_memory(user_id=state['user_id'])
 
     context = build_context(state["docs"])
-    logger.debug(f"context<UNK>{context}")
+
+    simplified_logger_context = [{**item, "text": len(item["text"])} for item in state["docs"]]
+    logger.debug(f"context数量: {simplified_logger_context}")
 
     prompt = ChatPromptTemplate.from_template("""
 你是一个严谨的狗狗百科助手。
@@ -95,13 +97,24 @@ intent: {intent}
     history_text = "\n".join([f"用户: {m.content}" if isinstance(m, HumanMessage) else f"助手: {m.content}" for m in state["messages"]])
     logger.debug(f"history_text:{history_text}")
 
-    safe_llm = RunnableLambda(
-        lambda x: safe_llm_invoke(
+    # safe_llm = RunnableLambda(
+    #     lambda x: safe_llm_ainvoke(
+    #         llm=llm,
+    #         prompt=x,
+    #         fallback_response="模型暂时不可用"
+    #     )
+    # )
+
+    async def create_async_safe_llm_ainvoke(x):
+        return await safe_llm_ainvoke(
             llm=llm,
             prompt=x,
-            fallback_response="模型暂时不可用"
+            fallback_response="调用LLM失败"
         )
-    )
+
+    safe_llm = RunnableLambda(
+        create_async_safe_llm_ainvoke
+        )
 
     # answer = (prompt | llm | StrOutputParser()).invoke({
     #     "intent": state["intent"],
@@ -111,7 +124,7 @@ intent: {intent}
     # })
 
     # 采用更安全的llm调用 支持降级和重试
-    answer = (prompt | safe_llm | StrOutputParser()).invoke({
+    answer = await (prompt | safe_llm | StrOutputParser()).ainvoke({
         "memory_text": memory_text,
         "intent": state["intent"],
         "context": context,
@@ -120,7 +133,7 @@ intent: {intent}
     })
 
     messages = state.get("messages",[])
-    logger.debug(f"messages<UNK>{messages}")
+    logger.debug(f"messages {messages}")
     messages.append(AIMessage(content=answer))
     logger.info(f"generate_node节点完成，结果answer为：{answer}")
 

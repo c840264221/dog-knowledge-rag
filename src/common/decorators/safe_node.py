@@ -10,7 +10,7 @@ def safe_node(fallback=None,raise_error=False):
     def decorator(func):
 
         @wraps(func)
-        def wrapper(state, *args, **kwargs):
+        async def wrapper(state, *args, **kwargs):
 
             start = time.time()
 
@@ -22,7 +22,7 @@ def safe_node(fallback=None,raise_error=False):
 
             try:
 
-                result = func(state,*args,**kwargs)
+                result = await func(state,*args,**kwargs)
 
                 elapsed = (
                     time.time() - start
@@ -61,7 +61,7 @@ def safe_node(fallback=None,raise_error=False):
 
                 if fallback:
 
-                    fallback_result = fallback(state,e)
+                    fallback_result = await fallback(state,e)
 
                     if isinstance(fallback_result,dict):
                         error_state.update(fallback_result)

@@ -12,7 +12,7 @@ from src.agents.general_qa_agent.valid_workers import VALID_WORKERS,TERMINAL_SIG
 
 from src.logger import logger
 
-from src.models.llm import safe_llm_invoke
+from src.models.llm import safe_llm_ainvoke
 
 
 # llm = get_backup_llm()
@@ -20,7 +20,7 @@ llm = get_instance_llm()
 
 valid_workers = VALID_WORKERS + TERMINAL_SIGNALS
 
-def general_qa_supervisor_node(state):
+async def general_qa_supervisor_node(state):
 
     logger.info(
         "进入 general qa supervisor"
@@ -47,17 +47,17 @@ def general_qa_supervisor_node(state):
             state.get("tool_confirmed")
     }
 
-    response = safe_llm_invoke(llm,
+    response = await safe_llm_ainvoke(llm,
 
-        GENERAL_QA_SUPERVISOR_PROMPT.format_messages(
+                                GENERAL_QA_SUPERVISOR_PROMPT.format_messages(
 
             state_summary=json.dumps(
                 summary,
                 ensure_ascii=False
             )
         ),
-        fallback_response="所有模型均不可用！"
-    )
+                                fallback_response="所有模型均不可用！"
+                                )
 
     decision = response.content.strip().lower()
 

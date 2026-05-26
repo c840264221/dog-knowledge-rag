@@ -133,7 +133,7 @@ def rerank_docs(question, docs, intent, top_k=3):
     scored.sort(key=lambda x: x[1], reverse=True)
 
     # 取前k个
-    reranked_docs = [doc for doc, _ in scored_docs[:top_k]]
+    reranked_docs = [doc for doc, _ in scored[:top_k]]
 
     return reranked_docs
 

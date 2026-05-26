@@ -11,7 +11,7 @@ def validate_state(required_keys=None):
     def decorator(func):
 
         @wraps(func)
-        def wrapper(state, *args, **kwargs):
+        async def wrapper(state, *args, **kwargs):
 
             if not isinstance(state, dict):
                 raise StateValidationError(
@@ -26,7 +26,7 @@ def validate_state(required_keys=None):
                         f"缺少必要字段: {key}"
                     )
 
-            return func(state, *args, **kwargs)
+            return await func(state, *args, **kwargs)
 
         return wrapper
 

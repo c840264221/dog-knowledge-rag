@@ -21,5 +21,5 @@ class AsyncMiddleware(BaseMiddleware):
             # return tool.run(args)
 
     async def process(self,ctx,next_func):
-
-        return await next_func()
+        result = await next_func()
+        return result

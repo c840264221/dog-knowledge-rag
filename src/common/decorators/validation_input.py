@@ -42,7 +42,7 @@ def validate_input(question: str) -> str:
 def validate_question(func):
 
     @wraps(func)
-    def wrapper(state, *args, **kwargs):
+    async def wrapper(state, *args, **kwargs):
 
         question = state.get("question", "")
 
@@ -50,6 +50,6 @@ def validate_question(func):
 
         state["question"] = validated_question
 
-        return func(state, *args, **kwargs)
+        return await func(state, *args, **kwargs)
 
     return wrapper

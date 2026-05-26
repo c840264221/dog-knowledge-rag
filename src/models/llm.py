@@ -55,7 +55,7 @@ def get_backup_llm():
         )
     return _llm_backup
 
-def safe_llm_invoke(llm, prompt, backup_llm=get_backup_llm(), fallback_response=None, max_attempts=3):
+async def safe_llm_ainvoke(llm, prompt, backup_llm=get_backup_llm(), fallback_response=None, max_attempts=3):
     """
        安全调用 LLM，支持重试和降级响应
        :param backup_llm: 降级的LLM模型
@@ -73,7 +73,7 @@ def safe_llm_invoke(llm, prompt, backup_llm=get_backup_llm(), fallback_response=
                 f"{attempt}/{max_attempts}"
             )
 
-            response = llm.invoke(prompt)
+            response = await llm.ainvoke(prompt)
 
             return response
 
@@ -91,7 +91,7 @@ def safe_llm_invoke(llm, prompt, backup_llm=get_backup_llm(), fallback_response=
 
         try:
 
-            response = backup_llm.invoke(prompt)
+            response = await backup_llm.ainvoke(prompt)
 
             return response
 
@@ -108,3 +108,4 @@ def safe_llm_invoke(llm, prompt, backup_llm=get_backup_llm(), fallback_response=
         return fallback_response
 
     raise RuntimeError("所有 LLM 调用失败")
+

@@ -2,74 +2,306 @@ import gradio as gr
 from src.graph.graph_run import run_main_graph_with_stream
 from src.logger import logger
 
+import src.runtime.events.setup
+
+from src.runtime.trace import trace_ctx
+
+from src.runtime.trace.init import trace_manager
+
+import uuid
+
+
 # 用于存储每个会话的配置信息和中断状态（使用 gr.State 更安全）
 # 但 State 需要绑定到界面，我们直接在函数中使用 gr.State 对象
+# async def respond_and_process(question: str, history: list, state: dict, request: gr.Request):
+#     """
+#     核心处理函数：
+#     - 调用 Agent
+#     - 处理中断/恢复
+#     - 返回 (新历史, 新状态, 确认面板可见性, 确认提示文本)
+#     """
+#     session_id = request.session_hash
+#
+#     # 生成 trace_id（也可以使用 uuid 或 trace_manager 的 create_trace）
+#     trace_id, _ = trace_manager.create_trace()
+#
+#     # 设置上下文变量
+#     trace_ctx.set_trace_id(trace_id)
+#     trace_ctx.set_session_id(session_id)
+#
+#     user_id = state.get("user_id") if state else None
+#     if user_id:
+#         trace_ctx.set_user_id(user_id)
+#     else:
+#         trace_ctx.set_user_id("unknown")
+#
+#     trace_ctx.set_component("gradio_handler")
+#
+#     # 初始化或获取状态
+#     if not state:
+#         state = {"config": {"configurable": {"thread_id": session_id}}, "pending": False, "pending_prompt": ""}
+#     else:
+#         # 确保 config 中的 thread_id 与当前会话一致
+#         state["config"]["configurable"]["thread_id"] = session_id
+#
+#     # 将用户问题也添加到聊天框中
+#     history.append({"role": "user", "content": question})
+#
+#     # 调用 Agent
+#     result = await run_main_graph_with_stream(question, thread_id=session_id)
+#
+#     # 判断是否中断
+#     if result.startswith("__INTERRUPT__:"):
+#         prompt = result[len("__INTERRUPT__:"):].strip()
+#         # 更新状态：标记等待确认
+#         state["pending"] = True
+#         state["pending_prompt"] = prompt
+#         # 在聊天记录中添加一条系统提示（可选）
+#         history.append({"role": "assistant", "content": f"⚠️ 需要确认：{prompt}"})
+#         # 返回历史、状态、显示确认面板、设置确认框的提示文本
+#         return history, state, gr.update(visible=True), prompt
+#     else:
+#         # 正常答案，且没有等待确认
+#         if state.get("pending"):
+#             # 可能恢复后已经解决了，但确保清除标志
+#             state["pending"] = False
+#         history.append({"role": "assistant", "content": result})
+#         return history, state, gr.update(visible=False), ""
 
-def respond_and_process(question: str, history: list, state: dict, request: gr.Request):
-    """
-    核心处理函数：
-    - 调用 Agent
-    - 处理中断/恢复
-    - 返回 (新历史, 新状态, 确认面板可见性, 确认提示文本)
-    """
+async def respond_and_process(
+    question: str,
+    history: list,
+    state: dict,
+    request: gr.Request
+):
+
     session_id = request.session_hash
-    # 初始化或获取状态
-    if not state:
-        state = {"config": {"configurable": {"thread_id": session_id}}, "pending": False, "pending_prompt": ""}
+
+    # ===== 创建 trace =====
+
+    trace_id = str(uuid.uuid4())
+
+    trace_manager.create_trace(trace_id)
+
+    # ===== 写入 contextvars =====
+
+    trace_ctx.set_trace_id(trace_id)
+
+    trace_ctx.set_session_id(session_id)
+
+    trace_ctx.set_component("gradio_handler")
+
+    # ===== user_id =====
+
+    user_id = state.get("user_id") if state else None
+
+    if user_id:
+
+        trace_ctx.set_user_id(user_id)
+
     else:
-        # 确保 config 中的 thread_id 与当前会话一致
+
+        trace_ctx.set_user_id("unknown")
+
+    # ===== 初始化 state =====
+
+    if not state:
+
+        state = {
+
+            "config": {
+                "configurable": {
+                    "thread_id": session_id
+                }
+            },
+
+            "pending": False,
+
+            "pending_prompt": "",
+
+            # ⭐ 新增
+            "trace_id": trace_id
+        }
+
+    else:
+
         state["config"]["configurable"]["thread_id"] = session_id
 
-    # 将用户问题也添加到聊天框中
-    history.append({"role": "user", "content": question})
+        # ⭐ 保证恢复时 trace 不丢
+        state["trace_id"] = trace_id
 
-    # 调用 Agent
-    result = run_main_graph_with_stream(question, thread_id=session_id)
+    # ===== 添加用户消息 =====
 
-    # 判断是否中断
+    history.append({
+
+        "role": "user",
+
+        "content": question
+    })
+
+    # ===== 调用图 =====
+
+    result = await run_main_graph_with_stream(
+
+        question,
+
+        thread_id=session_id,
+
+        trace_id=trace_id
+    )
+
+    # ===== interrupt =====
+
     if result.startswith("__INTERRUPT__:"):
+
         prompt = result[len("__INTERRUPT__:"):].strip()
-        # 更新状态：标记等待确认
+
         state["pending"] = True
+
         state["pending_prompt"] = prompt
-        # 在聊天记录中添加一条系统提示（可选）
-        history.append({"role": "assistant", "content": f"⚠️ 需要确认：{prompt}"})
-        # 返回历史、状态、显示确认面板、设置确认框的提示文本
-        return history, state, gr.update(visible=True), prompt
+
+        history.append({
+
+            "role": "assistant",
+
+            "content": f"⚠️ 需要确认：{prompt}"
+        })
+
+        return (
+
+            history,
+
+            state,
+
+            gr.update(visible=True),
+
+            prompt
+        )
+
+    # ===== normal =====
+
     else:
-        # 正常答案，且没有等待确认
-        if state.get("pending"):
-            # 可能恢复后已经解决了，但确保清除标志
-            state["pending"] = False
-        history.append({"role": "assistant", "content": result})
-        return history, state, gr.update(visible=False), ""
 
-def resume_agent(confirm_value: str, history: list, state: dict, request: gr.Request):
-    """用户确认后调用，恢复 Agent 执行"""
-    session_id = request.session_hash
-    if not state.get("pending"):
-        # 没有等待确认的任务
-        history.append({"role": "assistant", "content": "没有待确认的操作。"})
-        return history, state, gr.update(visible=False), ""
-
-    # 将用户的确认输入作为用户消息添加到历史
-    history.append({"role": "user", "content": f"确认选择：{confirm_value}"})
-
-    # 构造恢复消息
-    resume_msg = f"RESUME:{confirm_value}"
-    # 调用 Agent（会继续执行直到结束或再次中断）
-    result = run_main_graph_with_stream(resume_msg, thread_id=session_id)
-    if result.startswith("__INTERRUPT__:"):
-        # 理论上恢复后不应该立即又中断，但为了健壮性处理
-        prompt = result[len("__INTERRUPT__:"):].strip()
-        state["pending_prompt"] = prompt
-        history.append({"role": "assistant", "content": f"⚠️ 再次需要确认：{prompt}"})
-        return history, state, gr.update(visible=True), prompt
-    else:
-        # 正常结束
         state["pending"] = False
-        history.append({"role": "assistant", "content": result})
-        return history, state, gr.update(visible=False), ""
+
+        history.append({
+
+            "role": "assistant",
+
+            "content": result
+        })
+
+        return (
+
+            history,
+
+            state,
+
+            gr.update(visible=False),
+
+            ""
+        )
+
+async def resume_agent(
+    confirm_value: str,
+    history: list,
+    state: dict,
+    request: gr.Request
+):
+
+    session_id = request.session_hash
+
+    if not state.get("pending"):
+
+        history.append({
+            "role": "assistant",
+            "content": "没有待确认的操作。"
+        })
+
+        return (
+            history,
+            state,
+            gr.update(visible=False),
+            ""
+        )
+
+    # =========================
+    # 恢复 trace_id
+    # =========================
+
+    trace_id = state["trace_id"]
+
+    trace_ctx.set_trace_id(trace_id)
+
+    trace_ctx.set_session_id(session_id)
+
+    trace_ctx.set_user_id(
+        state.get("user_id", "unknown")
+    )
+
+    trace_ctx.set_component("resume_handler")
+
+    # =========================
+    # 添加用户确认
+    # =========================
+
+    history.append({
+        "role": "user",
+        "content": f"确认选择：{confirm_value}"
+    })
+
+    # =========================
+    # 恢复 graph
+    # =========================
+
+    resume_msg = f"RESUME:{confirm_value}"
+
+    result = await run_main_graph_with_stream(
+        resume_msg,
+        thread_id=session_id,
+        trace_id=trace_id
+    )
+
+    # =========================
+    # 再次中断
+    # =========================
+
+    if result.startswith("__INTERRUPT__:"):
+
+        prompt = result[len("__INTERRUPT__:"):].strip()
+
+        state["pending_prompt"] = prompt
+
+        history.append({
+            "role": "assistant",
+            "content": f"⚠️ 再次需要确认：{prompt}"
+        })
+
+        return (
+            history,
+            state,
+            gr.update(visible=True),
+            prompt
+        )
+
+    # =========================
+    # 正常结束
+    # =========================
+
+    state["pending"] = False
+
+    history.append({
+        "role": "assistant",
+        "content": result
+    })
+
+    return (
+        history,
+        state,
+        gr.update(visible=False),
+        ""
+    )
+
 
 # 清空对话
 def clear_all():

@@ -112,5 +112,5 @@ def build_exact_search_agent():
             "finish": END
         }
     )
-
-    return graph.compile()
+    app = graph.compile()
+    return app

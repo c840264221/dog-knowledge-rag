@@ -10,12 +10,13 @@ from src.graph.tools.runtime.tool_executor import ToolExecutor
 executor = ToolExecutor()
 
 
-@validate_state(["tool_calls"])
-def execute_tool_node(state: DogState) -> dict:
+# @validate_state(["tool_calls"])
+async def execute_tool_node(state: DogState) -> dict:
     """
 
     将之前的全部工具遍历调用改为链式循环  这样可以将之前调用工具产生的结果作为参数传给下面的工具
     """
+    logger.info(f"进入执行工具节点......")
     tool_calls = state.get("tool_calls", [])
     if not tool_calls:
         return {"need_tool": False, "tool_results": state.get("tool_results", [])}
@@ -27,7 +28,7 @@ def execute_tool_node(state: DogState) -> dict:
 
     logger.debug(f"tool_name: {name}...tool_args: {args}")
 
-    result = executor.execute(name, args)
+    result = await executor.execute(name, args)
 
     # func = TOOL_FUNCTIONS.get(name)
     # if not func:

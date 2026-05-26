@@ -1,6 +1,7 @@
 from langgraph.types import interrupt
 
 from src.graph.states.state import DogState
+from src.logger import logger
 
 
 def ask_confirm_tool_node(state: DogState) -> dict:
@@ -16,6 +17,7 @@ def ask_confirm_tool_node(state: DogState) -> dict:
 
     if user_input.strip().lower() == 'y':
         # 用户同意，保留 need_tool=True 和 tool_calls
+        logger.debug(f"DEBUG: state = {state}------进入下一节点")
         return {}  # 不修改状态，继续往下走
     else:
         # 用户拒绝

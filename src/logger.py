@@ -1,39 +1,114 @@
-import sys
 import os
-from loguru import logger
+import sys
+
+from loguru import logger as base_logger
+
+from src.runtime.trace import trace_ctx
 from src.config import LOG_PATH
 
-# 确保日志目录存在
-# LOG_PATH = os.getenv("LOG_DIR", "logs")
+
+# 创建日志目录
 os.makedirs(LOG_PATH, exist_ok=True)
 
-# 自定义格式（包含时间、级别、代码位置、消息）
-LOG_FORMAT = "{time:YYYY-MM-DD HH:mm:ss} | {level:<8} | {module}:{function}:{line} - {message}"
 
-# 移除默认 handler
+# 注入 Context
+def inject_context(record):
+
+    record["extra"]["trace_id"] = (
+        trace_ctx.get_trace_id()
+    )
+
+    record["extra"]["user_id"] = (
+        trace_ctx.get_user_id()
+    )
+
+    record["extra"]["session_id"] = (
+        trace_ctx.get_session_id()
+    )
+
+    record["extra"]["component"] = (
+        trace_ctx.get_component()
+    )
+
+
+logger = base_logger.patch(
+    inject_context
+)
+
+
+# 移除默认 Handler
 logger.remove()
 
-# 控制台输出（彩色，级别 DEBUG 及以上）
-logger.add(sys.stdout,
-           level="DEBUG",
-           format=LOG_FORMAT,
-           colorize=True)
 
-# 文件输出（滚动，级别 INFO 及以上，避免文件太大）
-logger.add(os.path.join(LOG_PATH, "app.log"),
-           level="INFO",
-           format=LOG_FORMAT,
-           rotation="10 MB",
-           retention="7 days",      # 保留最近7天的日志文件
-           encoding="utf-8")
+# Console Logger
+logger.add(
 
-# 可选：单独的 error 日志文件（只记录 ERROR 以上）
-logger.add(os.path.join(LOG_PATH, "error.log"),
-           level="ERROR",
-           format=LOG_FORMAT,
-           rotation="10 MB",
-           retention="30 days",
-           encoding="utf-8")
+    sys.stdout,
 
-# 对外暴露
-app_logger = logger
+    level="DEBUG",
+
+    colorize=True,
+
+    enqueue=True,
+
+    backtrace=True,
+
+    diagnose=True,
+
+    format=(
+
+        "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
+
+        "<level>{level: <8}</level> | "
+
+        "<cyan>{module}:{function}:{line}</cyan> | "
+
+        "trace_id=<yellow>{extra[trace_id]}</yellow> | "
+
+        "<level>{message}</level>"
+    )
+)
+
+
+# App JSON Log
+logger.add(
+
+    os.path.join(
+        LOG_PATH,
+        "app.log"
+    ),
+
+    level="INFO",
+
+    rotation="10 MB",
+
+    retention="7 days",
+
+    encoding="utf-8",
+
+    enqueue=True,
+
+    serialize=True
+)
+
+
+# Error JSON Log
+logger.add(
+
+    os.path.join(
+        LOG_PATH,
+        "error.log"
+    ),
+
+    level="ERROR",
+
+    rotation="10 MB",
+
+    retention="30 days",
+
+    encoding="utf-8",
+
+    enqueue=True,
+
+    serialize=True
+)
