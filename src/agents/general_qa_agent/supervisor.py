@@ -2,8 +2,6 @@ import json
 
 from langchain_core.messages import AIMessage
 
-from src.models.llm import get_backup_llm, get_instance_llm
-
 from src.agents.general_qa_agent.prompts import (
     GENERAL_QA_SUPERVISOR_PROMPT
 )
@@ -12,15 +10,24 @@ from src.agents.general_qa_agent.valid_workers import VALID_WORKERS,TERMINAL_SIG
 
 from src.logger import logger
 
-from src.models.llm import safe_llm_ainvoke
+from src.runtime.context import runtime_ctx
 
-
-# llm = get_backup_llm()
-llm = get_instance_llm()
 
 valid_workers = VALID_WORKERS + TERMINAL_SIGNALS
 
 async def general_qa_supervisor_node(state):
+
+    runtime_ctx.get().state().set_node(
+        "general_qa_supervisor_node"
+    )
+
+    def get_llm_provider():
+        from src.runtime.container.init import container
+        return container.get("llm")
+
+    llm_provider = get_llm_provider()
+
+    main_llm = llm_provider.main_llm
 
     logger.info(
         "进入 general qa supervisor"
@@ -47,17 +54,18 @@ async def general_qa_supervisor_node(state):
             state.get("tool_confirmed")
     }
 
-    response = await safe_llm_ainvoke(llm,
+    response = await llm_provider.safe_ainvoke(
+            main_llm,
 
-                                GENERAL_QA_SUPERVISOR_PROMPT.format_messages(
+            GENERAL_QA_SUPERVISOR_PROMPT.format_messages(
 
-            state_summary=json.dumps(
-                summary,
-                ensure_ascii=False
-            )
+                state_summary=json.dumps(
+                    summary,
+                    ensure_ascii=False
+                )
         ),
-                                fallback_response="所有模型均不可用！"
-                                )
+            fallback_response="所有模型均不可用！"
+    )
 
     decision = response.content.strip().lower()
 

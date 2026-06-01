@@ -2,11 +2,19 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough, RunnableLambda
 from langchain_core.output_parsers import StrOutputParser
 from src.retrieval.retriever import get_smart_retriever
-from src.models.llm import get_instance_llm
+
 
 def build_rag_chain(db):
+
+    def get_llm_provider():
+        from src.runtime.container.init import container
+        return container.get("llm")
+
+    llm_provider = get_llm_provider()
+
+    llm = llm_provider.main_llm
+
     print("开始实例化rag链......")
-    llm = get_instance_llm()
     prompt = ChatPromptTemplate.from_template("""
 你是一个严谨的狗狗百科助手。
 【任务】

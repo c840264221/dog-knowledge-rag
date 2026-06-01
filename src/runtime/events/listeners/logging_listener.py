@@ -4,13 +4,12 @@ from src.runtime.events.event_types import (
     ToolStartEvent,
     ToolSuccessEvent,
     ToolErrorEvent,
-    SpanStartEvent,
-    SpanEndEvent
 )
 
-from src.runtime.trace.init import (
-    trace_manager
-)
+from src.runtime.trace.init import trace_manager
+
+from src.runtime.context import runtime_ctx
+from src.runtime.scopes.metrics_scope import MetricsScope
 
 
 class LoggingListener:
@@ -18,8 +17,7 @@ class LoggingListener:
     async def handle(self, event):
 
         if isinstance(event, ToolStartEvent):
-        # if isinstance(event, SpanStartEvent):
-
+            
             logger.info(
 
                 f"[Tool Start] "
@@ -30,8 +28,9 @@ class LoggingListener:
             )
 
         elif isinstance(event, ToolSuccessEvent):
-
-            span = event.ctx.current_span
+            span = trace_manager.span_map.get(
+                event.span_id
+            )
 
             logger.info(
 
@@ -47,7 +46,9 @@ class LoggingListener:
 
         elif isinstance(event, ToolErrorEvent):
 
-            span = event.ctx.current_span
+            span = trace_manager.span_map.get(
+                event.span_id
+            )
 
             logger.error(
 

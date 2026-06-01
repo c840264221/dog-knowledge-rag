@@ -1,8 +1,13 @@
 from src.retrieval.filter_by_tags import filter_by_tags
 from src.logger import logger
 
+from src.runtime.context import runtime_ctx
+
 def tag_filter_node(state):
-    print("tag_filter_node", state)
+
+    runtime_ctx.get().state().set_node(
+        "tag_filter_node"
+    )
 
     logger.info(f"进入tag_filter_node节点，state："
         f"question:{state['question']}, "

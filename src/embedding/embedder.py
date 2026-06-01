@@ -1,5 +1,7 @@
 from langchain_huggingface import HuggingFaceEmbeddings
-from src.config import EMBEDDING_MODEL, CACHE_DIR
+# from src.config import EMBEDDING_MODEL, CACHE_DIR
+
+from src.settings import settings
 
 
 _embedding_instance = None
@@ -11,8 +13,9 @@ def get_embedding():
         print("🚀 加载 Embedding 模型...", flush=True)
 
         _embedding_instance = HuggingFaceEmbeddings(
-            model_name=EMBEDDING_MODEL,
-            cache_folder=CACHE_DIR
+            model_name=settings.embedding.model_name,
+            # cache_folder=CACHE_DIR.as_posix()
+            cache_folder=str(settings.path.CACHE_DIR)
         )
 
         print("✅ Embedding 加载完成", flush=True)

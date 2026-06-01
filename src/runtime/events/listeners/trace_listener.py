@@ -1,4 +1,5 @@
 from src.logger import logger
+from src.runtime.context import runtime_ctx
 from src.runtime.trace.init import (
     trace_manager
 )
@@ -17,19 +18,7 @@ class TraceListener:
 
         if isinstance(event, SpanStartEvent):
 
-            # span = TraceSpan(
-            #
-            #     span_id=event.span_id,
-            #
-            #     trace_id=event.trace_id,
-            #
-            #     name=event.span_name,
-            #
-            #     parent_span_id=event.parent_span_id
-            # )
-
             span = trace_manager.create_span(
-                span_id=event.span_id,
 
                 trace_id=event.trace_id,
 
@@ -38,7 +27,8 @@ class TraceListener:
                 parent_span=event.parent_span
             )
 
-            trace_manager.span_map[span.span_id] = span
+            # 回填给 Middleware
+            event.span = span
 
             logger.info(
 
@@ -53,25 +43,36 @@ class TraceListener:
 
         elif isinstance(event, SpanEndEvent):
 
-            span = trace_manager.span_map.get(event.span_id)
+            trace_manager.finish_span(
 
-            if not span:
-                return
-
-            span.finish(
+                event.span_id,
 
                 status=event.status,
 
                 error=event.error
+
             )
+
+            span = trace_manager.span_map.get(
+
+                event.span_id
+
+            )
+
+            if not span:
+                return
 
             logger.info(
 
                 f"[Span End] "
 
+
                 f"{span.name} "
+
 
                 f"status={span.status} "
 
+
                 f"latency={span.latency}s"
+
             )

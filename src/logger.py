@@ -3,7 +3,10 @@ import sys
 
 from loguru import logger as base_logger
 
-from src.runtime.trace import trace_ctx
+# from src.runtime.trace import trace_ctx
+
+from src.runtime.context import runtime_ctx
+
 from src.config import LOG_PATH
 
 
@@ -14,20 +17,38 @@ os.makedirs(LOG_PATH, exist_ok=True)
 # 注入 Context
 def inject_context(record):
 
+    # record["extra"]["trace_id"] = (
+    #     trace_ctx.get_trace_id()
+    # )
+    #
+    # record["extra"]["user_id"] = (
+    #     trace_ctx.get_user_id()
+    # )
+    #
+    # record["extra"]["session_id"] = (
+    #     trace_ctx.get_session_id()
+    # )
+    #
+    # record["extra"]["component"] = (
+    #     trace_ctx.get_component()
+    # )
+
+    ctx = runtime_ctx.get()
+
     record["extra"]["trace_id"] = (
-        trace_ctx.get_trace_id()
+        ctx.trace_id if ctx else None
     )
 
     record["extra"]["user_id"] = (
-        trace_ctx.get_user_id()
+        ctx.user_id if ctx else None
     )
 
     record["extra"]["session_id"] = (
-        trace_ctx.get_session_id()
+        ctx.session_id if ctx else None
     )
 
     record["extra"]["component"] = (
-        trace_ctx.get_component()
+        ctx.component if ctx else None
     )
 
 

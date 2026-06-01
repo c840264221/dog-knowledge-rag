@@ -23,9 +23,16 @@ from src.runtime.events.listeners.trace_listener import (
     TraceListener
 )
 
+from src.runtime.events.listeners.metrics_listener import (
+    MetricsListener
+)
+
+
 logging_listener = LoggingListener()
 
 tracing_listener = TraceListener()
+
+metrics_listener = MetricsListener()
 
 event_bus.subscribe(
     ToolStartEvent,
@@ -50,4 +57,14 @@ event_bus.subscribe(
 event_bus.subscribe(
     SpanEndEvent,
     tracing_listener
+)
+
+event_bus.subscribe(
+    ToolSuccessEvent,
+    metrics_listener
+)
+
+event_bus.subscribe(
+    ToolErrorEvent,
+    metrics_listener
 )

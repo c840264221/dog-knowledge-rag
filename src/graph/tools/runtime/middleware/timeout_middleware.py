@@ -11,12 +11,17 @@ from src.graph.tools.errors.tool_errors import ToolTimeoutError
 
 import asyncio
 
+from src.settings import settings
+
 
 class TimeoutMiddleware(BaseMiddleware):
 
     async def process(self,ctx,next_func):
 
-        timeout = ctx.tool.metadata.timeout
+        timeout = (
+                ctx.tool.metadata.timeout
+                or settings.runtime.tool_timeout
+        )
 
         # 同步运行下的超时设置
         # with ThreadPoolExecutor(max_workers=1) as executor:

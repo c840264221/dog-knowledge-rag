@@ -6,17 +6,27 @@ from src.agents.exact_search_agent.prompts import (
     EXACT_AGENT_SUPERVISOR_PROMPT
 )
 
-from src.models.llm import get_backup_llm, safe_llm_ainvoke, get_instance_llm
+# from src.models.llm import safe_llm_ainvoke, get_instance_llm
 
 from src.logger import logger
 
 from src.agents.exact_search_agent.valid_workers import VALID_WORKERS, TERMINAL_SIGNALS
 
-
-llm = get_backup_llm()
-# llm = get_instance_llm()
+from src.runtime.context import runtime_ctx
 
 async def exact_search_supervisor_node(state):
+
+    runtime_ctx.get().state().set_node(
+        "exact_search_supervisor_node"
+    )
+
+    def get_llm_provider():
+        from src.runtime.container.init import container
+        return container.get("llm")
+
+    llm_provider = get_llm_provider()
+
+    backup_llm = llm_provider.backup_llm
 
     logger.info(
         "进入 exact_search supervisor"
@@ -40,8 +50,8 @@ async def exact_search_supervisor_node(state):
             bool(state.get("answer"))
     }
 
-    response = await safe_llm_ainvoke(
-        llm,
+    response = await llm_provider.safe_ainvoke(
+        backup_llm,
         EXACT_AGENT_SUPERVISOR_PROMPT.format_messages(
             state_summary=json.dumps(
                 summary,

@@ -3,12 +3,17 @@ from src.graph.graph_run import run_main_graph_with_stream
 from src.logger import logger
 
 import src.runtime.events.setup
+from src.runtime.hooks.tool_counter_hook import ToolCounterHook
 
-from src.runtime.trace import trace_ctx
+# from src.runtime.trace import trace_ctx
 
 from src.runtime.trace.init import trace_manager
 
 import uuid
+
+from src.runtime.container.init import (
+    container
+)
 
 
 # 用于存储每个会话的配置信息和中断状态（使用 gr.State 更安全）
@@ -83,25 +88,53 @@ async def respond_and_process(
 
     trace_manager.create_trace(trace_id)
 
-    # ===== 写入 contextvars =====
-
-    trace_ctx.set_trace_id(trace_id)
-
-    trace_ctx.set_session_id(session_id)
-
-    trace_ctx.set_component("gradio_handler")
-
     # ===== user_id =====
 
     user_id = state.get("user_id") if state else None
 
-    if user_id:
+    # if user_id:
+    #
+    #     trace_ctx.set_user_id(user_id)
+    #
+    # else:
+    #
+    #     trace_ctx.set_user_id("unknown")
 
-        trace_ctx.set_user_id(user_id)
+    # ===== 写入 contextvars =====
 
-    else:
+    from src.runtime.context import (
+        runtime_ctx,
+        RuntimeContext
+    )
 
-        trace_ctx.set_user_id("unknown")
+    ctx = RuntimeContext(
+
+        trace_id=trace_id,
+
+        session_id=session_id,
+
+        user_id=user_id or "unknown",
+
+        component="gradio_handler"
+    )
+
+    ctx.hooks().register(
+        "tool.before",
+        ToolCounterHook()
+    )
+
+    await runtime_ctx.create(ctx)
+
+    # 保存runtime state
+    runtime_ctx.get().state().set_agent(
+        "graph agent"
+    )
+
+    # trace_ctx.set_trace_id(trace_id)
+    #
+    # trace_ctx.set_session_id(session_id)
+    #
+    # trace_ctx.set_component("gradio_handler")
 
     # ===== 初始化 state =====
 
@@ -191,6 +224,13 @@ async def respond_and_process(
             "content": result
         })
 
+        from src.runtime.scopes.metrics_scope import MetricsScope
+        metrics_scope = runtime_ctx.get().service(MetricsScope).get_metrics()
+        logger.info(f'运行结束，metrics为：{metrics_scope}')
+
+        # 销毁所有作用域scope
+        await runtime_ctx.destroy()
+
         return (
 
             history,
@@ -231,16 +271,49 @@ async def resume_agent(
 
     trace_id = state["trace_id"]
 
-    trace_ctx.set_trace_id(trace_id)
+    # trace_ctx.set_trace_id(trace_id)
 
-    trace_ctx.set_session_id(session_id)
+    # trace_ctx.set_session_id(session_id)
 
-    trace_ctx.set_user_id(
-        state.get("user_id", "unknown")
+    # trace_ctx.set_user_id(
+    #     state.get("user_id", "unknown")
+    # )
+
+    # trace_ctx.set_component("resume_handler")
+
+
+    # =========================
+    # RuntimeContext
+    # =========================
+
+    from src.runtime.context import (
+        runtime_ctx,
+        RuntimeContext
     )
 
-    trace_ctx.set_component("resume_handler")
+    ctx = RuntimeContext(
 
+        trace_id=trace_id,
+
+        session_id=session_id,
+
+        user_id=state.get(
+            "user_id",
+            "unknown"
+        ),
+
+        component="resume_handler"
+    )
+
+    # runtime_ctx.set(ctx)
+
+    await runtime_ctx.create(ctx)
+
+    #todo: 这里手动写死恢复current_agent 因为我现在的项目只有走general_agent时才会出现interrupt的情况
+    # 所以直接写死没问题  后续如果有新的分支走interrupt的话就将current_agent存到dogstate里用于恢复
+    runtime_ctx.get().state().set_agent(
+        "general_agent"
+    )
     # =========================
     # 添加用户确认
     # =========================
@@ -277,6 +350,7 @@ async def resume_agent(
             "content": f"⚠️ 再次需要确认：{prompt}"
         })
 
+
         return (
             history,
             state,
@@ -295,6 +369,10 @@ async def resume_agent(
         "content": result
     })
 
+    from src.runtime.scopes.metrics_scope import MetricsScope
+    metrics_scope = runtime_ctx.get().service(MetricsScope).get_metrics()
+    logger.info(f'运行结束，metrics为：{metrics_scope}')
+    
     return (
         history,
         state,
@@ -354,5 +432,30 @@ with gr.Blocks(title="狗狗百科 AI Agent", theme=gr.themes.Soft()) as demo:
         inputs=[msg]
     )
 
+import asyncio
+
+
+async def main():
+
+    # 启动 Container
+    await container.startup()
+
+    # 启动 Gradio
+    demo.launch(
+        server_name="127.0.0.1",
+        server_port=7860,
+        share=False
+    )
+
+
 if __name__ == "__main__":
-    demo.launch(server_name="127.0.0.1", server_port=7860, share=False)
+    # demo.launch(server_name="127.0.0.1", server_port=7860, share=False)
+    try:
+
+        asyncio.run(main())
+
+    finally:
+
+        asyncio.run(
+            container.shutdown()
+        )

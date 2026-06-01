@@ -3,8 +3,15 @@ from langgraph.types import interrupt
 from src.graph.states.state import DogState
 from src.logger import logger
 
+from src.runtime.context import runtime_ctx
+
 
 def ask_confirm_tool_node(state: DogState) -> dict:
+
+    runtime_ctx.get().state().set_node(
+        "ask_confirm_tool_node"
+    )
+
     """在 execute_tool 之前询问用户是否真的要执行"""
     tool_calls = state.get("tool_calls", [])
     if not tool_calls:

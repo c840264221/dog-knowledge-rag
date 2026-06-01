@@ -51,7 +51,14 @@ from src.graph.routes.route_after_ask_user import (
 )
 
 
+from src.logger import (
+    logger
+)
+
 def build_recommendation_agent():
+
+    logger.info("构建 recommendation agent中...")
+
     builder = StateGraph(RecommendationState)
 
     builder.add_node(
@@ -161,6 +168,10 @@ def build_recommendation_agent():
     builder.add_edge(
         "generate",
         END
+    )
+
+    logger.info(
+        "✅ recommendation agent 构建完成"
     )
 
     return builder.compile()

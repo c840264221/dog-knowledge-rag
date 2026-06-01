@@ -4,7 +4,7 @@ from typing import Any
 from typing import Optional, Dict
 import asyncio
 from src.runtime.trace.init import trace_manager
-from src.runtime.trace import trace_ctx
+# from src.runtime.trace import trace_ctx
 
 
 class ToolContext:
@@ -21,9 +21,8 @@ class ToolContext:
 
         # trace id
         self.trace_id = trace_id
-        # 为了保持 trace_manager 的一致性，也应该创建根 span
 
-        # self.trace_id, root_span = trace_manager.create_trace()
+        self.span_id: str | None = None
 
         # 当前节点
         self.current_span = None
@@ -40,8 +39,11 @@ class ToolContext:
         # 耗时
         # self.latency: Optional[float] = None
 
-        # 同时将 trace_id 设置到 contextvar（确保覆盖）
-        trace_ctx.set_trace_id(self.trace_id)
+        # 启用runtime上下文管理  废弃trace_ctx
+        from src.runtime.context import runtime_ctx
+
+        runtime_context = runtime_ctx.get()
+        runtime_context.trace_id = self.trace_id
 
     async def invoke(self):
         if asyncio.iscoroutinefunction(self.tool.run):

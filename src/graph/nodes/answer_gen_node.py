@@ -1,10 +1,23 @@
 from src.graph.states.state import DogState
-from src.models.llm import get_instance_llm, safe_llm_ainvoke
 from langchain_core.messages import HumanMessage
 
 
-llm = get_instance_llm()
 async def answer_gen_node(state: DogState) -> dict:
+
+    from src.runtime.context import runtime_ctx
+
+    runtime_ctx.get().state().set_node(
+        "answer_gen_node"
+    )
+
+    def get_llm_provider():
+        from src.runtime.container.init import container
+        return container.get("llm")
+
+    llm_provider = get_llm_provider()
+
+    main_llm = llm_provider.main_llm
+
     tool_results = state.get("tool_results", [])
     question = state["question"]
     history_text = "\n".join([f"用户: {m.content}" if isinstance(m, HumanMessage) else f"助手: {m.content}" for m in
@@ -27,8 +40,8 @@ async def answer_gen_node(state: DogState) -> dict:
 
     # response = llm.invoke(base_prompt).content
     # 采用更安全版本的llm
-    response = await safe_llm_ainvoke(
-        llm=llm,
+    response = await llm_provider.safe_ainvoke(
+        llm=main_llm,
         prompt=base_prompt,
         fallback_response="模型暂时不可用"
     )

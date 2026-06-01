@@ -4,7 +4,7 @@ from src.logger import logger
 
 import time
 
-import src.runtime.trace.trace_ctx as trace_ctx
+# import src.runtime.trace.trace_ctx as trace_ctx
 
 
 def safe_execute_tool(func,args=None,timeout=5):
@@ -92,24 +92,45 @@ from src.logger import logger
 
 from src.runtime.trace.init import trace_manager
 
+from src.settings import settings
+
 
 class ToolExecutor:
 
     def __init__(self):
 
-        self.middlewares = [
-            LoggingMiddleware(),
+        # self.middlewares = [
+        #     LoggingMiddleware(),
+        #
+        #     TraceMiddleware(),
+        #
+        #     RetryMiddleware(),
+        #
+        #     TimeoutMiddleware(),
+        #
+        #     AsyncMiddleware()
+        # ]
 
-            TraceMiddleware(),
+        # 用工程化配置文件来控制中间件的开关
+        middlewares = []
 
-            RetryMiddleware(),
+        if settings.runtime.enable_logging_middleware:
+            middlewares.append(LoggingMiddleware())
 
-            TimeoutMiddleware(),
+        if settings.runtime.enable_trace_middleware:
+            middlewares.append(TraceMiddleware())
 
-            AsyncMiddleware()
-        ]
+        if settings.runtime.enable_retry_middleware:
+            middlewares.append(RetryMiddleware())
 
-        self.pipeline = MiddlewarePipeline(self.middlewares)
+        if settings.runtime.enable_timeout_middleware:
+            middlewares.append(TimeoutMiddleware())
+
+        if settings.runtime.enable_async_middleware:
+            middlewares.append(AsyncMiddleware())
+
+
+        self.pipeline = MiddlewarePipeline(middlewares)
 
     async def execute(self,tool_name,args):
 
@@ -122,7 +143,12 @@ class ToolExecutor:
                 f"{tool_name}"
             )
 
-        trace_id = trace_ctx.get_trace_id()
+        # 启用runtime上下文管理  废弃trace_ctx
+        from src.runtime.context import runtime_ctx
+
+        runtime_context = runtime_ctx.get()
+
+        trace_id = runtime_context.trace_id
 
         ctx = ToolContext(
             tool=tool,
@@ -156,6 +182,10 @@ class ToolExecutor:
             # ctx.result = result
 
             # self.logging.after(ctx)
+
+            await runtime_context.hooks().emit(
+                "tool.before"
+            )
 
             result = await self.pipeline.run(ctx,final_func)
 

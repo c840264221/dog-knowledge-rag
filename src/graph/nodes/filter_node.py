@@ -1,9 +1,15 @@
 from src.logger import logger
 
+from src.runtime.context import runtime_ctx
+
 def filter_node(state):
     """
     构建数据库可用的 filter_dict
     """
+
+    runtime_ctx.get().state().set_node(
+        "filter_node"
+    )
 
     logger.info(
         f"进入filter_node节点  "

@@ -2,7 +2,7 @@ from langgraph.graph import END
 from src.logger import logger
 
 def route_after_evaluate(state):
-    logger.info(f"进入route_after_evaluate路由咯，检验retrieval_ok字段的值，state为：<UNK>{state}")
+    logger.info(f"进入route_after_evaluate路由咯，检验retrieval_ok字段的值，state为：{state}")
     logger.debug(f"重试次数retry_cnt为：{state.get("retry_count", 0)}")
 
     if state["retrieval_ok"]:

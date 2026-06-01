@@ -1,5 +1,9 @@
 from sentence_transformers import CrossEncoder
-from src.config import RERANKER_MODEL, CACHE_DIR, HF_TOKEN
+# from src.config import RERANKER_MODEL, CACHE_DIR, HF_TOKEN
+
+from src.settings import settings
+
+from src.settings import settings
 
 _reranker_instance = None
 
@@ -11,16 +15,20 @@ def get_reranker():
 
         # 准备传递给底层模型的参数
         model_kwargs = {}
-        if CACHE_DIR:
-            model_kwargs['cache_dir'] = CACHE_DIR  # 指定缓存目录
-        if HF_TOKEN:
+        if settings.path.CACHE_DIR:
+            model_kwargs['cache_dir'] = str(settings.path.CACHE_DIR)  # 指定缓存目录
+
+        if settings.reranker.huggingface_token:
             # 根据你的 sentence-transformers / transformers 版本选择其中一个
             # 新版本推荐 'token'，旧版本则用 'use_auth_token'
-            model_kwargs['token'] = HF_TOKEN
+            model_kwargs["token"] = (
+                settings.reranker.huggingface_token
+                .get_secret_value()
+            )
             # model_kwargs['use_auth_token'] = HF_TOKEN
 
         _reranker_instance = CrossEncoder(
-            RERANKER_MODEL,
+            settings.reranker.model_name,
             model_kwargs=model_kwargs,  # 统一传入
             device='cpu'  # 可选：'cuda' 或 'cpu'
         )

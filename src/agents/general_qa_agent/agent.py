@@ -34,7 +34,14 @@ from src.agents.general_qa_agent.routes import (
 )
 
 
+from src.logger import logger
+
+
 def build_general_qa_agent():
+
+    logger.info(
+        "构建 general_qa_agent中..."
+    )
 
     graph = StateGraph(DogState)
 
@@ -121,6 +128,10 @@ def build_general_qa_agent():
 
             "finish": END
         }
+    )
+
+    logger.info(
+        "✅ general_qa_agent 构建完成"
     )
 
     return graph.compile()

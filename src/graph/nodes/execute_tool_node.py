@@ -5,7 +5,7 @@ from src.graph.tools.runtime.tool_executor import safe_execute_tool
 from src.logger import logger
 from src.graph.tools.runtime.tool_executor import ToolExecutor
 
-
+from src.runtime.context import runtime_ctx
 
 executor = ToolExecutor()
 
@@ -16,6 +16,11 @@ async def execute_tool_node(state: DogState) -> dict:
 
     将之前的全部工具遍历调用改为链式循环  这样可以将之前调用工具产生的结果作为参数传给下面的工具
     """
+
+    runtime_ctx.get().state().set_node(
+        "execute_tool_node"
+    )
+
     logger.info(f"进入执行工具节点......")
     tool_calls = state.get("tool_calls", [])
     if not tool_calls:
@@ -27,6 +32,11 @@ async def execute_tool_node(state: DogState) -> dict:
     args = tc["args"]
 
     logger.debug(f"tool_name: {name}...tool_args: {args}")
+
+    # 运行时上下文中的runtime state 记录调用的工具名称
+    runtime_ctx.get().state().set_tool(
+        name
+    )
 
     result = await executor.execute(name, args)
 
@@ -51,6 +61,7 @@ async def execute_tool_node(state: DogState) -> dict:
     #     )
     new_results = state.get("tool_results", []) + [result.model_dump()]
     remaining_calls = tool_calls[1:]  # 剩余未执行的工具
+
 
     # 如果还有剩余，继续需要工具；否则结束
     return {

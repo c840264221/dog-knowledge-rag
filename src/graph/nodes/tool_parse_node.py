@@ -2,7 +2,7 @@ from langchain_core.runnables import RunnableLambda
 
 from src.graph.states.state import DogState
 from langchain_core.messages import HumanMessage, SystemMessage
-from src.models.llm import get_instance_llm, safe_llm_ainvoke
+# from src.models.llm import get_instance_llm, safe_llm_ainvoke
 
 from src.logger import logger
 
@@ -18,18 +18,27 @@ from src.graph.tools.schemas.tool_call_schema import (
     ToolParseResult
 )
 
-from src.models.llm import get_backup_llm, get_chinese_llm
+from src.runtime.context import runtime_ctx
 
-
-
-# llm = get_chinese_llm()
-llm = get_backup_llm()
 
 parser = PydanticOutputParser(
     pydantic_object=ToolParseResult
 )
 
 async def tool_parse_node(state: DogState) -> dict:
+
+    runtime_ctx.get().state().set_node(
+        "tool_parse_node"
+    )
+
+    def get_llm_provider():
+        from src.runtime.container.init import container
+        return container.get("llm")
+
+    llm_provider = get_llm_provider()
+
+    backup_llm = llm_provider.backup_llm
+
     if state.get("tool_calls"):
         return {}
 
@@ -105,8 +114,8 @@ TOOL: get_weather|北京|2025-03-15
     # response = llm.invoke(messages).content
 
     async def create_async_safe_llm_ainvoke(x):
-        return await safe_llm_ainvoke(
-            llm=llm,
+        return await llm_provider.safe_ainvoke(
+            llm=backup_llm,
             prompt=x,
             fallback_response="调用LLM失败"
         )

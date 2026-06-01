@@ -102,12 +102,20 @@ def handle_filters(filters):
         return filters
 
 
-from src.models.reranker import get_reranker
+# from src.models.reranker import get_reranker
+
 
 # rerank重新将向量数据库返回的数据进行一次精准排序
 def rerank_docs(question, docs, intent, top_k=3):
+
+    def get_reranker_model():
+        from src.runtime.container.init import container
+        return container.get('reranker').reranker
+
     pairs = [(question, doc.page_content) for doc in docs]
-    reranker_model = get_reranker()
+
+    reranker_model = get_reranker_model()
+
     scores = reranker_model.predict(pairs)
 
     # 组合 doc + score

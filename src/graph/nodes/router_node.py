@@ -62,6 +62,10 @@ from src.common.decorators.validate_llm_output import (
     validate_llm_output, validate_query_parse_result, default_parse_result
 )
 
+from src.runtime.context import (
+    runtime_ctx
+)
+
 @safe_node(
     fallback=lambda state, e: {
         "next_agent": AgentType.GENERAL_QA.value
@@ -74,6 +78,12 @@ from src.common.decorators.validate_llm_output import (
     fallback_factory=default_parse_result
 )
 async def semantic_router_node(state):
+
+    runtime_context = runtime_ctx.get()
+    runtime_context.state().set_node(
+        "semantic_router_node"
+    )
+
     question = state["question"]
 
     logger.info(

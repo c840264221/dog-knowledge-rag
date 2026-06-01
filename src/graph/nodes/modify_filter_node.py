@@ -1,9 +1,15 @@
 from src.graph.states.state import DogState
 from src.logger import logger
 
+from src.runtime.context import runtime_ctx
+
 def modify_filter_node(state: DogState) -> dict:
+
+    runtime_ctx.get().state().set_node(
+        "modify_filter_node"
+    )
+
     """根据用户选择 2，修改 filters，例如换一个品种"""
-    print("modify_filter_node", state)
 
     logger.info(f"进入modify_filter_node节点<UNK>state为：{state}")
     # 测试阶段 采用简单策略对付一下 比如改为更为常见的金毛

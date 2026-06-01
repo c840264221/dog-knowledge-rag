@@ -83,7 +83,9 @@ if __name__ == "__main__":
     from src.logger import logger
     from src.memory.memory_schema import MemoryOutput
 
-    llm = get_chinese_llm()
+    from src.runtime.container.init import container
+
+    llm = container.get('llm').chinese_llm
     structured_llm = llm.with_structured_output(MemoryOutput)
     result = extract_memory(llm, "我觉得拉布拉多挺不错")
     logger.info(result)

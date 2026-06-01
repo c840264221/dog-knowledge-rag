@@ -1,45 +1,13 @@
-from click import Command
-
-from src.graph.build_graph import build_graph
-from src.vectorstore.vector_store import load_vector_store
-from src.embedding.embedder import get_embedding
-from src.config import CHROMA_DB_DIR
-from src.graph.sub_graphs.main_graph import build_main_graph
-import uuid
 from src.logger import logger
 from src.graph.tools.runtime.graph_stream_runtime import safe_stream_graph
 from src.user.user_manager import get_user_id
-import asyncio
-from src.graph.sub_graphs.main_graph import _app_2, build_main_graph
 
-from src.runtime.trace import trace_ctx
+# from src.runtime.trace import trace_ctx
 
-from src.runtime.trace.init import trace_manager
+from src.runtime.container.init import (
+    container
+)
 
-
-# embedding = get_embedding()
-# db = load_vector_store(embedding, CHROMA_DB_DIR)
-# app = build_graph(db)
-
-
-# def run(question: str):
-#     result = app.invoke({
-#         "question": question
-#     })
-#
-#     return result["answer"]
-
-
-# app_2 = asyncio.run(build_main_graph())
-
-# app_2 = None
-
-# def init_main_graph():
-#     global app_2
-#     # 用 asyncio.run() 调用异步函数（此时还没有运行中的事件循环）
-#     app_2 = asyncio.run(build_main_graph())
-#     # 然后启动 Gradio
-#     return app_2
 
 def create_initial_state(question: str, trace_id:str):
     logger.info("初始化state...")
@@ -82,14 +50,21 @@ def create_initial_state(question: str, trace_id:str):
 
 
 async def run_main_graph_with_stream(question: str, thread_id:str="default_user", trace_id=None) -> str:
-    global _app_2
-    # 惰性初始化图（仅在第一次调用时执行）
-    if _app_2 is None:
-        logger.info("_app_2未初始化，初始化准备中...")
-        _app_2 = await build_main_graph()  # 此时运行在 Gradio 的事件循环中
+    # 启用runtime上下文管理  废弃trace_ctx
+    from src.runtime.context import runtime_ctx
+
+    runtime_context = runtime_ctx.get()
+
+
+    graph_runtime = container.get(
+        "graph_runtime"
+    )
+
+    app = graph_runtime.graph
 
     if trace_id:
-        trace_ctx.set_trace_id(trace_id)
+        # trace_ctx.set_trace_id(trace_id)
+        runtime_context.trace_id = trace_id
 
     if isinstance(question, list) and len(question) > 0 and "text" in question[0]:
         question = question[0]["text"]
@@ -98,8 +73,12 @@ async def run_main_graph_with_stream(question: str, thread_id:str="default_user"
     state = create_initial_state(question, trace_id)
 
     # 设置 user_id 和 session_id 到 contextvar（确保即使没有经过 Gradio 入口也能记录）
-    trace_ctx.set_user_id(state.get("user_id", "unknown"))
-    trace_ctx.set_session_id(thread_id)
+    # trace_ctx.set_user_id(state.get("user_id", "unknown"))
+    # trace_ctx.set_session_id(thread_id)
+
+
+    runtime_context.user_id = state.get("user_id", "unknown")
+    runtime_context.set_session_id = thread_id
 
     logger.info(f"收到用户 [{state["user_id"]}] 问题: {question}")
 
@@ -108,14 +87,17 @@ async def run_main_graph_with_stream(question: str, thread_id:str="default_user"
               "run_name": f"query_{question[:20]}",  # LangSmith 显示的名称
               "tags": ["dog_agent", "memory_test"],
               }
+
     from langgraph.types import Command
+
+
     # 根据question判断是恢复断点还是新的问题
     if question.startswith("RESUME:"):
         user_input = question[7:].strip()
 
         async def get_command_events():
             events = []
-            async for chunk in _app_2.astream(Command(resume=user_input), config, stream_mode="values"):
+            async for chunk in app.astream(Command(resume=user_input), config, stream_mode="values"):
                 events.append(chunk)
             return events
 
@@ -123,12 +105,15 @@ async def run_main_graph_with_stream(question: str, thread_id:str="default_user"
 
         events = await get_command_events()
 
+
         # 遍历事件  获取最后的answer
         for ev in events:
             if "answer" in ev and ev["answer"]:
                 return ev["answer"]
+
+
         # 恢复后又中断了  虽然不太可能  但为了保险起见
-        current = await _app_2.aget_state(config)
+        current = await app.aget_state(config)
         if current.next:
             prompt = extract_interrupt_prompt(current)
             return f"__INTERRUPT__:{prompt}"
@@ -156,20 +141,24 @@ async def run_main_graph_with_stream(question: str, thread_id:str="default_user"
         # safe_stream_graph改为异步之后 调用方式变为async for来收集
         async def collect_stream():
             events = []
-            async for chunk in safe_stream_graph(graph=_app_2, state=state, config=config, stream_mode="updates"):
+            async for chunk in safe_stream_graph(graph=app, state=state, config=config, stream_mode="updates"):
                 events.append(chunk)
             return events
 
         events = await collect_stream()
         logger.debug(f"图执行产生 {len(events)} 个状态快照")
 
+
         # 检查最后的事件中是否有 answer
         for ev in reversed(events):
             if "answer" in ev and ev["answer"]:
                 logger.info(f"返回答案长度: {len(ev["answer"])} 字符")
                 return ev["answer"]
+
+
         # 如果没有 answer，说明图在中断点暂停了 此处配合gradio，所以不采用循环处理
-        current = await _app_2.aget_state(config)
+        current = await app.aget_state(config)
+
         if current.next:
             prompt = extract_interrupt_prompt(current)
             # 返回一个带有特定表示的数据 前端可以根据标识知道这是断点  需要用户输入

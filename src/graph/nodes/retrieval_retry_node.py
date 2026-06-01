@@ -1,8 +1,13 @@
 from src.logger import logger
 
+from src.runtime.context import runtime_ctx
 
 def retrieval_retry_node(state):
-    print("retrieval_retry_node", state)
+
+    runtime_ctx.get().state().set_node(
+        "retrieval_retry_node"
+    )
+
     logger.info(f"进入retrieval_retry_node重试节点，state：{state}")
 
     retry_count = state.get("retry_count", 0)

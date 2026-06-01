@@ -33,8 +33,13 @@ from src.agents.exact_search_agent.routes import (
     route_exact_worker
 )
 
+from src.logger import logger
 
 def build_exact_search_agent():
+
+    logger.info(
+        "构建exact_search_agent中..."
+    )
 
     graph = StateGraph(DogState)
 
@@ -113,4 +118,8 @@ def build_exact_search_agent():
         }
     )
     app = graph.compile()
+
+    logger.info(
+        "✅ exact_search_agent 构建完成"
+    )
     return app

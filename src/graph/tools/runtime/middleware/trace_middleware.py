@@ -11,10 +11,18 @@ from src.runtime.events.event_types import (
     SpanEndEvent
 )
 
+from src.settings import settings
+
+from src.runtime.context import runtime_ctx
+
 
 class TraceMiddleware(BaseMiddleware):
 
     async def process(self,ctx,next_func):
+
+        # 通过配置来控制是否进行trace
+        if not settings.runtime.enable_trace:
+            return await next_func()
 
         # start_event = SpanStartEvent(
         #
@@ -24,10 +32,6 @@ class TraceMiddleware(BaseMiddleware):
         #
         #     parent_span=ctx.current_span if ctx.current_span else None,
         # )
-
-        start_event = SpanStartEvent(ctx)
-
-        await event_bus.emit(start_event)
 
         # span = trace_manager.create_span(
         #
@@ -39,13 +43,25 @@ class TraceMiddleware(BaseMiddleware):
         # )
 
         # 从 trace_manager 拿 span
-        span = trace_manager.span_map.get(
-            start_event.span_id
-        )
+        # span = trace_manager.span_map.get(
+        #     start_event.span_id
+        # )
 
-        previous_span = ctx.current_span
 
-        ctx.current_span = span
+        runtime_context = runtime_ctx.get()
+
+        previous_span = runtime_context.current_span
+
+
+        start_event = SpanStartEvent(ctx)
+
+        await event_bus.emit(start_event)
+
+        span = start_event.span
+
+        runtime_context.current_span = span
+
+        ctx.span_id = span.span_id
 
         try:
 
@@ -56,36 +72,27 @@ class TraceMiddleware(BaseMiddleware):
                 SpanEndEvent(
                     ctx=ctx,
 
-                    span_id=start_event.span_id,
+                    span_id=span.span_id,
 
                     status="success"
                 )
             )
 
-            # span.finish(
-            #     status="success"
-            # )
 
             return result
 
         except Exception as e:
-
-            # span.finish(
-            #
-            #     status="error",
-            #
-            #     error=str(e)
-            # )
             ctx.error = str(e)
 
             await event_bus.emit(
                 SpanEndEvent(
                     ctx=ctx,
-                    span_id=start_event.span_id,
+                    span_id=span.span_id,
                     status="error",
                 )
             )
 
             raise e
+
         finally:
-            ctx.current_span = previous_span
+            runtime_context.current_span = previous_span

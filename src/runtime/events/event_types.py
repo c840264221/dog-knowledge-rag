@@ -30,6 +30,8 @@ class ToolSuccessEvent(BaseEvent):
 
         self.tool_name = ctx.tool.metadata.name
 
+        self.span_id = ctx.span_id
+
 
 class ToolErrorEvent(BaseEvent):
 
@@ -45,6 +47,8 @@ class ToolErrorEvent(BaseEvent):
 
         self.error = ctx.error
 
+        self.span_id = ctx.span_id
+
 class SpanStartEvent(BaseEvent):
 
     def __init__(self,ctx):
@@ -53,13 +57,14 @@ class SpanStartEvent(BaseEvent):
 
         self.ctx = ctx
 
-        self.span_id = str(uuid.uuid4())
-
         self.trace_id = ctx.trace_id
 
         self.span_name = ctx.tool.metadata.name
 
         self.parent_span = ctx.current_span
+
+        # Listener回填
+        self.span = None
 
 
 class SpanEndEvent(BaseEvent):

@@ -1,8 +1,14 @@
 from src.retrieval.retriever import rerank_docs
 from src.logger import logger
 
+
+from src.runtime.context import runtime_ctx
+
 def rerank_node(state):
-    print("rerank_node", state)
+
+    runtime_ctx.get().state().set_node(
+        "rerank_node"
+    )
 
     logger.info(f"进入rerank_node节点 state为{state}"
         f"state: "

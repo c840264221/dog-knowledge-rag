@@ -12,11 +12,14 @@ from src.graph.tools.runtime.middleware.base_middleware import (
     BaseMiddleware
 )
 
+from src.settings import settings
+
+
 class RetryMiddleware(BaseMiddleware):
 
     async def process(self,ctx,next_func):
 
-        retries = ctx.tool.metadata.retries
+        retries = ctx.tool.metadata.retries or settings.runtime.max_retries
 
         last_error = None
 
@@ -42,7 +45,9 @@ class RetryMiddleware(BaseMiddleware):
                     f"{i + 1}/{retries}"
                 )
 
-                await asyncio.sleep(1)
+                await asyncio.sleep(
+                    settings.runtime.retry_delay
+                )
 
         raise last_error
 

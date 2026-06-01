@@ -1,22 +1,34 @@
 import os
-from dotenv import load_dotenv
+# from dotenv import load_dotenv
+
+from src.settings import settings
+
+# load_dotenv()
 
 
-load_dotenv()
 
+BASE_DIR = settings.path.BASE_DIR
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CHROMA_DB_DIR = settings.path.CHROMA_DB_DIR
+
+CACHE_DIR = settings.path.CACHE_DIR
+
+EMBEDDING_MODEL = settings.embedding.model_name
+
+RERANKER_MODEL = settings.reranker.model_name
+
+# BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 os.makedirs(os.path.join(BASE_DIR,"data/checkpoints_db"), exist_ok=True)
 
 DOG_MD_DATA_DIR = os.path.join(BASE_DIR,os.getenv("DOG_MD_DATA_DIR", "data/dog_markdown"))
 LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "qwen:1.8b")
-CHROMA_DB_DIR = os.path.join(BASE_DIR,os.getenv("CHROMA_DB_DIR", "chroma_db"))
+# CHROMA_DB_DIR = os.path.join(BASE_DIR,os.getenv("CHROMA_DB_DIR", "chroma_db"))
 HF_TOKEN = os.getenv("HF_TOKEN", "")
-EMBEDDING_MODEL = "BAAI/bge-small-zh"
-RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+# EMBEDDING_MODEL = "BAAI/bge-small-zh"
+# RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
-CACHE_DIR = os.path.join(BASE_DIR,"models_cache")
+# CACHE_DIR = os.path.join(BASE_DIR,"models_cache")
 
 DOG_NAME_JSON_PATH = os.path.join(BASE_DIR, "data", "dog_names.json")
 DOG_NAME_ALIAS_JSON_PATH = os.path.join(BASE_DIR, "data", "alias_dog_name.json")

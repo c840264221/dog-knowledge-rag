@@ -2,20 +2,26 @@ from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.runnables import  RunnableLambda
 from src.parser.schema import QueryParseResult
 from src.parser.prompt import QUERY_PARSE_PROMPT
-from src.models.llm import get_instance_llm, safe_llm_ainvoke, get_chinese_llm
+# from src.models.llm import get_instance_llm, safe_llm_ainvoke, get_chinese_llm
 from src.parser.schema import Intent
 
-# llm = get_instance_llm()
-llm = get_chinese_llm()
+
 parser = PydanticOutputParser(pydantic_object=QueryParseResult)
 
 
 async def parse_query_with_llm(query: str):
 
+    def get_llm_provider():
+        from src.runtime.container.init import container
+        return container.get("llm")
+
+    llm_provider = get_llm_provider()
+
+    chinese_llm = llm_provider.chinese_llm
 
     async def create_async_safe_llm_ainvoke(x):
-        return await safe_llm_ainvoke(
-            llm=llm,
+        return await llm_provider.safe_ainvoke(
+            llm=chinese_llm,
             prompt=x,
             fallback_response="调用LLM失败"
         )

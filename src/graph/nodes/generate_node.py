@@ -2,7 +2,7 @@
 from gradio.themes.builder_app import history
 from langchain_core.messages import AIMessage
 
-from src.models.llm import get_instance_llm, safe_llm_ainvoke
+# from src.models.llm import get_instance_llm, safe_llm_ainvoke
 import json
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
@@ -13,10 +13,13 @@ from src.logger import logger
 # 导入记忆模块  用历史记忆注入prompt
 from src.memory.memory_retrieve import retrieve_user_memory
 
+from src.runtime.context import runtime_ctx
 
-llm = get_instance_llm()
+from src.runtime.scopes.retrieval_scope import RetrievalScope
+
 
 def build_context(docs):
+
     context = []
 
     for d in docs:
@@ -35,6 +38,24 @@ def build_context(docs):
 
 async def generate_node(state):
 
+    runtime_ctx.get().state().set_node(
+        "generate_node"
+    )
+
+    # 试运行  使用runtime_ctx来获取作用域中的数据
+    # docs = runtime_ctx.get().retrieval.get_docs()
+    retrieval_scope = runtime_ctx.get().service(RetrievalScope)
+    docs = retrieval_scope.get_docs()
+    logger.debug(f"获取runtime_ctx中作用域retrieval内的数据docs,数量为：{len(docs)}")
+
+    def get_llm_provider():
+        from src.runtime.container.init import container
+        return container.get("llm")
+
+    llm_provider = get_llm_provider()
+
+    main_llm = llm_provider.main_llm
+
     logger.info(f"进入generate_node节点，state为："
         f"state: "
         f"question:{state['question']}, "
@@ -52,7 +73,13 @@ async def generate_node(state):
 
     context = build_context(state["docs"])
 
-    simplified_logger_context = [{**item, "text": len(item["text"])} for item in state["docs"]]
+    simplified_logger_context = [
+        {
+            "text": len(doc.page_content),
+            "metadata": doc.metadata
+        }
+        for doc in state["docs"]
+    ]
     logger.debug(f"context数量: {simplified_logger_context}")
 
     prompt = ChatPromptTemplate.from_template("""
@@ -106,8 +133,8 @@ intent: {intent}
     # )
 
     async def create_async_safe_llm_ainvoke(x):
-        return await safe_llm_ainvoke(
-            llm=llm,
+        return await llm_provider.safe_ainvoke(
+            llm=main_llm,
             prompt=x,
             fallback_response="调用LLM失败"
         )
@@ -136,5 +163,7 @@ intent: {intent}
     logger.debug(f"messages {messages}")
     messages.append(AIMessage(content=answer))
     logger.info(f"generate_node节点完成，结果answer为：{answer}")
+
+    logger.debug(f"Runtime State:{runtime_ctx.get().state().get_state()}")
 
     return {"answer": answer}

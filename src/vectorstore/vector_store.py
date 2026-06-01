@@ -1,7 +1,8 @@
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
-from src.embedding.embedder import get_embedding
-from src.config import CHROMA_DB_DIR
+# from src.embedding.embedder import get_embedding
+# from src.config import CHROMA_DB_DIR
+from src.settings import settings
 import shutil
 import os
 import json
@@ -197,13 +198,9 @@ def build_documents(chunks, dog_map):
 
     return new_docs
 
-db = load_vector_store(get_embedding(), CHROMA_DB_DIR)
+# db = load_vector_store(
+#     get_embedding(),
+#     str(settings.path.CHROMA_DB_DIR)
+# )
 
-if __name__ == "__main__":
-    from src.config import CHROMA_DB_DIR
-    from src.embedding.embedder import get_embedding
-    embedding = get_embedding()
-    db = load_vector_store(embedding, CHROMA_DB_DIR)
-    print(len(embedding.embed_query("test")))
-    print("文档数量:", db._collection.count())
 
