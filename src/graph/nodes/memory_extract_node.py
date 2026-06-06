@@ -6,9 +6,6 @@ from src.memory.sqlite_memory_store import (
     get_memory_store
 )
 
-# from src.models.llm import get_chinese_llm
-
-
 
 memory_store = get_memory_store()
 # llm = get_chinese_llm()
@@ -42,5 +39,7 @@ def memory_extract_node(state):
             content=result["content"],
             confidence=result["confidence"]
         )
+
+    container.get("checkpoint").manager.save_checkpoint()
 
     return {}

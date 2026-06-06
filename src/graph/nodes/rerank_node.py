@@ -22,4 +22,9 @@ def rerank_node(state):
                 )
     docs = rerank_docs(state["question"], state["docs"], state["intent"], top_k=3)
     logger.debug(f"rerank结束，结果docs的数量为：{len(docs)}")
+
+    from src.runtime.container.init import container
+
+    container.get("checkpoint").manager.save_checkpoint()
+
     return {"docs": docs}

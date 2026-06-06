@@ -42,15 +42,27 @@ async def generate_node(state):
         "generate_node"
     )
 
+    # 记录时间线
+    runtime_ctx.get().timeline().add_event(
+
+        event_type="node",
+
+        name="generate_node"
+    )
+
+
     # 试运行  使用runtime_ctx来获取作用域中的数据
     # docs = runtime_ctx.get().retrieval.get_docs()
     retrieval_scope = runtime_ctx.get().service(RetrievalScope)
     docs = retrieval_scope.get_docs()
     logger.debug(f"获取runtime_ctx中作用域retrieval内的数据docs,数量为：{len(docs)}")
 
+
+    from src.runtime.container.init import container
+
     def get_llm_provider():
-        from src.runtime.container.init import container
         return container.get("llm")
+
 
     llm_provider = get_llm_provider()
 
@@ -165,5 +177,7 @@ intent: {intent}
     logger.info(f"generate_node节点完成，结果answer为：{answer}")
 
     logger.debug(f"Runtime State:{runtime_ctx.get().state().get_state()}")
+
+    container.get("checkpoint").manager.save_checkpoint()
 
     return {"answer": answer}

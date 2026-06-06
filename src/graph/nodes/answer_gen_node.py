@@ -10,6 +10,14 @@ async def answer_gen_node(state: DogState) -> dict:
         "answer_gen_node"
     )
 
+    # 记录时间线
+    runtime_ctx.get().timeline().add_event(
+
+        event_type="node",
+
+        name="answer_gen_node"
+    )
+
     def get_llm_provider():
         from src.runtime.container.init import container
         return container.get("llm")
@@ -45,4 +53,9 @@ async def answer_gen_node(state: DogState) -> dict:
         prompt=base_prompt,
         fallback_response="模型暂时不可用"
     )
+
+    from src.runtime.container.init import container
+
+    container.get("checkpoint").manager.save_checkpoint()
+
     return {"answer": response.content}

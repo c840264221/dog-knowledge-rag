@@ -21,6 +21,14 @@ async def execute_tool_node(state: DogState) -> dict:
         "execute_tool_node"
     )
 
+    # 记录时间线
+    runtime_ctx.get().timeline().add_event(
+
+        event_type="node",
+
+        name="execute_tool_node"
+    )
+
     logger.info(f"进入执行工具节点......")
     tool_calls = state.get("tool_calls", [])
     if not tool_calls:
@@ -36,6 +44,18 @@ async def execute_tool_node(state: DogState) -> dict:
     # 运行时上下文中的runtime state 记录调用的工具名称
     runtime_ctx.get().state().set_tool(
         name
+    )
+
+    # 记录时间线——工具
+    runtime_ctx.get().timeline().add_event(
+
+        event_type="tool",
+
+        name=name,
+
+        metadata={
+            "args": args
+        }
     )
 
     result = await executor.execute(name, args)
@@ -61,6 +81,10 @@ async def execute_tool_node(state: DogState) -> dict:
     #     )
     new_results = state.get("tool_results", []) + [result.model_dump()]
     remaining_calls = tool_calls[1:]  # 剩余未执行的工具
+
+    from src.runtime.container.init import container
+
+    container.get("checkpoint").manager.save_checkpoint()
 
 
     # 如果还有剩余，继续需要工具；否则结束

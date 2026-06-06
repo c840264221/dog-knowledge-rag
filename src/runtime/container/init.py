@@ -22,6 +22,10 @@ from src.runtime.services.graph_runtime_service import (
     GraphRuntimeService
 )
 
+from src.runtime.container.providers.runtime_persistence_provider import RuntimePersistenceProvider
+
+from src.runtime.container.providers.checkpoint_provider import CheckpointProvider
+
 # 创建容器
 container = RuntimeContainer()
 
@@ -66,4 +70,24 @@ container.register(
     "graph_runtime",
 
     GraphRuntimeService()
+)
+
+# container.register(
+#
+#     "runtime_persistence",
+#
+#     RuntimePersistenceProvider()
+# )
+
+
+persistence_provider = RuntimePersistenceProvider()
+checkpoint_provider = (
+    CheckpointProvider(
+        persistence_provider.persistence
+    )
+)
+
+container.register(
+    "checkpoint",
+    checkpoint_provider
 )

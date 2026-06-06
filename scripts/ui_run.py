@@ -15,6 +15,8 @@ from src.runtime.container.init import (
     container
 )
 
+from src.runtime.timeline.timeline_reporter import TimelineReporter
+
 
 # 用于存储每个会话的配置信息和中断状态（使用 gr.State 更安全）
 # 但 State 需要绑定到界面，我们直接在函数中使用 gr.State 对象
@@ -92,6 +94,7 @@ async def respond_and_process(
 
     user_id = state.get("user_id") if state else None
 
+
     # if user_id:
     #
     #     trace_ctx.set_user_id(user_id)
@@ -129,6 +132,7 @@ async def respond_and_process(
     runtime_ctx.get().state().set_agent(
         "graph agent"
     )
+
 
     # trace_ctx.set_trace_id(trace_id)
     #
@@ -228,8 +232,38 @@ async def respond_and_process(
         metrics_scope = runtime_ctx.get().service(MetricsScope).get_metrics()
         logger.info(f'运行结束，metrics为：{metrics_scope}')
 
+        #==============时间线打印==============
+        TimelineReporter.report()
+
+
+        # ============可观测性完整日志==============
+
+        from src.runtime.observability.report_builder import (
+            ReportBuilder
+        )
+
+        from src.runtime.observability.report_printer import (
+            ReportPrinter
+        )
+
+        report = ReportBuilder.build(
+            runtime_ctx.get()
+        )
+
+        ReportPrinter.print(
+            report
+        )
+
         # 销毁所有作用域scope
         await runtime_ctx.destroy()
+
+        # 销毁清空checkpoint  否则回无限增长
+
+        checkpoint = container.get(
+            "checkpoint").manager
+        checkpoint.clear_checkpoint(
+            trace_id
+        )
 
         return (
 
@@ -286,25 +320,34 @@ async def resume_agent(
     # RuntimeContext
     # =========================
 
+    # 恢复runtime_ctx
     from src.runtime.context import (
         runtime_ctx,
-        RuntimeContext
     )
+    #
+    # ctx = RuntimeContext(
+    #
+    #     trace_id=trace_id,
+    #
+    #     session_id=session_id,
+    #
+    #     user_id=state.get(
+    #         "user_id",
+    #         "unknown"
+    #     ),
+    #
+    #     component="resume_handler"
+    # )
 
-    ctx = RuntimeContext(
 
-        trace_id=trace_id,
+    # 用persistence来回复runtime_ctx
+    checkpoint = container.get(
+        "checkpoint"
+    ).manager
 
-        session_id=session_id,
-
-        user_id=state.get(
-            "user_id",
-            "unknown"
-        ),
-
-        component="resume_handler"
+    ctx = checkpoint.restore_checkpoint(
+        trace_id
     )
-
     # runtime_ctx.set(ctx)
 
     await runtime_ctx.create(ctx)
@@ -340,6 +383,7 @@ async def resume_agent(
     # =========================
 
     if result.startswith("__INTERRUPT__:"):
+        logger.warning("再次中断了!...")
 
         prompt = result[len("__INTERRUPT__:"):].strip()
 
@@ -350,6 +394,23 @@ async def resume_agent(
             "content": f"⚠️ 再次需要确认：{prompt}"
         })
 
+        # 用persistence来回复runtime_ctx
+        checkpoint = container.get(
+            "checkpoint"
+        ).manager
+
+        ctx = checkpoint.restore_checkpoint(
+            trace_id
+        )
+        # runtime_ctx.set(ctx)
+
+        await runtime_ctx.create(ctx)
+
+        # todo: 这里手动写死恢复current_agent 因为我现在的项目只有走general_agent时才会出现interrupt的情况
+        # 所以直接写死没问题  后续如果有新的分支走interrupt的话就将current_agent存到dogstate里用于恢复
+        runtime_ctx.get().state().set_agent(
+            "general_agent"
+        )
 
         return (
             history,
@@ -369,9 +430,34 @@ async def resume_agent(
         "content": result
     })
 
+    # ==============时间线打印==============
+    TimelineReporter.report()
+
+    # ==============可观测性完整日志==============
+    from src.runtime.observability.report_builder import (
+        ReportBuilder
+    )
+
+    from src.runtime.observability.report_printer import (
+        ReportPrinter
+    )
+
+    report = ReportBuilder.build(
+        runtime_ctx.get()
+    )
+
+    ReportPrinter.print(
+        report
+    )
+
     from src.runtime.scopes.metrics_scope import MetricsScope
     metrics_scope = runtime_ctx.get().service(MetricsScope).get_metrics()
     logger.info(f'运行结束，metrics为：{metrics_scope}')
+
+    checkpoint = container.get("checkpoint").manager
+    checkpoint.clear_checkpoint(trace_id)
+
+    await runtime_ctx.destroy()
     
     return (
         history,

@@ -31,4 +31,9 @@ def ask_user_node(state: DogState) -> dict:
     user_input = interrupt(question)
     logger.info(f"ask_user_node恢复运行，user_input为：{user_input}")
     # 将用户输入存入状态，供后续节点判断
+
+    from src.runtime.container.init import container
+
+    container.get("checkpoint").manager.save_checkpoint()
+
     return {"user_feedback": user_input, "has_asked_user": True}

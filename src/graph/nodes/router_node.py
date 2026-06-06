@@ -151,6 +151,18 @@ async def semantic_router_node(state):
         f"路由到Agent: {next_agent}"
     )
 
+    # 记录时间线——agent
+    runtime_ctx.get().timeline().add_event(
+
+        event_type="agent",
+
+        name=next_agent
+    )
+
+    from src.runtime.container.init import container
+
+    container.get("checkpoint").manager.save_checkpoint()
+
     return {
 
         "intent": parsed["intent"],

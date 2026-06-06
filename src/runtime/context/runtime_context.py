@@ -24,8 +24,13 @@ from src.runtime.scopes.metrics_scope import (
 
 from src.runtime.hooks.hook_manager import RuntimeHookManager
 
-from src.runtime.state.state_scope import (
+from src.runtime.scopes.state_scope import (
     StateScope
+)
+
+
+from src.runtime.scopes.timeline_scope import (
+    TimelineScope
 )
 
 
@@ -50,10 +55,6 @@ class RuntimeContext:
 
     current_span: Any = None
 
-    current_agent: str | None = None
-
-    retry_count: int = 0
-
     error: str | None = None
 
     # =========================
@@ -64,21 +65,6 @@ class RuntimeContext:
         default_factory=dict
     )
 
-    # =========================
-    # Runtime Data
-    # =========================
-
-    runtime_data: dict = field(
-        default_factory=dict
-    )
-
-    # =========================
-    # Services
-    # =========================
-
-    services: dict = field(
-        default_factory=dict
-    )
 
     # 请求作用域
     request_scope: RequestScope = field(
@@ -96,34 +82,46 @@ class RuntimeContext:
 
     def __post_init__(self):
 
-        retrieval_scope = RetrievalScope(
-            self.request_scope
-        )
 
+        # 注册记忆相关作用域
         memory_scope = MemoryScope(
             self.request_scope
         )
 
-        metrics_scope = MetricsScope(
-            self.request_scope
-        )
-
-        state_scope = StateScope()
-
         self.registry.register(
             memory_scope
+        )
+
+        # 注册检索生成相关作用域
+        retrieval_scope = RetrievalScope(
+            self.request_scope
         )
 
         self.registry.register(
             retrieval_scope
         )
 
+        # 注册统计数据相关作用域
+        metrics_scope = MetricsScope(
+            self.request_scope
+        )
+
         self.registry.register(
             metrics_scope
         )
 
+        # 注册state相关作用域
+        state_scope = StateScope()
+
         self.registry.register(
             state_scope
+        )
+
+        # 注册时间线相关作用域
+        timeline_scope = TimelineScope()
+
+        self.registry.register(
+            timeline_scope
         )
 
     def service(self,service_type):
@@ -137,12 +135,18 @@ class RuntimeContext:
 
     def state(self):
 
-        from src.runtime.state.state_scope import (
+        from src.runtime.scopes.state_scope import (
             StateScope
         )
 
         return self.service(
             StateScope
+        )
+
+    def timeline(self):
+
+        return self.service(
+            TimelineScope
         )
 
     async def startup(self):

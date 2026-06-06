@@ -11,6 +11,14 @@ def filter_node(state):
         "filter_node"
     )
 
+    # 记录时间线
+    runtime_ctx.get().timeline().add_event(
+
+        event_type="node",
+
+        name="filter_node"
+    )
+
     logger.info(
         f"进入filter_node节点  "
         f"state: "
@@ -35,6 +43,12 @@ def filter_node(state):
         filter_dict["name"] = dog_name
 
     logger.debug(f"filter_node节点执行完毕 filter_dict: {filter_dict}")
+
+    from src.runtime.container.init import container
+
+    container.get("checkpoint").manager.save_checkpoint()
+
+
     return {
         "filters": filter_dict
     }

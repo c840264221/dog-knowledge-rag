@@ -21,6 +21,14 @@ async def general_qa_supervisor_node(state):
         "general_qa_supervisor_node"
     )
 
+    # 记录时间线
+    runtime_ctx.get().timeline().add_event(
+
+        event_type="node",
+
+        name="general_qa_supervisor_node"
+    )
+
     def get_llm_provider():
         from src.runtime.container.init import container
         return container.get("llm")
@@ -82,6 +90,10 @@ async def general_qa_supervisor_node(state):
     logger.info(
         f"Supervisor决策: {decision}"
     )
+
+    from src.runtime.container.init import container
+
+    container.get("checkpoint").manager.save_checkpoint()
 
     return {
 

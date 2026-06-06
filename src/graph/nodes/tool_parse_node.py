@@ -31,6 +31,14 @@ async def tool_parse_node(state: DogState) -> dict:
         "tool_parse_node"
     )
 
+    # 记录时间线
+    runtime_ctx.get().timeline().add_event(
+
+        event_type="node",
+
+        name="tool_parse_node"
+    )
+
     def get_llm_provider():
         from src.runtime.container.init import container
         return container.get("llm")
@@ -94,6 +102,8 @@ TOOL: get_weather|北京|2025-03-15
     6. args必须是JSON对象
 
     7. tool_calls必须是数组
+    
+    8. 如果用户问到天气则调用的工具中必须含有工具weather
     -----------------------------------
 
     用户问题：
@@ -164,6 +174,12 @@ TOOL: get_weather|北京|2025-03-15
     #     }
     # else:
     #     return {"need_tool": False}
+
+    from src.runtime.container.init import container
+
+    container.get("checkpoint").manager.save_checkpoint()
+
+
     return {
 
         "need_tool":

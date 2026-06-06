@@ -65,7 +65,17 @@ class MetricsScope(BaseScope):
             metrics
         )
 
+    def restore(self, data):
+        self.scope.set(
+            self.KEY,
+            data
+        )
+
     async def startup(self):
+        metrics = self.get_metrics()
+
+        if metrics:
+            return
 
         self.init_metrics()
 

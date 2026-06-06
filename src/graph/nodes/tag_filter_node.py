@@ -25,4 +25,9 @@ def tag_filter_node(state):
 
     filtered = filter_by_tags(docs, tags)
     logger.debug(f"tag_filter_node结束  过滤后的结果为：{filtered}")
+
+    from src.runtime.container.init import container
+
+    container.get("checkpoint").manager.save_checkpoint()
+
     return {"docs": filtered}

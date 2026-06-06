@@ -8,6 +8,15 @@ def retrieval_retry_node(state):
         "retrieval_retry_node"
     )
 
+
+    # 记录时间线
+    runtime_ctx.get().timeline().add_event(
+
+        event_type="node",
+
+        name="retrieval_retry_node"
+    )
+
     logger.info(f"进入retrieval_retry_node重试节点，state：{state}")
 
     retry_count = state.get("retry_count", 0)
@@ -31,6 +40,11 @@ def retrieval_retry_node(state):
     elif retry_count == 2:
         logger.info(f"第三次重试")
         filters.pop("barking", None)
+
+    from src.runtime.container.init import container
+
+    container.get("checkpoint").manager.save_checkpoint()
+
 
     return {
         "retry_count": retry_count + 1,

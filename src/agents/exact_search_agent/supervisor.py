@@ -20,8 +20,18 @@ async def exact_search_supervisor_node(state):
         "exact_search_supervisor_node"
     )
 
+    # 记录时间线
+    runtime_ctx.get().timeline().add_event(
+
+        event_type="node",
+
+        name="exact_search_supervisor_node"
+    )
+
+
+    from src.runtime.container.init import container
+
     def get_llm_provider():
-        from src.runtime.container.init import container
         return container.get("llm")
 
     llm_provider = get_llm_provider()
@@ -77,6 +87,8 @@ async def exact_search_supervisor_node(state):
     logger.info(
         f"Supervisor决策: {decision}"
     )
+
+    container.get("checkpoint").manager.save_checkpoint()
 
     return {
 

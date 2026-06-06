@@ -18,6 +18,16 @@ async def retrieve_node(state):
         "retrieve_node"
     )
 
+
+    # 记录时间线
+    runtime_ctx.get().timeline().add_event(
+
+        event_type="node",
+
+        name="retrieve_node"
+    )
+
+
     logger.info(f"进入retrieve_node节点 state：{state}")
     question = state["question"]
 
@@ -39,5 +49,9 @@ async def retrieve_node(state):
 
     # docs = retriever.invoke(question)
     logger.info(f"retrieve_node节点执行完毕 返回数据docs  docs长度为:{len(docs)}")
+
+    from src.runtime.container.init import container
+
+    container.get("checkpoint").manager.save_checkpoint()
 
     return {"docs": docs}
