@@ -70,3 +70,5 @@ class DogState(TypedDict, total=False):
     user_id:str
 
     trace_id: str
+
+    memory_context: str

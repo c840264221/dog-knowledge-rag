@@ -17,6 +17,8 @@ class PathSettings(BaseAppSettings):
 
     CHROMA_DB_DIR: Path = BASE_DIR / "chroma_db"
 
+    MEMORY_CHROMA_DB_DIR: Path = BASE_DIR / "chroma_memory_db"
+
     CHECKPOINT_DIR: Path = DATA_DIR / "checkpoints_db"
 
     MEMORY_DIR: Path = DATA_DIR / "memory_db"

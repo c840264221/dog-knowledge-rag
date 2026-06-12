@@ -9,6 +9,7 @@ from src.settings.trace import TraceSettings
 from src.settings.tool import ToolSettings
 from src.settings.embedding import EmbeddingSettings
 from src.settings.reranker import RerankerSettings
+from src.settings.memory import MemorySettings
 
 
 class Settings:
@@ -33,6 +34,8 @@ class Settings:
         self.embedding = EmbeddingSettings()
 
         self.reranker = RerankerSettings()
+
+        self.memory = MemorySettings()
 
 
 settings = Settings()

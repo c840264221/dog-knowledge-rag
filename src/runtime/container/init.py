@@ -26,6 +26,10 @@ from src.runtime.container.providers.runtime_persistence_provider import Runtime
 
 from src.runtime.container.providers.checkpoint_provider import CheckpointProvider
 
+from src.runtime.container.providers.memory_provider import (
+    MemoryProvider
+)
+
 # 创建容器
 container = RuntimeContainer()
 
@@ -65,20 +69,18 @@ container.register(
     )
 )
 
+
+# 注册memory provider
 container.register(
 
-    "graph_runtime",
+    "memory",
 
-    GraphRuntimeService()
+    MemoryProvider(
+        vectorstore_provider=(
+            container.get("vectorstore")
+        )
+    )
 )
-
-# container.register(
-#
-#     "runtime_persistence",
-#
-#     RuntimePersistenceProvider()
-# )
-
 
 persistence_provider = RuntimePersistenceProvider()
 checkpoint_provider = (
@@ -91,3 +93,28 @@ container.register(
     "checkpoint",
     checkpoint_provider
 )
+
+container.register(
+
+    "graph_runtime",
+
+    GraphRuntimeService(
+        llm_provider=(
+            container.get("llm")
+        ),
+        memory_provider=(
+            container.get("memory")
+        ),
+        checkpoint_provider=(
+            container.get("checkpoint")
+        )
+    )
+)
+
+# container.register(
+#
+#     "runtime_persistence",
+#
+#     RuntimePersistenceProvider()
+# )
+

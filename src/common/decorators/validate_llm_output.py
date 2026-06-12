@@ -31,7 +31,7 @@ def validate_query_parse_result(parsed):
     return parsed
 
 from functools import wraps
-from loguru import logger
+from src.logger import logger
 
 
 def validate_llm_output(validator,fallback_factory):
@@ -65,7 +65,7 @@ from src.parser.schema import QueryParseResult, Intent
 
 def default_parse_result():
     return QueryParseResult(
-        intent=Intent.ASK_INFO.value,
+        intent=Intent.GENERAL.value,
         filters={},
         tags=[],
         features=[],

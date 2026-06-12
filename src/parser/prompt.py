@@ -11,13 +11,13 @@ QUERY_PARSE_PROMPT = PromptTemplate(
 【重要规则】
 如果用户没有输入任何有效问题，或者问题为空：
 
-必须返回：
+必须返回带以下字段格式的数据：
 {{
   "intent": "",
   "filters": {{}},
   "tags": [],
   "features": [],
-  "dog_name": None
+  "dog_name": ""
 }}
 
 禁止猜测用户意图。
@@ -26,7 +26,8 @@ QUERY_PARSE_PROMPT = PromptTemplate(
 【严格要求】
 
 1️⃣ intent：
-必须是以下之一，并且当"filters"和"dog_name"均为空时"intent"一定返回"general",其余情况经过分析后返回：
+当"filters"和"dog_name"都没有具体内容时，"intent"一定返回"general"否则视为失败；
+其余情况经过分析后返回以下其中之一：
 - "recommend"
 - "ask_info"
 - "general"

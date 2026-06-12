@@ -17,7 +17,8 @@ async def parse_query_with_llm(query: str):
 
     llm_provider = get_llm_provider()
 
-    chinese_llm = llm_provider.chinese_llm
+    # chinese_llm = llm_provider.chinese_llm
+    chinese_llm = llm_provider.main_llm
 
     async def create_async_safe_llm_ainvoke(x):
         return await llm_provider.safe_ainvoke(

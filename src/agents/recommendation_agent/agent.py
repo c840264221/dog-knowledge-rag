@@ -28,7 +28,7 @@ from src.graph.nodes.rerank_node import (
 )
 
 from src.graph.nodes.generate_node import (
-    generate_node
+    build_generate_node
 )
 
 from src.graph.nodes.ask_user_node import (
@@ -55,11 +55,57 @@ from src.logger import (
     logger
 )
 
-def build_recommendation_agent():
+def build_recommendation_agent(
+        llm_provider=None,
+        memory_provider=None,
+        checkpoint_provider=None
+):
+    """
+    构建 recommendation_agent。
 
-    logger.info("构建 recommendation agent中...")
+    功能：
+    - 构建推荐 Agent 的 LangGraph 图
+    - 注册 filter、retrieve、evaluate、rerank、generate 等节点
+    - 将 LLMProvider、MemoryProvider、CheckpointProvider 注入 generate_node
+    - 避免 generate_node 内部直接 import container
 
-    builder = StateGraph(RecommendationState)
+    技术名词：
+    - Recommendation：推荐，指根据用户需求筛选合适狗狗
+    - Provider：提供者，负责统一管理和提供服务对象
+    - Node：节点，LangGraph 中的一个执行步骤
+    - Rerank：重排序，对召回结果再次精排
+
+    参数：
+    - llm_provider:
+      LLMProvider 实例。
+      中文释义：用于提供主模型和安全调用能力。
+
+    - memory_provider:
+      MemoryProvider 实例。
+      中文释义：用于召回用户长期记忆。
+
+    - checkpoint_provider:
+      CheckpointProvider 实例。
+      中文释义：用于保存运行时检查点。
+
+    返回值：
+    - compiled graph
+      编译后的 recommendation_agent 图对象。
+    """
+
+    logger.info(
+        "构建 recommendation_agent 中..."
+    )
+
+    builder = StateGraph(
+        RecommendationState
+    )
+
+    generate_node = build_generate_node(
+        llm_provider=llm_provider,
+        memory_provider=memory_provider,
+        checkpoint_provider=checkpoint_provider
+    )
 
     builder.add_node(
         "filter",
@@ -126,19 +172,15 @@ def build_recommendation_agent():
     )
 
     builder.add_conditional_edges(
-
         "evaluate",
-
         route_after_evaluate,
-
         {
             "good": "rerank",
             "retry": "retry",
             "give_up": "generate",
-            "ask_user": "ask_user"  # 新增分支
+            "ask_user": "ask_user"
         }
     )
-
 
     builder.add_edge(
         "retry",
@@ -171,7 +213,7 @@ def build_recommendation_agent():
     )
 
     logger.info(
-        "✅ recommendation agent 构建完成"
+        "✅ recommendation_agent 构建完成"
     )
 
     return builder.compile()

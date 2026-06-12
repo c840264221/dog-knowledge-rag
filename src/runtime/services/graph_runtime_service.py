@@ -39,14 +39,52 @@ from langgraph.graph import END
 
 class GraphRuntimeService:
 
-    def __init__(self):
+    def __init__(
+            self,
+            llm_provider=None,
+            memory_provider=None,
+            checkpoint_provider=None,
+    ):
+        """
+        初始化 GraphRuntimeService。
+
+        功能：
+        - 管理主 Graph 的构建与生命周期
+        - 管理 LangGraph checkpointer
+        - 接收 LLMProvider，用于注入生成节点
+        - 接收 MemoryProvider，用于注入记忆召回能力
+        - 接收 CheckpointProvider，用于注入 checkpoint 保存能力
+        - 避免 Graph Node 内部直接 import container
+
+        参数：
+        - llm_provider:
+          LLMProvider 实例。
+          中文释义：统一管理主模型、备用模型、安全调用等 LLM 能力。
+
+        - memory_provider:
+          MemoryProvider 实例。
+          中文释义：统一管理用户长期记忆的保存与召回能力。
+
+        - checkpoint_provider:
+          CheckpointProvider 实例。
+          中文释义：统一管理运行时检查点保存能力。
+
+        返回值：
+        - None
+          初始化函数不返回业务数据。
+        """
+
+        self.llm_provider = llm_provider
+
+        self.memory_provider = memory_provider
+
+        self.checkpoint_provider = checkpoint_provider
 
         self._graph = None
 
         self._checkpointer = None
 
         self._checkpointer_cm = None
-
 
     # startup
     async def startup(self):
@@ -125,15 +163,44 @@ class GraphRuntimeService:
         )
 
         recommendation_agent = (
-            build_recommendation_agent()
+            build_recommendation_agent(
+                llm_provider=(
+                    self.llm_provider
+                ),
+                memory_provider=(
+                    self.memory_provider
+                ),
+                checkpoint_provider=(
+                    self.checkpoint_provider
+                )
+            )
         )
 
         exact_agent = (
-            build_exact_search_agent()
+            build_exact_search_agent(
+                llm_provider=(
+                    self.llm_provider
+                ),
+                memory_provider=(
+                    self.memory_provider
+                ),
+                checkpoint_provider=(
+                    self.checkpoint_provider
+                )
+            )
         )
-
         general_agent = (
-            build_general_qa_agent()
+            build_general_qa_agent(
+                llm_provider=(
+                    self.llm_provider
+                ),
+                memory_provider=(
+                    self.memory_provider
+                ),
+                checkpoint_provider=(
+                    self.checkpoint_provider
+                )
+            )
         )
 
         graph = StateGraph(DogState)

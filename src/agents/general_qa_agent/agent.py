@@ -33,11 +33,39 @@ from src.agents.general_qa_agent.routes import (
     route_general_qa_worker
 )
 
+from src.graph.nodes.memory_retrieve_node import (
+    build_memory_retrieve_node
+)
+
 
 from src.logger import logger
 
 
-def build_general_qa_agent():
+def build_general_qa_agent(
+    llm_provider=None,
+    memory_provider=None,
+    checkpoint_provider = None
+):
+    """
+       构建 general_qa_agent。
+
+       功能：
+       - 构建通用问答 Agent 的 LangGraph 图
+       - 注册 tool_parse、ask_confirm、execute_tool、answer_gen、supervisor 等节点
+       - 如果传入 memory_provider，则额外注册 memory_retrieve 节点
+       - memory_retrieve 节点会在 supervisor 之前执行，用于召回用户长期记忆
+       - 不在 node 内部直接 import container，避免循环导入
+
+       参数：
+       - memory_provider:
+         MemoryProvider 实例。
+         如果传入，则启用 Memory 语义召回。
+         如果不传入，则保持旧流程，直接从 supervisor 开始。
+
+       返回值：
+       - compiled graph
+         编译后的 LangGraph 图对象。
+       """
 
     logger.info(
         "构建 general_qa_agent中..."
@@ -46,6 +74,19 @@ def build_general_qa_agent():
     graph = StateGraph(DogState)
 
     # ========= Workers =========
+
+    # ========= Workers =========
+
+    if memory_provider is not None and checkpoint_provider is not None:
+        graph.add_node(
+            "memory_retrieve",
+            build_memory_retrieve_node(
+                semantic_recall=(
+                    memory_provider.semantic_recall
+                ),
+                checkpoint_manager=checkpoint_provider.manager
+            )
+        )
 
     graph.add_node(
         "tool_parse",
@@ -76,9 +117,22 @@ def build_general_qa_agent():
 
     # ========= Entry =========
 
-    graph.set_entry_point(
-        "supervisor"
-    )
+    if memory_provider is not None and checkpoint_provider is not None:
+
+        graph.set_entry_point(
+            "memory_retrieve"
+        )
+
+        graph.add_edge(
+            "memory_retrieve",
+            "supervisor"
+        )
+
+    else:
+
+        graph.set_entry_point(
+            "supervisor"
+        )
 
     # ========= Workers返回Supervisor =========
     from src.agents.general_qa_agent.valid_workers import VALID_WORKERS
