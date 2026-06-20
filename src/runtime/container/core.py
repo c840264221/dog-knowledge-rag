@@ -2,6 +2,8 @@ from typing import Any
 
 from src.logger import logger
 
+import inspect
+
 
 class RuntimeContainer:
     """
@@ -41,10 +43,60 @@ class RuntimeContainer:
         # 生命周期状态
         self._started = False
 
+
+    async def _call_lifecycle_method(
+            self,
+            service_name: str,
+            service,
+            method_name: str,
+    ):
+        """
+        调用服务的生命周期方法。
+
+        功能：
+        - 根据 method_name 获取 service 上对应的生命周期方法
+        - 如果该方法不存在，则直接跳过
+        - 如果该方法是同步函数，则直接执行
+        - 如果该方法返回 awaitable（可等待对象），则使用 await 等待执行完成
+        - 统一兼容同步 Provider 和异步 Provider
+
+        参数：
+        - service_name：服务名称，字符串格式，用于日志输出
+        - service：服务实例，可以是 provider、runtime service 或其他容器管理对象
+        - method_name：生命周期方法名称，字符串格式，例如 startup 或 shutdown
+
+        返回值：
+        - None
+          只负责执行生命周期方法，不返回业务数据。
+
+        专业名词：
+        - lifecycle method（生命周期方法）：服务启动或关闭时自动执行的方法
+        - awaitable（可等待对象）：可以被 await 的对象，例如 coroutine、Task、Future
+        - coroutine（协程）：async 函数调用后返回的异步执行对象
+        """
+
+        lifecycle_method = getattr(
+            service,
+            method_name,
+            None,
+        )
+
+        if not callable(lifecycle_method):
+            return
+
+        logger.info(
+            f"{method_name} 服务: {service_name}"
+        )
+
+        result = lifecycle_method()
+
+        if inspect.isawaitable(result):
+            await result
+
+
     # =========================
     # 注册服务
     # =========================
-
     def register(self,name: str,service: Any):
         """
            注册服务到容器。
@@ -108,23 +160,29 @@ class RuntimeContainer:
 
     async def startup(self):
         """
-           启动容器中的所有服务。
+        启动容器中的所有服务。
 
-           功能：
-           - 遍历所有已注册服务
-           - 如果服务实现了 startup 方法，则自动调用
-           - 避免业务入口手动启动每个服务
+        功能：
+        - 遍历所有已注册服务
+        - 如果服务实现了 startup 方法，则自动调用
+        - 同时支持同步 startup 和异步 startup
+        - 避免业务入口手动启动每个服务
 
-           参数：
-           - 无
+        参数：
+        - 无
 
-           返回值：
-           - None
-             只执行启动流程。
-       """
+        返回值：
+        - None
+          只执行启动流程，不返回业务数据。
+
+        专业名词：
+        - container startup（容器启动）：统一初始化容器中注册的服务
+        - provider startup（提供者启动）：provider 初始化自身资源的过程
+        - sync startup（同步启动）：普通 def startup 方法
+        - async startup（异步启动）：async def startup 方法
+        """
 
         if self._started:
-
             logger.warning(
                 "Container 已启动"
             )
@@ -136,20 +194,11 @@ class RuntimeContainer:
         )
 
         for name, service in self._services.items():
-
-            startup = getattr(
-                service,
-                "startup",
-                None
+            await self._call_lifecycle_method(
+                service_name=name,
+                service=service,
+                method_name="startup",
             )
-
-            if callable(startup):
-
-                logger.info(
-                    f"启动服务: {name}"
-                )
-
-                await startup()
 
         self._started = True
 
@@ -163,23 +212,30 @@ class RuntimeContainer:
 
     async def shutdown(self):
         """
-           关闭容器中的所有服务。
+        关闭容器中的所有服务。
 
-           功能：
-           - 反向遍历所有已注册服务
-           - 如果服务实现了 shutdown 方法，则自动调用
-           - 释放数据库连接、文件连接、运行时资源等
+        功能：
+        - 遍历所有已注册服务
+        - 如果服务实现了 shutdown 方法，则自动调用
+        - 同时支持同步 shutdown 和异步 shutdown
+        - 按注册顺序的反方向关闭服务
 
-           参数：
-           - 无
+        参数：
+        - 无
 
-           返回值：
-           - None
-             只执行关闭流程。
-       """
+        返回值：
+        - None
+          只执行关闭流程，不返回业务数据。
+
+        专业名词：
+        - container shutdown（容器关闭）：统一释放容器中服务占用的资源
+        - provider shutdown（提供者关闭）：provider 释放自身资源的过程
+        - reverse order shutdown（反序关闭）：按照注册顺序的反方向关闭服务
+        """
+
         if not self._started:
             logger.warning(
-                "Container 尚未启动，无需关闭"
+                "Container 未启动"
             )
 
             return
@@ -191,23 +247,14 @@ class RuntimeContainer:
         for name, service in reversed(
                 list(self._services.items())
         ):
-
-            shutdown = getattr(
-                service,
-                "shutdown",
-                None
+            await self._call_lifecycle_method(
+                service_name=name,
+                service=service,
+                method_name="shutdown",
             )
-
-            if callable(shutdown):
-
-                logger.info(
-                    f"关闭服务: {name}"
-                )
-
-                await shutdown()
 
         self._started = False
 
         logger.info(
-            "✅ Container 已关闭"
+            "✅ Container 关闭完成"
         )

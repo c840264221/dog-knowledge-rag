@@ -12,7 +12,7 @@ chroma_db/
 models_cache/
 data
 logs
-test
+test_scripts
 *.log
 
 # IDE

@@ -33,6 +33,8 @@ from src.runtime.scopes.timeline_scope import (
     TimelineScope
 )
 
+import inspect
+
 
 @dataclass
 class RuntimeContext:
@@ -124,6 +126,59 @@ class RuntimeContext:
             timeline_scope
         )
 
+    async def _call_lifecycle_method(
+            self,
+            service,
+            method_name: str,
+    ):
+        """
+        调用运行时服务的生命周期方法。
+
+        功能：
+        - 根据 method_name 获取 service 上对应的生命周期方法
+        - 如果 service 没有该方法，则直接跳过
+        - 如果生命周期方法是同步函数，则直接执行
+        - 如果生命周期方法返回 awaitable（可等待对象），则 await 等待执行完成
+        - 统一兼容同步 Service 和异步 Service
+
+        参数：
+            service：运行时服务实例，例如 MemoryScope、RetrievalScope、TimelineScope 等。
+            method_name：生命周期方法名称，字符串格式，例如 startup 或 shutdown。
+
+        返回值：
+            None：无业务返回值，只负责执行生命周期方法。
+
+        专业名词：
+            lifecycle method（生命周期方法）：
+                服务启动或关闭时自动执行的方法。
+
+            awaitable（可等待对象）：
+                可以被 await 等待的对象，例如 coroutine、Task、Future。
+
+            coroutine（协程）：
+                async 函数调用后返回的异步执行对象。
+
+            sync service（同步服务）：
+                使用普通 def startup / def shutdown 的服务。
+
+            async service（异步服务）：
+                使用 async def startup / async def shutdown 的服务。
+        """
+
+        lifecycle_method = getattr(
+            service,
+            method_name,
+            None,
+        )
+
+        if not callable(lifecycle_method):
+            return
+
+        result = lifecycle_method()
+
+        if inspect.isawaitable(result):
+            await result
+
     def service(self,service_type):
         return self.registry.get(
             service_type
@@ -150,17 +205,47 @@ class RuntimeContext:
         )
 
     async def startup(self):
+        """
+        启动 RuntimeContext 中注册的所有运行时服务。
+
+        功能：
+        - 遍历 registry 中的所有 runtime service（运行时服务）
+        - 如果服务实现了 startup 方法，则自动调用
+        - 同时兼容同步 startup 和异步 startup
+
+        参数：
+            无。
+
+        返回值：
+            None：无业务返回值，只执行启动流程。
+        """
 
         for service in self.registry.all_services():
-
-            if hasattr(service, "startup"):
-                await service.startup()
+            await self._call_lifecycle_method(
+                service=service,
+                method_name="startup",
+            )
 
     async def shutdown(self):
+        """
+        关闭 RuntimeContext 中注册的所有运行时服务。
+
+        功能：
+        - 按注册顺序的反方向遍历所有 runtime service（运行时服务）
+        - 如果服务实现了 shutdown 方法，则自动调用
+        - 同时兼容同步 shutdown 和异步 shutdown
+
+        参数：
+            无。
+
+        返回值：
+            None：无业务返回值，只执行关闭流程。
+        """
 
         for service in reversed(
                 list(self.registry.all_services())
         ):
-
-            if hasattr(service, "shutdown"):
-                await service.shutdown()
+            await self._call_lifecycle_method(
+                service=service,
+                method_name="shutdown",
+            )
