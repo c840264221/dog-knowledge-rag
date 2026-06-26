@@ -10,6 +10,7 @@ from src.settings.tool import ToolSettings
 from src.settings.embedding import EmbeddingSettings
 from src.settings.reranker import RerankerSettings
 from src.settings.memory import MemorySettings
+from src.settings.rag import RagSettings
 
 
 class Settings:
@@ -36,6 +37,8 @@ class Settings:
         self.reranker = RerankerSettings()
 
         self.memory = MemorySettings()
+
+        self.rag = RagSettings()
 
 
 settings = Settings()

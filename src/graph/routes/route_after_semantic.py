@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Literal, Any
 
 from src.graph.states.state import (
     DogState
@@ -19,6 +19,60 @@ SemanticRoute = Literal[
 ]
 
 
+def get_route_from_state(
+        state: DogState
+) -> str:
+    """
+    从 state 中读取主图路由。
+
+    功能：
+    - 优先读取新版 route_decision.route
+    - 如果 route_decision 不存在或格式异常，则回退读取旧版 next_agent
+    - 如果两个字段都不存在，则兜底到 general_agent
+
+    参数：
+    - state: DogState
+      LangGraph 当前状态。
+      中文释义：Graph 节点之间传递的数据结构。
+
+    返回值：
+    - str
+      主图路由 key。
+      例如 recommendation_agent、exact_agent、general_agent、FINISH。
+    """
+
+    route_decision = state.get(
+        "route_decision"
+    )
+
+    if isinstance(
+            route_decision,
+            dict
+    ):
+
+        route = route_decision.get(
+            "route"
+        )
+
+        if route:
+
+            return str(
+                route
+            ).strip()
+
+    next_agent = state.get(
+        "next_agent"
+    )
+
+    if next_agent:
+
+        return str(
+            next_agent
+        ).strip()
+
+    return "general_agent"
+
+
 def route_after_semantic(
         state: DogState
 ) -> SemanticRoute:
@@ -26,9 +80,10 @@ def route_after_semantic(
     根据 semantic_router_node 的结果选择下一个 Agent。
 
     功能：
-    - 从 state 中读取 next_agent
-    - 校验 next_agent 是否属于主图 conditional_edges 允许的路由 key
-    - 如果 next_agent 是空字符串、None 或非法值，则兜底到 general_agent
+    - 优先从 route_decision.route 读取新版结构化路由结果
+    - 如果 route_decision 不存在，则兼容旧版 next_agent
+    - 校验路由 key 是否属于主图 conditional_edges 允许范围
+    - 如果路由为空或非法，则兜底到 general_agent
     - 写入 Runtime Context 当前 agent
     - 避免 LangGraph 因非法路由 key 抛出 KeyError
 
@@ -50,27 +105,26 @@ def route_after_semantic(
         "FINISH",
     }
 
-    next_agent = str(
-        state.get(
-            "next_agent"
-        )
-        or "general_agent"
-    ).strip()
+    next_agent = get_route_from_state(
+        state
+    )
 
     if next_agent not in allowed_routes:
 
         logger.warning(
-            f"非法 next_agent，已兜底到 general_agent: {next_agent!r}"
+            f"非法主图路由，已兜底到 general_agent: {next_agent!r}"
         )
 
         next_agent = "general_agent"
 
     try:
-        runtime_ctx.get().state().set_agent(
+        runtime_context = runtime_ctx.get()
+
+        runtime_context.state().set_agent(
             next_agent
         )
 
-        runtime_ctx.get().timeline().add_event(
+        runtime_context.timeline().add_event(
             event_type="route",
             name="route_after_semantic"
         )

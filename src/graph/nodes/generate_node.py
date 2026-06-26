@@ -1,129 +1,227 @@
-import json
+from typing import Any
 
 from langchain_core.messages import AIMessage
 from langchain_core.messages import HumanMessage
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnableLambda
 
+from src.graph.nodes.generate_prompt_builder_node import (
+    build_generation_prompt,
+)
+from src.graph.nodes.generate_strategy_resolver_node import (
+    resolve_answer_strategy,
+)
 from src.logger import logger
 from src.memory.memory_retrieve import retrieve_user_memory
+from src.rag.context_builders.generation_context_builder import (
+    resolve_generation_context,
+)
 from src.runtime.context import runtime_ctx
 from src.runtime.scopes.retrieval_scope import RetrievalScope
 
 
-def build_context(
-        docs
-):
+def build_history_text(
+        messages: list[Any],
+) -> str:
     """
-    构建 Prompt 上下文数据。
+    构建历史对话文本。
 
     功能：
-    - 将检索到的 Document 列表转换成 JSON 字符串
-    - 提取狗狗名称、结构化字段和正文内容
-    - 控制正文长度，避免 Prompt 过长
+        将 LangGraph state["messages"] 中的消息转换成可读字符串，
+        供 Prompt 使用。
+
+        当前会过滤掉 Supervisor 写入的调试消息，
+        避免污染 Prompt。
+
+    技术名词：
+        Message：
+            消息对象。LangChain 中常见消息类型包括 HumanMessage、AIMessage 等。
+
+        History：
+            历史记录。这里指用户与助手之前的对话内容。
+
+        Prompt Pollution：
+            Prompt 污染。指无关调试内容进入 Prompt，影响 LLM 回答质量。
 
     参数：
-    - docs:
-      LangChain Document 列表。
-      中文释义：检索阶段返回的文档数据。
+        messages:
+            历史消息列表，通常包含 HumanMessage、AIMessage 等对象。
 
     返回值：
-    - str
-      JSON 字符串格式的上下文数据。
+        str:
+            格式化后的历史对话文本。
     """
 
-    context = []
+    lines = []
 
-    for doc in docs:
+    for message in messages:
 
-        item = {
-            "name": doc.metadata.get(
-                "name"
-            ),
-            "structured": {
-                "barking": doc.metadata.get(
-                    "barking"
-                ),
-                "trainability": doc.metadata.get(
-                    "trainability"
-                ),
-                "shedding": doc.metadata.get(
-                    "shedding"
-                ),
-            },
-            "text": doc.page_content[:300]
-        }
-
-        context.append(
-            item
+        content = str(
+            getattr(
+                message,
+                "content",
+                "",
+            )
+            or ""
         )
 
-    return json.dumps(
-        context,
-        ensure_ascii=False,
-        indent=2
+        if not content:
+            continue
+
+        if is_debug_message(
+                content=content,
+        ):
+            continue
+
+        if isinstance(
+                message,
+                HumanMessage,
+        ):
+            lines.append(
+                f"用户: {content}"
+            )
+
+        elif isinstance(
+                message,
+                AIMessage,
+        ):
+            lines.append(
+                f"助手: {content}"
+            )
+
+        else:
+            lines.append(
+                f"消息: {content}"
+            )
+
+    return "\n".join(
+        lines
     )
+
+
+def is_debug_message(
+        content: str,
+) -> bool:
+    """
+    判断消息是否属于调试消息。
+
+    功能：
+        过滤 Supervisor 决策、路由日志等调试内容，
+        避免这些内容进入 generate_node 的 Prompt。
+
+    参数：
+        content:
+            消息内容。
+
+    返回值：
+        bool:
+            True 表示是调试消息，需要过滤。
+            False 表示可以进入历史对话。
+    """
+
+    debug_prefixes = [
+        "Supervisor决策:",
+        "RouteDecision:",
+        "路由决策:",
+        "next_worker:",
+        "next_agent:",
+    ]
+
+    for prefix in debug_prefixes:
+
+        if content.startswith(
+                prefix,
+        ):
+            return True
+
+    return False
 
 
 def build_generate_node(
         llm_provider,
         memory_provider=None,
-        checkpoint_provider=None
+        checkpoint_provider=None,
 ):
     """
     构建 generate_node 节点函数。
 
     功能：
-    - 使用闭包方式注入 LLMProvider、MemoryProvider、CheckpointProvider
-    - 避免 generate_node 内部直接 import container
-    - 让节点符合 v1.2.1 container/provider 架构规范
+        使用闭包方式注入 LLMProvider、MemoryProvider、CheckpointProvider。
+
+        v1.5 当前职责：
+        1. 从 state 中读取 question、intent、user_id。
+        2. 调用 resolve_generation_context 获取 Prompt 上下文。
+        3. 召回用户长期记忆。
+        4. 解析 answer_strategy 回答策略。
+        5. 根据 answer_strategy 构建不同 Prompt。
+        6. 调用 LLM 生成最终回答。
+        7. 返回 answer、final_answer、memory_context、answer_strategy、messages。
 
     技术名词：
-    - Closure：闭包，指内部函数可以使用外部函数传入的变量
-    - Provider：提供者，负责统一创建和管理服务对象
-    - Node：节点，LangGraph 中执行某个业务步骤的函数
+        Closure：
+            闭包。内部函数可以访问外部函数传入的变量。
+
+        Provider：
+            提供者。用于统一创建、缓存和管理服务对象。
+
+        Node：
+            节点。LangGraph 中执行某个业务步骤的函数。
+
+        Prompt：
+            提示词。发送给 LLM 的输入模板。
+
+        LLM：
+            Large Language Model，大语言模型。
+
+        Answer Strategy：
+            回答策略。用于决定当前问题应该采用哪种回答模板。
 
     参数：
-    - llm_provider:
-      LLMProvider 实例。
-      中文释义：用于获取主模型 main_llm，并执行安全 LLM 调用。
+        llm_provider:
+            LLMProvider 实例。
+            中文释义：用于获取主模型 main_llm，并执行安全 LLM 调用。
 
-    - memory_provider:
-      MemoryProvider 实例。
-      中文释义：用于召回用户长期记忆。
+        memory_provider:
+            MemoryProvider 实例。
+            中文释义：用于召回用户长期记忆。
 
-    - checkpoint_provider:
-      CheckpointProvider 实例。
-      中文释义：用于保存运行时 checkpoint 检查点。
+        checkpoint_provider:
+            CheckpointProvider 实例。
+            中文释义：用于保存运行时 checkpoint 检查点。
 
     返回值：
-    - callable
-      返回一个 async generate_node 函数，供 LangGraph 注册使用。
+        callable:
+            返回一个 async generate_node 函数，供 LangGraph 注册使用。
     """
 
     async def generate_node(
-            state
-    ):
+            state: dict[str, Any],
+    ) -> dict[str, Any]:
         """
         生成最终回答。
 
         功能：
-        - 从 runtime_ctx 获取检索作用域中的 docs
-        - 召回用户长期记忆
-        - 构建 Prompt
-        - 调用 LLM 生成回答
-        - 保存 checkpoint
-        - 返回 answer 和 messages
+            1. 设置 runtime 当前节点。
+            2. 解析 RAG 上下文。
+            3. 召回用户长期记忆。
+            4. 构建历史对话文本。
+            5. 解析回答策略 answer_strategy。
+            6. 根据回答策略构建 Prompt。
+            7. 调用 LLM。
+            8. 保存 checkpoint。
+            9. 返回状态更新。
 
         参数：
-        - state:
-          LangGraph 当前状态。
-          中文释义：包含 question、intent、docs、messages、user_id 等字段。
+            state:
+                LangGraph 当前状态。
+                中文释义：包含 question、intent、rag_context、docs、messages、user_id 等字段。
 
         返回值：
-        - dict
-          返回 answer 和 messages，用于合并回 LangGraph state。
+            dict[str, Any]:
+                返回需要合并进 DogState 的字段：
+                - answer
+                - final_answer
+                - memory_context
+                - answer_strategy
+                - messages
         """
 
         runtime = runtime_ctx.get()
@@ -134,190 +232,302 @@ def build_generate_node(
 
         runtime.timeline().add_event(
             event_type="node",
-            name="generate_node"
+            name="generate_node",
         )
 
-        retrieval_scope = runtime.service(
-            RetrievalScope
+        question = str(
+            state.get(
+                "question",
+                "",
+            )
+            or ""
+        ).strip()
+
+        intent = str(
+            state.get(
+                "intent",
+                "general",
+            )
+            or "general"
         )
 
-        docs = retrieval_scope.get_docs()
+        user_id = str(
+            state.get(
+                "user_id",
+                "default",
+            )
+            or "default"
+        )
+
+        context, context_source = resolve_generation_context(
+            state=state,
+        )
+
+        answer_strategy = resolve_answer_strategy(
+            state=state,
+        )
+
+        logger.info(
+            "进入 generate_node 节点，"
+            f"question={question}, "
+            f"intent={intent}, "
+            f"user_id={user_id}, "
+            f"context_source={context_source}, "
+            f"context_length={len(context)}, "
+            f"answer_strategy={answer_strategy.task_type}"
+        )
+
+        write_docs_to_retrieval_scope_safely(
+            state=state,
+            runtime=runtime,
+        )
+
+        memory_text = await resolve_memory_text(
+            user_id=user_id,
+            question=question,
+            memory_provider=memory_provider,
+        )
+
+        history_text = build_history_text(
+            messages=state.get(
+                "messages",
+                [],
+            )
+        )
 
         logger.debug(
-            f"获取 runtime_ctx 中 retrieval 作用域 docs，数量为：{len(docs)}"
+            f"generate_node history_text={history_text}"
+        )
+
+        logger.debug(
+            "generate_node 使用上下文，"
+            f"context_source={context_source}, "
+            f"context_preview={context[:1000]}"
+        )
+
+        prompt_text = build_generation_prompt(
+            state=state,
+            answer_strategy=answer_strategy,
+            context=context,
+            context_source=context_source,
+            memory_text=memory_text,
+            history_text=history_text,
         )
 
         main_llm = llm_provider.main_llm
 
-        logger.info(
-            "进入 generate_node 节点，state 为："
-            f"question:{state['question']}, "
-            f"intent:{state['intent']}, "
-            f"strategy:{state['strategy']}, "
-            f"filters:{state['filters']}, "
-            f"tags:{state['tags']}, "
-            f"dog_name:{state['dog_name']}, "
-            f"docs len:{len(state['docs'])}, "
-            f"user_id:{state['user_id']}"
+        raw_response = await llm_provider.safe_ainvoke(
+            llm=main_llm,
+            prompt=prompt_text,
+            fallback_response="调用 LLM 失败",
         )
 
-        if memory_provider is not None:
-
-            memory_text = await retrieve_user_memory(
-                user_id=state["user_id"],
-                question=state["question"],
-                memory_provider=memory_provider,
-                limit=10
-            )
-
-        else:
-
-            memory_text = "暂无用户记忆"
-
-        context = build_context(
-            state["docs"]
-        )
-
-        simplified_logger_context = [
-            {
-                "text": len(
-                    doc.page_content
-                ),
-                "metadata": doc.metadata
-            }
-            for doc in state["docs"]
-        ]
-
-        logger.debug(
-            f"context数量: {simplified_logger_context}"
-        )
-
-        prompt = ChatPromptTemplate.from_template(
-            """
-你是一个严谨的狗狗百科助手。
-
-# 用户长期记忆（Memory）
-{memory_text}
-
-【任务】
-根据 intent 决定行为：
-- recommendation → 推荐狗狗
-- 其他 → 回答问题
-
-【严格要求】
-1. 必须使用数据中的 "name" 字段作为狗狗名称
-2. 严禁使用“品种一/二”等编号
-3. 只能基于提供数据，不得编造
-4. 每条推荐必须包含名称 + 原因
-5. 至少3条数据，但最多不超过5条
-6. 如果 intent 不是 general，只回答该 intent 相关内容
-
-intent: {intent}
-
-数据（JSON格式）：
-{context}
-
-历史信息：
-{history_text}
-
-问题：
-{question}
-
-输出规则：
-- 如果是推荐：最多5个，名称+原因
-- 如果是问答：直接回答，不要推荐
-"""
-        )
-
-        history_text = "\n".join(
-            [
-                f"用户: {message.content}"
-                if isinstance(
-                    message,
-                    HumanMessage
-                )
-                else f"助手: {message.content}"
-                for message in state.get(
-                    "messages",
-                    []
-                )
-            ]
-        )
-
-        logger.debug(
-            f"history_text:{history_text}"
-        )
-
-        async def create_async_safe_llm_ainvoke(
-                prompt_value
-        ):
-            """
-            安全调用 LLM。
-
-            功能：
-            - 通过 LLMProvider 调用 safe_ainvoke
-            - 支持失败兜底
-            - 避免节点直接操作底层模型调用细节
-
-            参数：
-            - prompt_value:
-              Prompt 模板渲染后的输入。
-
-            返回值：
-            - str
-              LLM 返回的文本结果。
-            """
-
-            return await llm_provider.safe_ainvoke(
-                llm=main_llm,
-                prompt=prompt_value,
-                fallback_response="调用LLM失败"
-            )
-
-        safe_llm = RunnableLambda(
-            create_async_safe_llm_ainvoke
-        )
-
-        answer = await (
-                prompt
-                | safe_llm
-                | StrOutputParser()
-        ).ainvoke(
-            {
-                "memory_text": memory_text,
-                "intent": state["intent"],
-                "context": context,
-                "question": state["question"],
-                "history_text": history_text
-            }
-        )
-
-        messages = state.get(
-            "messages",
-            []
-        )
-
-        messages.append(
-            AIMessage(
-                content=answer
-            )
+        answer = normalize_llm_response_to_text(
+            response=raw_response,
         )
 
         logger.info(
-            f"generate_node 节点完成，结果 answer 为：{answer}"
+            f"generate_node 节点完成，answer={answer}"
         )
 
         logger.debug(
             f"Runtime State:{runtime.state().get_state()}"
         )
 
-        if checkpoint_provider is not None:
+        save_checkpoint_safely(
+            checkpoint_provider=checkpoint_provider,
+        )
 
-            checkpoint_provider.manager.save_checkpoint()
-
-        return {
+        output_state = {
             "answer": answer,
-            "messages": messages
+            "final_answer": answer,
+            "memory_context": memory_text,
+            "answer_strategy": answer_strategy.model_dump(),
+            "messages": [
+                AIMessage(
+                    content=answer,
+                )
+            ],
         }
 
+        logger.debug(
+            "generate_node 即将返回 output_state，"
+            f"keys={list(output_state.keys())}, "
+            f"has_answer={bool(output_state.get('answer'))}, "
+            f"has_final_answer={bool(output_state.get('final_answer'))}, "
+            f"answer_strategy={answer_strategy.model_dump()}"
+        )
+
+        return output_state
+
     return generate_node
+
+
+async def resolve_memory_text(
+        user_id: str,
+        question: str,
+        memory_provider=None,
+) -> str:
+    """
+    解析用户长期记忆文本。
+
+    功能：
+        如果 memory_provider 存在，则调用 retrieve_user_memory 召回用户长期记忆。
+        如果 memory_provider 不存在，则返回默认文本。
+
+    技术名词：
+        Memory：
+            记忆。这里指用户长期偏好、历史信息、个性化上下文。
+
+        Memory Retrieval：
+            记忆召回。从记忆存储中找出和当前问题相关的用户记忆。
+
+    参数：
+        user_id:
+            用户 ID。
+
+        question:
+            当前用户问题。
+
+        memory_provider:
+            MemoryProvider 实例，可选。
+
+    返回值：
+        str:
+            用户长期记忆文本。
+    """
+
+    if memory_provider is None:
+        return "暂无用户记忆"
+
+    return await retrieve_user_memory(
+        user_id=user_id,
+        question=question,
+        memory_provider=memory_provider,
+        limit=10,
+    )
+
+
+def write_docs_to_retrieval_scope_safely(
+        state: dict[str, Any],
+        runtime,
+) -> None:
+    """
+    安全写入 RetrievalScope。
+
+    功能：
+        如果 state 中存在 docs，则写入 RetrievalScope，
+        方便后续调试、观察或其他运行时能力使用。
+
+        如果写入失败，只记录 debug，不中断主流程。
+
+    技术名词：
+        RetrievalScope：
+            检索作用域。用于在运行时保存当前检索到的文档。
+
+        Runtime Scope：
+            运行时作用域。表示一次执行过程中的临时上下文容器。
+
+    参数：
+        state:
+            当前 DogState。
+
+        runtime:
+            当前 RuntimeContext。
+
+    返回值：
+        None。
+    """
+
+    try:
+        retrieval_scope = runtime.service(
+            RetrievalScope,
+        )
+
+        docs = state.get(
+            "docs",
+            [],
+        )
+
+        if docs:
+            retrieval_scope.set_docs(
+                docs
+            )
+
+    except Exception as e:
+        logger.debug(
+            f"generate_node 写入 RetrievalScope 失败，可忽略: {e}"
+        )
+
+
+def normalize_llm_response_to_text(
+        response: Any,
+) -> str:
+    """
+    将 LLM 返回值转换成文本。
+
+    功能：
+        兼容不同 LLM 返回格式：
+        1. str
+        2. AIMessage / BaseMessage，带 content 字段
+        3. 其他对象
+
+    参数：
+        response:
+            LLM 原始返回值。
+
+    返回值：
+        str:
+            解析后的文本答案。
+    """
+
+    if response is None:
+        return ""
+
+    if hasattr(
+            response,
+            "content",
+    ):
+        return str(
+            response.content
+            or ""
+        ).strip()
+
+    return str(
+        response
+        or ""
+    ).strip()
+
+
+def save_checkpoint_safely(
+        checkpoint_provider=None,
+) -> None:
+    """
+    安全保存 checkpoint。
+
+    功能：
+        如果 checkpoint_provider 存在，则调用 save_checkpoint。
+        如果保存失败，只记录 warning，不中断主流程。
+
+    技术名词：
+        Checkpoint：
+            检查点。用于保存图执行过程中的中间状态。
+
+    参数：
+        checkpoint_provider:
+            CheckpointProvider 实例，可选。
+
+    返回值：
+        None。
+    """
+
+    if checkpoint_provider is None:
+        return
+
+    try:
+        checkpoint_provider.manager.save_checkpoint()
+
+    except Exception as e:
+        logger.warning(
+            f"generate_node 保存 checkpoint 失败: {e}"
+        )

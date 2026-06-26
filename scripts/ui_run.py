@@ -18,63 +18,6 @@ from src.runtime.container.init import (
 from src.runtime.timeline.timeline_reporter import TimelineReporter
 
 
-# 用于存储每个会话的配置信息和中断状态（使用 gr.State 更安全）
-# 但 State 需要绑定到界面，我们直接在函数中使用 gr.State 对象
-# async def respond_and_process(question: str, history: list, state: dict, request: gr.Request):
-#     """
-#     核心处理函数：
-#     - 调用 Agent
-#     - 处理中断/恢复
-#     - 返回 (新历史, 新状态, 确认面板可见性, 确认提示文本)
-#     """
-#     session_id = request.session_hash
-#
-#     # 生成 trace_id（也可以使用 uuid 或 trace_manager 的 create_trace）
-#     trace_id, _ = trace_manager.create_trace()
-#
-#     # 设置上下文变量
-#     trace_ctx.set_trace_id(trace_id)
-#     trace_ctx.set_session_id(session_id)
-#
-#     user_id = state.get("user_id") if state else None
-#     if user_id:
-#         trace_ctx.set_user_id(user_id)
-#     else:
-#         trace_ctx.set_user_id("unknown")
-#
-#     trace_ctx.set_component("gradio_handler")
-#
-#     # 初始化或获取状态
-#     if not state:
-#         state = {"config": {"configurable": {"thread_id": session_id}}, "pending": False, "pending_prompt": ""}
-#     else:
-#         # 确保 config 中的 thread_id 与当前会话一致
-#         state["config"]["configurable"]["thread_id"] = session_id
-#
-#     # 将用户问题也添加到聊天框中
-#     history.append({"role": "user", "content": question})
-#
-#     # 调用 Agent
-#     result = await run_main_graph_with_stream(question, thread_id=session_id)
-#
-#     # 判断是否中断
-#     if result.startswith("__INTERRUPT__:"):
-#         prompt = result[len("__INTERRUPT__:"):].strip()
-#         # 更新状态：标记等待确认
-#         state["pending"] = True
-#         state["pending_prompt"] = prompt
-#         # 在聊天记录中添加一条系统提示（可选）
-#         history.append({"role": "assistant", "content": f"⚠️ 需要确认：{prompt}"})
-#         # 返回历史、状态、显示确认面板、设置确认框的提示文本
-#         return history, state, gr.update(visible=True), prompt
-#     else:
-#         # 正常答案，且没有等待确认
-#         if state.get("pending"):
-#             # 可能恢复后已经解决了，但确保清除标志
-#             state["pending"] = False
-#         history.append({"role": "assistant", "content": result})
-#         return history, state, gr.update(visible=False), ""
-
 async def respond_and_process(
     question: str,
     history: list,

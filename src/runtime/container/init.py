@@ -30,6 +30,10 @@ from src.runtime.container.providers.memory_provider import (
     MemoryProvider
 )
 
+from src.runtime.container.providers.retriever_provider import (
+    RetrieverProvider
+)
+
 # 创建容器
 container = RuntimeContainer()
 
@@ -65,6 +69,17 @@ container.register(
     VectorStoreProvider(
         embedding_provider=(
             container.get("embedding")
+        )
+    )
+)
+
+container.register(
+
+    "retriever",
+
+    RetrieverProvider(
+        vectorstore_provider=(
+            container.get("vectorstore")
         )
     )
 )
@@ -107,7 +122,13 @@ container.register(
         ),
         checkpoint_provider=(
             container.get("checkpoint")
-        )
+        ),
+        retriever_provider=(
+            container.get("retriever")
+        ),
+        reranker_provider=(
+            container.get("reranker")
+        ),
     )
 )
 

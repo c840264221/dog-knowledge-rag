@@ -1,51 +1,164 @@
-from src.logger import logger
 from src.graph.tools.runtime.graph_stream_runtime import safe_stream_graph
-from src.user.user_manager import get_user_id
-
-# from src.runtime.trace import trace_ctx
 
 from src.runtime.container.init import (
     container
 )
 
+from typing import Any
 
-def create_initial_state(question: str, trace_id:str):
-    logger.info("初始化state...")
+from src.logger import logger
+from src.user.user_manager import get_user_id
+
+
+def create_initial_state(
+        question: str,
+        trace_id: str,
+        session_id: str | None = None,
+) -> dict[str, Any]:
+    """
+    创建每次 Graph 运行的初始状态。
+
+    功能：
+        为每一次用户问题创建一个干净的 DogState 初始字典。
+
+        v1.5 当前设计：
+        1. 每个新问题都要重置临时运行状态。
+        2. 保留 user_id、trace_id、session_id 等运行身份字段。
+        3. 初始化新版 RAG 字段：
+           rag_query、rag_context、retrieval_quality、retrieval_failure_type。
+        4. 初始化新版路由字段：
+           route_decision、next_agent、next_worker、current_agent。
+        5. 初始化工具调用字段：
+           tool_calls、tool_results、need_tool、tool_round、tool_confirmed、tool_executed。
+        6. 初始化生成结果字段：
+           answer、final_answer。
+        7. 兼容旧字段：
+           filters、tags、features、dog_name、docs、retry_count。
+
+    重要说明：
+        这里 messages 暂时保持为空列表。
+        因为当前 semantic_router_node 内部会把 HumanMessage(question) 追加进去。
+        如果这里也放 HumanMessage，就会导致消息重复。
+
+    技术名词：
+        State：
+            状态。LangGraph 节点之间共享和传递的数据。
+
+        Initial State：
+            初始状态。每次图运行开始时创建的状态。
+
+        Transient State：
+            临时状态。只属于当前一次问题处理流程的数据，
+            例如 docs、rag_context、answer、route_decision。
+
+        RAG：
+            Retrieval-Augmented Generation，检索增强生成。
+
+        Trace ID：
+            链路追踪 ID。用于定位一次完整请求的日志。
+
+        Session ID：
+            会话 ID。用于表示一次连续对话会话。
+
+    参数：
+        question:
+            用户本次输入的问题。
+
+        trace_id:
+            当前请求的链路追踪 ID。
+
+        session_id:
+            当前会话 ID。
+            如果外部没有传入，则默认使用 trace_id 作为 session_id。
+
+    返回值：
+        dict[str, Any]:
+            DogState 初始状态字典。
+    """
+
+    logger.info(
+        "初始化 state..."
+    )
+
+    clean_question = str(
+        question
+        or ""
+    ).strip()
+
+    if not clean_question:
+        raise ValueError(
+            "create_initial_state 失败：question 不能为空"
+        )
+
+    user_id = get_user_id()
+
+    resolved_session_id = (
+        session_id
+        or trace_id
+    )
 
     return {
-
-        "question": question,
-
+        # ========= 用户输入 =========
+        "question": clean_question,
         "messages": [],
 
+        # ========= 身份与追踪 =========
+        "user_id": user_id,
+        "session_id": resolved_session_id,
+        "trace_id": trace_id,
+
+        # ========= 路由字段 =========
+        "intent": "",
+        "strategy": None,
+        "next_agent": "",
+        "current_agent": "",
+        "next_worker": "",
+        "route_decision": {},
+
+        # ========= 旧版兼容检索字段 =========
         "filters": {},
-
         "tags": [],
-
+        "features": [],
+        "dog_name": None,
+        "top_k": 5,
         "docs": [],
 
-        "answer": "",
+        # ========= 新版 RAG 字段 =========
+        "rag_query": None,
+        "rag_context": None,
 
-        "intent": "",
-
+        # ========= 召回评估字段 =========
+        "retrieval_ok": False,
+        "retrieval_evaluated": False,
+        "retrieval_quality": None,
+        "retrieval_failure_type": None,
+        "retrieval_retry_strategy": None,
         "retry_count": 0,
 
-        "retrieval_ok": "",
+        # ========= 生成结果字段 =========
+        "answer": "",
+        "final_answer": "",
+        "answer_strategy": {},
 
+        # ========= 用户反馈 / 追问字段 =========
         "user_feedback": "",
-
-        "current_agent": "",
-
-        "next_agent": "",
-
         "has_asked_user": False,
+        "pending_prompt": "",
+        "waiting_user_input": False,
 
-        "dog_name": None,
+        # ========= 工具调用字段 =========
+        "tool_calls": [],
+        "tool_results": [],
+        "need_tool": False,
+        "tool_round": 0,
+        "tool_confirmed": "",
+        "tool_executed": False,
 
-        "strategy": None,
+        # ========= 记忆字段 =========
+        "memory_context": "",
 
-        "user_id": get_user_id(),
-        "trace_id": trace_id,
+        # ========= 错误字段 =========
+        "error": "",
     }
 
 

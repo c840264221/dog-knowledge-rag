@@ -205,7 +205,7 @@ class MemorySemanticRecallService:
 
             # 测试用  查看chroma召回结果
             logger.info(
-                f"Chroma召回: content={document.page_content}, "
+                f"Memory Chroma召回: content={document.page_content}, "
                 f"metadata={document.metadata}, "
                 f"distance={distance}"
             )

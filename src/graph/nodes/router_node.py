@@ -1,5 +1,7 @@
 from typing import Any
 
+import json
+
 from langchain_core.messages import HumanMessage
 
 from src.common.decorators.safe_node import (
@@ -14,7 +16,7 @@ from src.common.decorators.state_validation import (
     validate_state
 )
 
-from src.graph.states.state import (
+from src.graph.states.dog_state import (
     DogState
 )
 
@@ -32,6 +34,8 @@ from src.parser.query_parser import (
 from src.runtime.context import (
     runtime_ctx
 )
+
+from src.graph.schemas.route_decision import RouteDecision
 
 
 RECOMMENDATION_AGENT = "recommendation_agent"
@@ -103,14 +107,10 @@ def normalize_query_parse_result(
             tags,
             list
     ):
-        tags = [
-            "general"
-        ]
+        tags = []
 
     if not tags:
-        tags = [
-            "general"
-        ]
+        tags = []
 
     features = parsed.get(
         "features"
@@ -120,14 +120,10 @@ def normalize_query_parse_result(
             features,
             list
     ):
-        features = [
-            "general"
-        ]
+        features = []
 
     if not features:
-        features = [
-            "general"
-        ]
+        features = []
 
     dog_name = parsed.get(
         "dog_name"
@@ -179,6 +175,321 @@ def route_intent_to_agent(
 
     return GENERAL_AGENT
 
+
+def build_route_hints(
+        parsed: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    构建路由提示信息。
+
+    功能：
+        将 semantic_router_node 从 LLM 中解析出来的辅助字段，
+        统一放入 route_decision.hints。
+
+        注意：
+            hints 不是正式 RAG 检索条件。
+            它只用于 Debug（调试）、Trace（链路追踪）、Evaluation（评估）、
+            以及后续可能的 Query Rewrite（查询改写）。
+
+            正式检索条件仍然应该由 DogQueryFilterParser 构建到：
+                RagQuery.filters
+
+    技术名词：
+        Hints：
+            提示信息。表示路由阶段得到的辅助线索。
+
+        Query Rewrite：
+            查询改写。根据用户问题和上下文重写成更适合检索的查询。
+
+    参数：
+        parsed:
+            LLM 解析用户问题后的清洗结果。
+
+    返回值：
+        dict[str, Any]:
+            route_decision.hints 字典。
+    """
+
+    return {
+        "intent": parsed.get(
+            "intent",
+            Intent.GENERAL.value,
+        ),
+        "filters": parsed.get(
+            "filters",
+            {},
+        ) or {},
+        "tags": parsed.get(
+            "tags",
+            [],
+        ) or [],
+        "features": parsed.get(
+            "features",
+            [],
+        ) or [],
+        "dog_name": parsed.get(
+            "dog_name",
+        ),
+        "parser": "semantic_router_node",
+        "usage": (
+            "route hints only; not official rag filters"
+        ),
+    }
+
+
+def clamp_confidence(
+        value: float,
+        min_value: float = 0.0,
+        max_value: float = 1.0,
+) -> float:
+    """
+    限制置信度范围。
+
+    功能：
+        将 confidence 限制在 0 到 1 之间。
+
+    参数：
+        value:
+            原始置信度。
+
+        min_value:
+            最小值。
+
+        max_value:
+            最大值。
+
+    返回值：
+        float:
+            合法置信度。
+    """
+
+    if value < min_value:
+        return min_value
+
+    if value > max_value:
+        return max_value
+
+    return value
+
+
+def resolve_route_confidence(
+        parsed: dict[str, Any],
+        route: str,
+        fallback_used: bool = False,
+) -> float:
+    """
+    计算路由置信度。
+
+    功能：
+        根据 LLM 解析结果和路由目标计算一个相对合理的 confidence。
+
+        当前说明：
+            这不是模型真实概率。
+            因为当前 QueryParseResult 里没有 confidence 字段，
+            所以这里采用规则评分。
+
+        后续增强方向：
+            可以在 QueryParseResult 中增加 confidence 字段，
+            并修改 parse_query_with_llm 的 prompt，
+            让 LLM 同时输出路由置信度。
+
+    技术名词：
+        Confidence Heuristic：
+            置信度启发式规则。
+            在没有模型概率输出时，根据解析信号估算置信度。
+
+        Fallback：
+            兜底。当 LLM 解析失败时使用默认结果。
+
+    参数：
+        parsed:
+            清洗后的 LLM 解析结果。
+
+        route:
+            最终路由到的 Agent。
+
+        fallback_used:
+            是否使用了兜底解析结果。
+
+    返回值：
+        float:
+            0 到 1 之间的置信度。
+    """
+
+    if fallback_used:
+        return 0.35
+
+    raw_confidence = parsed.get(
+        "confidence"
+    )
+
+    if isinstance(
+            raw_confidence,
+            (
+                    int,
+                    float,
+            )
+    ):
+        return clamp_confidence(
+            float(
+                raw_confidence
+            )
+        )
+
+    intent = str(
+        parsed.get(
+            "intent",
+            Intent.GENERAL.value
+        )
+    )
+
+    filters = parsed.get(
+        "filters",
+        {}
+    ) or {}
+
+    tags = parsed.get(
+        "tags",
+        []
+    ) or []
+
+    features = parsed.get(
+        "features",
+        []
+    ) or []
+
+    dog_name = parsed.get(
+        "dog_name"
+    )
+
+    if route == RECOMMENDATION_AGENT:
+        confidence = 0.82
+
+        if intent == Intent.RECOMMEND.value:
+            confidence += 0.05
+
+        if filters:
+            confidence += 0.03
+
+        if tags:
+            confidence += 0.02
+
+        if features:
+            confidence += 0.02
+
+        return clamp_confidence(
+            confidence
+        )
+
+    if route == EXACT_AGENT:
+        confidence = 0.82
+
+        if intent == Intent.ASK_INFO.value:
+            confidence += 0.05
+
+        if dog_name:
+            confidence += 0.05
+
+        if filters:
+            confidence += 0.02
+
+        return clamp_confidence(
+            confidence
+        )
+
+    if route == GENERAL_AGENT:
+        confidence = 0.70
+
+        if intent == Intent.GENERAL.value:
+            confidence += 0.08
+
+        return clamp_confidence(
+            confidence
+        )
+
+    return 0.5
+
+
+def create_route_decision_from_parsed(
+        parsed: dict[str, Any],
+        fallback_used: bool = False,
+) -> RouteDecision:
+    """
+    根据 parsed 创建结构化路由决策。
+
+    功能：
+        将 semantic_router_node 的解析结果转换成 RouteDecision。
+
+        和旧版 create_route_decision_from_intent 的区别：
+        1. 不只依赖 intent。
+        2. 会把 filters、tags、features、dog_name 放入 hints。
+        3. confidence 不再完全写死，而是通过 resolve_route_confidence 计算。
+        4. 返回的 RouteDecision 更适合 Debug、Trace、Evaluation。
+
+    参数：
+        parsed:
+            清洗后的 LLM 解析结果。
+            中文释义：包含 intent、filters、tags、features、dog_name 等字段。
+
+        fallback_used:
+            是否使用了默认兜底解析结果。
+
+    返回值：
+        RouteDecision:
+            主图路由决策对象。
+    """
+
+    intent = str(
+        parsed.get(
+            "intent",
+            Intent.GENERAL.value,
+        )
+    )
+
+    route = route_intent_to_agent(
+        intent=intent
+    )
+
+    confidence = resolve_route_confidence(
+        parsed=parsed,
+        route=route,
+        fallback_used=fallback_used,
+    )
+
+    hints = build_route_hints(
+        parsed=parsed
+    )
+
+    if route == RECOMMENDATION_AGENT:
+        reason = (
+            "用户问题被解析为推荐意图，"
+            "需要进入 recommendation_agent 进行犬种推荐。"
+        )
+
+    elif route == EXACT_AGENT:
+        reason = (
+            "用户问题被解析为犬种信息查询意图，"
+            "需要进入 exact_agent 进行知识库检索问答。"
+        )
+
+    else:
+        reason = (
+            "用户问题未命中推荐或精确查询意图，"
+            "兜底进入 general_agent 进行通用问答。"
+        )
+
+    if fallback_used:
+        reason = (
+            "semantic_router_node 使用默认解析结果，"
+            "因此低置信度兜底进入 general_agent。"
+        )
+
+    return RouteDecision(
+        route=route,
+        confidence=confidence,
+        reason=reason,
+        hints=hints,
+    )
 
 def create_default_query_parse_result() -> QueryParseResult:
     """
@@ -241,20 +552,30 @@ def save_semantic_router_checkpoint() -> None:
             f"semantic_router_node 保存 checkpoint 失败: {checkpoint_error}"
         )
 
-
 @safe_node(
     fallback=lambda state, e: {
         "intent": Intent.GENERAL.value,
-        "filters": {},
-        "tags": [
-            "general"
-        ],
-        "features": [
-            "general"
-        ],
-        "dog_name": None,
         "next_agent": GENERAL_AGENT,
+        "route_decision": RouteDecision(
+            route=GENERAL_AGENT,
+            confidence=0.0,
+            reason=(
+                "semantic_router_node 执行失败，"
+                "safe_node fallback 兜底到 general_agent。"
+            ),
+            hints={
+                "intent": Intent.GENERAL.value,
+                "filters": {},
+                "tags": [],
+                "features": [],
+                "dog_name": None,
+                "parser": "semantic_router_node",
+                "usage": "fallback route hints only; not official rag filters",
+                "error": str(e),
+            },
+        ).model_dump(),
         "current_agent": "semantic_router",
+        "error": str(e),
     }
 )
 @validate_question
@@ -326,6 +647,8 @@ async def semantic_router_node(
         )
     )
 
+    fallback_used = False
+
     result = create_default_query_parse_result()
 
     try:
@@ -334,6 +657,8 @@ async def semantic_router_node(
         )
 
     except Exception as e:
+        fallback_used = True
+
         logger.exception(
             f"LLM解析失败，已使用默认 general 结果: {e}"
         )
@@ -355,9 +680,12 @@ async def semantic_router_node(
         )
     )
 
-    next_agent = route_intent_to_agent(
-        intent
+    route_decision = create_route_decision_from_parsed(
+        parsed=parsed,
+        fallback_used=fallback_used,
     )
+
+    next_agent = route_decision.route
 
     logger.info(
         f"路由到Agent: {next_agent}"
@@ -374,13 +702,20 @@ async def semantic_router_node(
 
     save_semantic_router_checkpoint()
 
+    json_normalize_route_decision = json.dumps(route_decision.model_dump(), indent=4, ensure_ascii=False)
+    logger.debug(f"语义路由解析完后的route_decision内容：{json_normalize_route_decision}")
+
     return {
-        "intent": parsed["intent"],
-        "filters": parsed["filters"],
-        "tags": parsed["tags"],
-        "features": parsed["features"],
-        "dog_name": parsed["dog_name"],
-        "messages": messages,
+        "intent": parsed.get(
+            "intent",
+            Intent.GENERAL.value,
+        ),
         "next_agent": next_agent,
         "current_agent": "semantic_router",
+        "route_decision": route_decision.model_dump(),
+        "messages": [
+            HumanMessage(
+                content=question
+            )
+        ],
     }
