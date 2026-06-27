@@ -1,7 +1,7 @@
 import json
 from typing import Any
 
-from src.graph.states.state import DogState
+from src.graph.states.dog_state import DogState
 from src.logger import logger
 from src.rag.adapters import (
     rag_context_to_documents
@@ -11,6 +11,12 @@ from src.rag.query_builders import (
 )
 from src.runtime.context import runtime_ctx
 from src.runtime.scopes.retrieval_scope import RetrievalScope
+
+# 导入rag召回诊断工具
+from src.rag.observation.diagnostics import (
+    build_retrieval_diagnostics,
+    build_retrieval_quality_log_summary,
+)
 
 
 def build_retrieve_node(
@@ -238,6 +244,60 @@ async def execute_new_rag_retrieve(
 
     rag_context_dump = rag_context.model_dump()
 
+    filters = rag_query_dump.get(
+        "filters",
+        {},
+    ) or {}
+
+    intent = rag_query_dump.get(
+        "intent",
+        state.get(
+            "intent",
+            "dog_info",
+        ),
+    )
+
+    top_k = rag_query_dump.get(
+        "top_k",
+        state.get(
+            "top_k",
+            5,
+        ),
+    )
+
+    diagnostic_state = {
+        **state,
+        "rag_query": rag_query_dump,
+        "rag_context": rag_context_dump,
+        "filters": filters,
+        "intent": intent,
+        "top_k": top_k,
+    }
+
+    retrieval_quality = build_retrieval_diagnostics(
+        state=diagnostic_state,
+        stage="retrieve",
+        docs=docs,
+        rag_context=rag_context,
+        failure_type="",
+        decision="evaluate",
+        reason=(
+            "retrieve_node 完成初始召回，"
+            f"rag_context.status={rag_context.status}，"
+            f"retrieved_chunks={len(rag_context.chunks)}，"
+            f"docs={len(docs)}。"
+        ),
+    )
+
+    logger.debug(
+        "retrieve_node 检索诊断摘要: "
+        f"{json.dumps(
+            build_retrieval_quality_log_summary(
+                retrieval_quality=retrieval_quality,
+            ),
+            ensure_ascii=False,
+        )}"
+    )
     return {
         # 新版 RAG 结构化字段
         "rag_query": rag_query_dump,
@@ -246,27 +306,12 @@ async def execute_new_rag_retrieve(
         # v1.5 filters 字段补齐重点：
         # 将 parser / query_builder 最终生成的 filters 回写到 DogState。
         # 这样后面的旧节点、debug 日志、evaluate、retry、generate 都可以继续读取 state["filters"]。
-        "filters": rag_query_dump.get(
-            "filters",
-            {}
-        ) or {},
+        "filters": filters,
 
         # 兼容旧链路字段
-        "intent": rag_query_dump.get(
-            "intent",
-            state.get(
-                "intent",
-                "dog_info",
-            ),
-        ),
+        "intent": intent,
 
-        "top_k": rag_query_dump.get(
-            "top_k",
-            state.get(
-                "top_k",
-                5,
-            ),
-        ),
+        "top_k": top_k,
 
         "docs": docs,
 
@@ -278,7 +323,10 @@ async def execute_new_rag_retrieve(
         # 表示当前 rag_context 还没有经过 evaluate_node 质量评估。
         "retrieval_evaluated": False,
 
-        # 清理上一轮可能残留的质量评估结果。
-        "retrieval_quality": None,
-        "retrieval_failure_type": None,
+        # retrieve 阶段先写入基础诊断信息。
+        # evaluate_node 后续会在这个基础上 merge 质量评估结果。
+        "retrieval_quality": retrieval_quality,
+
+        # retrieve 阶段还没有失败类型判断。
+        "retrieval_failure_type": "",
     }

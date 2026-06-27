@@ -196,12 +196,11 @@ def route_after_dog_knowledge_evaluate(
     )
 
     logger.info(
-        "[route_after_dog_knowledge_evaluate] "
-        "retrieval_ok=%s failure_type=%s retry_count=%s has_asked_user=%s",
-        retrieval_ok,
-        retrieval_failure_type,
-        retry_count,
-        has_asked_user,
+        f"[route_after_dog_knowledge_evaluate] "
+        f"retrieval_ok={retrieval_ok} "
+        f"failure_type={retrieval_failure_type} "
+        f"retry_count={retry_count} "
+        f"has_asked_user={has_asked_user}",
     )
 
     if retrieval_ok is True:

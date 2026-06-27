@@ -8,6 +8,13 @@ from src.rag.evaluators import (
 )
 from src.runtime.context import runtime_ctx
 
+# 导入rag诊断工具
+from src.rag.observation.diagnostics import (
+    build_retrieval_diagnostics,
+    merge_retrieval_diagnostics,
+    build_retrieval_quality_log_summary,
+)
+
 
 def evaluate_retrieval_node(
         state: DogState,
@@ -70,21 +77,174 @@ def evaluate_retrieval_node(
         state=state
     )
 
+    failure_type = str(
+        quality_result.failure_type
+        or ""
+    )
+
     logger.info(
         "RAG 召回质量评估完成，"
         f"status={quality_result.status}, "
         f"is_usable={quality_result.is_usable}, "
-        f"failure_type={quality_result.failure_type}, "
+        f"failure_type={failure_type}, "
         f"quality_score={quality_result.quality_score}"
     )
 
+    quality_result_dump = quality_result.model_dump()
+
     logger.debug(
-        f"RAG 召回质量评估详情: {json.dumps(quality_result.model_dump(),indent=4, ensure_ascii=False)}"
+        "RAG 召回质量评估摘要: "
+        f"status={quality_result.status}, "
+        f"is_usable={quality_result.is_usable}, "
+        f"failure_type={failure_type}, "
+        f"quality_score={quality_result.quality_score}, "
+        f"reasons_count={len(quality_result_dump.get('reasons', []))}, "
+        f"metrics={quality_result_dump.get('metrics', {})}"
+    )
+
+    decision = resolve_evaluate_decision(
+        state=state,
+        is_usable=quality_result.is_usable,
+        failure_type=failure_type,
+    )
+
+    evaluate_diagnostics = build_retrieval_diagnostics(
+        state=state,
+        stage="evaluate",
+        docs=state.get(
+            "docs",
+            [],
+        ) or [],
+        rag_context=state.get(
+            "rag_context",
+            {},
+        ) or {},
+        failure_type=failure_type,
+        decision=decision,
+        reason=(
+            "evaluate_retrieval_node 完成召回质量评估，"
+            f"status={quality_result.status}，"
+            f"is_usable={quality_result.is_usable}，"
+            f"failure_type={failure_type}，"
+            f"quality_score={quality_result.quality_score}，"
+            f"decision={decision}。"
+        ),
+    )
+
+    retrieval_quality = merge_retrieval_diagnostics(
+        old_diagnostics=state.get(
+            "retrieval_quality",
+            {},
+        ),
+        new_diagnostics={
+            **evaluate_diagnostics,
+            "quality_evaluation": quality_result_dump,
+            "quality_status": str(
+                quality_result.status
+                or ""
+            ),
+            "quality_score": quality_result.quality_score,
+            "is_usable": quality_result.is_usable,
+        },
+    )
+
+    logger.debug(
+        "evaluate_retrieval_node 检索诊断摘要: "
+        f"{json.dumps(
+            build_retrieval_quality_log_summary(
+                retrieval_quality=retrieval_quality,
+            ),
+            ensure_ascii=False,
+        )}"
     )
 
     return {
         "retrieval_ok": quality_result.is_usable,
         "retrieval_evaluated": True,
-        "retrieval_quality": quality_result.model_dump(),
-        "retrieval_failure_type": quality_result.failure_type,
+        "retrieval_quality": retrieval_quality,
+        "retrieval_failure_type": failure_type,
     }
+
+def resolve_evaluate_decision(
+        state: DogState,
+        is_usable: bool,
+        failure_type: str,
+) -> str:
+    """
+    根据召回质量评估结果推断 evaluate 后的建议动作。
+
+    功能：
+        这个函数只用于写入 retrieval_quality["decision"]，
+        不直接控制 LangGraph 路由。
+
+        真正的路由仍然由 dog_knowledge_agent.routes 中的
+        route_after_dog_knowledge_evaluate 决定。
+
+        当前逻辑尽量和 dog_knowledge_agent 的 evaluate 后路由保持一致：
+        1. 如果召回可用，建议进入 rerank。
+        2. 如果问题模糊且还没问过用户，建议 ask_user。
+        3. 如果还没超过 retry 次数，建议 retry。
+        4. 否则建议 generate，让 generate_node 用有限上下文兜底回答。
+
+    参数：
+        state:
+            当前 DogState。
+
+        is_usable:
+            召回结果是否可用。
+
+        failure_type:
+            召回失败类型。
+
+    返回值：
+        str:
+            建议动作：
+            - rerank
+            - ask_user
+            - retry
+            - generate
+
+    专业名词：
+        Decision：
+            决策。这里表示 evaluate 后建议下一步走哪个节点。
+
+        Quality Gate：
+            质量门控。根据质量评估结果决定是否继续生成或重试。
+    """
+    failure_type = str(
+        failure_type
+        or ""
+    )
+
+    if is_usable:
+        return "rerank"
+
+    has_asked_user = bool(
+        state.get(
+            "has_asked_user",
+            False,
+        )
+    )
+
+    if (
+            failure_type
+            in {
+                "ambiguous_query",
+                "need_user_clarification",
+            }
+            and not has_asked_user
+    ):
+        return "ask_user"
+
+    retry_count = int(
+        state.get(
+            "retry_count",
+            0,
+        )
+        or 0
+    )
+
+    if retry_count < 2:
+        return "retry"
+
+    return "generate"

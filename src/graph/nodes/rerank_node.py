@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from typing import Any
 
@@ -8,6 +9,14 @@ from langchain_core.documents import Document
 from src.graph.states.dog_state import DogState
 from src.logger import logger
 from src.runtime.context import runtime_ctx
+
+
+# 导入rag诊断工具
+from src.rag.observation.diagnostics import (
+    build_retrieval_diagnostics,
+    merge_retrieval_diagnostics,
+    build_retrieval_quality_log_summary,
+)
 
 
 RetrievedChunkDict = dict[str, Any]
@@ -221,13 +230,40 @@ def execute_rerank(
             ),
         )
 
+        reranked_chunks_count = len(
+            result.get(
+                "rag_context",
+                {},
+            ).get(
+                "chunks",
+                [],
+            )
+        )
+
+        reranked_docs_count = len(
+            result.get(
+                "docs",
+                [],
+            )
+        )
+
+        result = attach_rerank_diagnostics(
+            state=state,
+            result=result,
+            reason=(
+                "rerank_node 完成新版 rag_context.chunks 重排序，"
+                f"reranked_chunks={reranked_chunks_count}，"
+                f"reranked_docs={reranked_docs_count}。"
+            ),
+        )
+
         if checkpoint_provider is not None:
             checkpoint_provider.manager.save_checkpoint()
 
         logger.info(
             "新版 rerank_node 执行完成，"
-            f"reranked_chunks={len(result.get('rag_context', {}).get('chunks', []))}, "
-            f"docs={len(result.get('docs', []))}"
+            f"reranked_chunks={reranked_chunks_count}, "
+            f"docs={reranked_docs_count}"
         )
 
         return result
@@ -249,12 +285,129 @@ def execute_rerank(
         ),
     )
 
+    reranked_docs_count = len(
+        result.get(
+            "docs",
+            [],
+        )
+    )
+
+    result = attach_rerank_diagnostics(
+        state=state,
+        result=result,
+        reason=(
+            "rerank_node 完成旧版 docs 重排序，"
+            f"reranked_docs={reranked_docs_count}。"
+        ),
+    )
+
     if checkpoint_provider is not None:
         checkpoint_provider.manager.save_checkpoint()
 
     logger.info(
         "旧版 docs rerank 执行完成，"
-        f"docs={len(result.get('docs', []))}"
+        f"docs={reranked_docs_count}"
+    )
+
+    return result
+
+def attach_rerank_diagnostics(
+        state: DogState,
+        result: dict[str, Any],
+        reason: str,
+) -> dict[str, Any]:
+    """
+    给 rerank 结果附加检索诊断信息。
+
+    功能：
+        rerank_node 完成重排序后，会返回新的 rag_context。
+        本函数负责基于新版 RagContext 构建 rerank 阶段 diagnostics。
+
+        数据优先级：
+        1. result["rag_context"] 是 rerank 后的新版 RAG 主结果。
+        2. state["rag_context"] 是 rerank 前的新版 RAG 结果。
+        3. result["docs"] / state["docs"] 只作为旧版兼容 fallback。
+
+    参数：
+        state:
+            当前 DogState。
+
+        result:
+            rerank_node 返回的状态更新。
+            新版链路中通常包含 result["rag_context"]。
+
+        reason:
+            rerank 阶段诊断原因。
+
+    返回值：
+        dict[str, Any]:
+            附加 retrieval_quality 后的 result。
+    """
+
+    original_rag_context = state.get(
+        "rag_context",
+        {},
+    ) or {}
+
+    reranked_rag_context = result.get(
+        "rag_context",
+        {},
+    ) or {}
+
+    original_docs = list(
+        state.get(
+            "docs",
+            [],
+        )
+        or []
+    )
+
+    reranked_docs = list(
+        result.get(
+            "docs",
+            [],
+        )
+        or []
+    )
+
+    rerank_diagnostics = build_retrieval_diagnostics(
+        state=state,
+        stage="rerank",
+        docs=original_docs,
+        reranked_docs=reranked_docs,
+        rag_context=original_rag_context,
+        reranked_rag_context=reranked_rag_context,
+        failure_type=str(
+            state.get(
+                "retrieval_failure_type",
+                "",
+            )
+            or ""
+        ),
+        decision="generate",
+        reason=reason,
+    )
+
+    retrieval_quality = merge_retrieval_diagnostics(
+        old_diagnostics=state.get(
+            "retrieval_quality",
+            {},
+        ),
+        new_diagnostics=rerank_diagnostics,
+    )
+
+    result[
+        "retrieval_quality"
+    ] = retrieval_quality
+
+    logger.debug(
+        "rerank_node 检索诊断摘要: "
+        f"{json.dumps(
+            build_retrieval_quality_log_summary(
+                retrieval_quality=retrieval_quality,
+            ),
+            ensure_ascii=False,
+        )}"
     )
 
     return result

@@ -296,13 +296,16 @@ def build_generate_node(
         )
 
         logger.debug(
-            f"generate_node history_text={history_text}"
+            "generate_node history摘要，"
+            f"history_length={len(history_text)}, "
+            f"history_preview={truncate_log_text(history_text, max_length=200)}"
         )
 
         logger.debug(
-            "generate_node 使用上下文，"
+            "generate_node 使用上下文摘要，"
             f"context_source={context_source}, "
-            f"context_preview={context[:1000]}"
+            f"context_length={len(context)}, "
+            f"context_preview={truncate_log_text(context, max_length=300)}"
         )
 
         prompt_text = build_generation_prompt(
@@ -327,11 +330,22 @@ def build_generate_node(
         )
 
         logger.info(
-            f"generate_node 节点完成，answer={answer}"
+            "generate_node 节点完成，"
+            f"answer_length={len(answer)}"
         )
 
         logger.debug(
-            f"Runtime State:{runtime.state().get_state()}"
+            "generate_node answer摘要，"
+            f"answer_preview={truncate_log_text(answer, max_length=300)}"
+        )
+
+        runtime_state = runtime.state().get_state()
+
+        runtime_state = runtime.state().get_state()
+
+        logger.debug(
+            "Runtime State 摘要: "
+            f"{build_runtime_state_log_summary(runtime_state)}"
         )
 
         save_checkpoint_safely(
@@ -459,6 +473,112 @@ def write_docs_to_retrieval_scope_safely(
             f"generate_node 写入 RetrievalScope 失败，可忽略: {e}"
         )
 
+
+def truncate_log_text(
+        text: str,
+        max_length: int = 300,
+) -> str:
+    """
+    截断日志文本。
+
+    功能：
+        避免将过长的 context、answer、history 直接打印到控制台。
+
+    参数：
+        text:
+            原始文本。
+
+        max_length:
+            最大保留长度。
+
+    返回值：
+        str:
+            截断后的文本。
+    """
+
+    normalized = str(
+        text
+        or ""
+    ).strip()
+
+    if len(
+            normalized
+    ) <= max_length:
+        return normalized
+
+    return (
+        normalized[:max_length]
+        + "...【已截断】"
+    )
+
+
+def build_runtime_state_log_summary(
+        runtime_state: Any,
+) -> dict[str, Any]:
+    """
+    构建 RuntimeState 日志摘要。
+
+    功能：
+        避免直接打印完整 RuntimeState 对象。
+
+    参数：
+        runtime_state:
+            runtime.state().get_state() 返回的运行时状态。
+
+    返回值：
+        dict[str, Any]:
+            适合控制台打印的运行时状态摘要。
+    """
+
+    if isinstance(
+            runtime_state,
+            dict,
+    ):
+        return {
+            "current_agent": runtime_state.get(
+                "current_agent",
+            ),
+            "current_node": runtime_state.get(
+                "current_node",
+            ),
+            "current_tool": runtime_state.get(
+                "current_tool",
+            ),
+            "phase": runtime_state.get(
+                "phase",
+            ),
+            "retry_count": runtime_state.get(
+                "retry_count",
+            ),
+        }
+
+    return {
+        "current_agent": getattr(
+            runtime_state,
+            "current_agent",
+            None,
+        ),
+        "current_node": getattr(
+            runtime_state,
+            "current_node",
+            None,
+        ),
+        "current_tool": getattr(
+            runtime_state,
+            "current_tool",
+            None,
+        ),
+        "phase": getattr(
+            runtime_state,
+            "phase",
+            None,
+        ),
+        "retry_count": getattr(
+            runtime_state,
+            "retry_count",
+            None,
+        ),
+    }
 
 def normalize_llm_response_to_text(
         response: Any,

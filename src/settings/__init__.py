@@ -11,6 +11,7 @@ from src.settings.embedding import EmbeddingSettings
 from src.settings.reranker import RerankerSettings
 from src.settings.memory import MemorySettings
 from src.settings.rag import RagSettings
+from src.settings.observability import ObservabilitySettings
 
 
 class Settings:
@@ -39,6 +40,8 @@ class Settings:
         self.memory = MemorySettings()
 
         self.rag = RagSettings()
+
+        self.observability = ObservabilitySettings()
 
 
 settings = Settings()

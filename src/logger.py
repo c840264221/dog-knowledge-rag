@@ -57,6 +57,21 @@ logger = base_logger.patch(
 )
 
 
+CONSOLE_LOG_LEVEL = os.getenv(
+    "LOG_LEVEL",
+    "INFO",
+).upper()
+
+LOG_DIAGNOSE = os.getenv(
+    "LOG_DIAGNOSE",
+    "false",
+).lower() == "true"
+
+LOG_BACKTRACE = os.getenv(
+    "LOG_BACKTRACE",
+    "false",
+).lower() == "true"
+
 # 移除默认 Handler
 logger.remove()
 
@@ -66,15 +81,15 @@ logger.add(
 
     sys.stdout,
 
-    level="DEBUG",
+    level=CONSOLE_LOG_LEVEL,
 
     colorize=True,
 
     enqueue=True,
 
-    backtrace=True,
+    backtrace=LOG_BACKTRACE,
 
-    diagnose=True,
+    diagnose=LOG_DIAGNOSE,
 
     format=(
 

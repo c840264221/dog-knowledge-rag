@@ -9,6 +9,14 @@ from typing import Any
 from src.logger import logger
 from src.user.user_manager import get_user_id
 
+from collections.abc import Mapping
+
+from src.settings import settings
+from src.rag.debug.retriever_debug_report import (
+    cleanup_old_rag_debug_reports,
+    save_rag_debug_report,
+)
+
 
 def create_initial_state(
         question: str,
@@ -162,6 +170,164 @@ def create_initial_state(
     }
 
 
+def should_write_rag_debug_report(
+        state: Mapping[str, Any],
+) -> bool:
+    """
+    判断是否应该写入 RAG Debug Report。
+
+    功能：
+        根据 settings.observability 的配置，
+        以及当前 state 是否包含 RAG 相关字段，
+        判断是否需要保存 RAG Debug Report。
+
+    参数：
+        state:
+            当前 LangGraph 最终状态。
+
+    返回值：
+        bool:
+            True 表示需要保存报告。
+            False 表示不保存报告。
+
+    专业名词：
+        RAG Debug Report：
+            RAG 调试报告，用于记录一次 RAG 链路的查询、检索、评估、精排、生成结果。
+    """
+
+    if not settings.observability.ENABLE_RAG_DEBUG_REPORT:
+        return False
+
+    if not settings.observability.RAG_DEBUG_REPORT_TO_FILE:
+        return False
+
+    if not isinstance(
+            state,
+            Mapping,
+    ):
+        return False
+
+    has_rag_data = any(
+        [
+            state.get(
+                "rag_query"
+            ),
+            state.get(
+                "rag_context"
+            ),
+            state.get(
+                "retrieval_quality"
+            ),
+        ]
+    )
+
+    return bool(
+        has_rag_data
+    )
+
+
+def write_rag_debug_report_if_enabled(
+        state: Mapping[str, Any],
+        trace_id: str | None = None,
+) -> None:
+    """
+    按配置写入 RAG Debug Report。
+
+    功能：
+        如果 settings 中开启了 RAG Debug Report 文件输出，
+        则将当前 state 写入 Markdown 报告文件。
+
+        当前支持：
+        1. 按 trace_id 命名报告文件。
+        2. 按日期分目录保存。
+        3. 写入后打印文件路径。
+        4. 可选清理过期报告目录。
+
+    参数：
+        state:
+            当前 LangGraph 最终状态。
+
+        trace_id:
+            当前请求 trace_id。
+
+    返回值：
+        None。
+    """
+
+    if not should_write_rag_debug_report(
+            state=state,
+    ):
+        return
+
+    try:
+        report_path = save_rag_debug_report(
+            state=state,
+            report_dir=settings.path.RAG_DEBUG_REPORT_DIR,
+            trace_id=trace_id,
+            max_context_chars=settings.observability.RAG_DEBUG_CONTEXT_MAX_CHARS,
+            max_answer_chars=settings.observability.RAG_DEBUG_ANSWER_MAX_CHARS,
+            use_date_dir=settings.observability.RAG_DEBUG_REPORT_USE_DATE_DIR,
+        )
+
+        logger.info(
+            f"RAG Debug Report saved: {report_path.resolve()} "
+            f"exists={report_path.exists()}"
+        )
+
+        if settings.observability.RAG_DEBUG_REPORT_CLEANUP_ON_WRITE:
+            removed_count = cleanup_old_rag_debug_reports(
+                report_dir=settings.path.RAG_DEBUG_REPORT_DIR,
+                retention_days=settings.observability.RAG_DEBUG_REPORT_RETENTION_DAYS,
+            )
+
+            if removed_count > 0:
+                logger.info(
+                    f"RAG Debug Report 清理完成，removed_dirs={removed_count}"
+                )
+
+    except Exception as e:
+        logger.warning(
+            f"RAG Debug Report 保存失败: {e}"
+        )
+
+
+def get_final_state_values(
+        current_state,
+) -> dict[str, Any]:
+    """
+    从 LangGraph current_state 中提取最终 state。
+
+    功能：
+        app.aget_state(config) 返回的对象中，
+        values 通常保存当前图状态。
+        这里统一转换为 dict，方便后续写报告。
+
+    参数：
+        current_state:
+            LangGraph 当前状态对象。
+
+    返回值：
+        dict[str, Any]:
+            当前图状态字典。
+    """
+
+    values = getattr(
+        current_state,
+        "values",
+        {},
+    )
+
+    if isinstance(
+            values,
+            Mapping,
+    ):
+        return dict(
+            values
+        )
+
+    return {}
+
+
 async def run_main_graph_with_stream(question: str, thread_id:str="default_user", trace_id=None) -> str:
     # 启用runtime上下文管理  废弃trace_ctx
     from src.runtime.context import runtime_ctx
@@ -226,12 +392,39 @@ async def run_main_graph_with_stream(question: str, thread_id:str="default_user"
 
 
         # 恢复后又中断了  虽然不太可能  但为了保险起见
-        current = await app.aget_state(config)
+        current = await app.aget_state(
+            config
+        )
+
         if current.next:
-            prompt = extract_interrupt_prompt(current)
+            prompt = extract_interrupt_prompt(
+                current
+            )
+
             return f"__INTERRUPT__:{prompt}"
-        else:
-            return current.values.get("answer","无答案")
+
+        final_state = get_final_state_values(
+            current_state=current
+        )
+
+        write_rag_debug_report_if_enabled(
+            state=final_state,
+            trace_id=trace_id,
+        )
+
+        answer = (
+                final_state.get(
+                    "answer"
+                )
+                or final_state.get(
+            "final_answer"
+        )
+                or "无答案"
+        )
+
+        return str(
+            answer
+        )
     else:
 
         # 使用uuid作为线程id 每次对话创建一个新的id
@@ -259,25 +452,48 @@ async def run_main_graph_with_stream(question: str, thread_id:str="default_user"
             return events
 
         events = await collect_stream()
-        logger.debug(f"图执行产生 {len(events)} 个状态快照")
 
+        logger.debug(
+            f"图执行产生 {len(events)} 个状态快照"
+        )
 
-        # 检查最后的事件中是否有 answer
-        for ev in reversed(events):
-            if "answer" in ev and ev["answer"]:
-                logger.info(f"返回答案长度: {len(ev["answer"])} 字符")
-                return ev["answer"]
-
-
-        # 如果没有 answer，说明图在中断点暂停了 此处配合gradio，所以不采用循环处理
-        current = await app.aget_state(config)
+        current = await app.aget_state(
+            config
+        )
 
         if current.next:
-            prompt = extract_interrupt_prompt(current)
-            # 返回一个带有特定表示的数据 前端可以根据标识知道这是断点  需要用户输入
+            prompt = extract_interrupt_prompt(
+                current
+            )
+
             return f"__INTERRUPT__:{prompt}"
-        else:
-            return current.values.get("answer", "无答案")
+
+        final_state = get_final_state_values(
+            current_state=current
+        )
+
+        write_rag_debug_report_if_enabled(
+            state=final_state,
+            trace_id=trace_id,
+        )
+
+        answer = (
+                final_state.get(
+                    "answer"
+                )
+                or final_state.get(
+            "final_answer"
+        )
+                or "无答案"
+        )
+
+        logger.info(
+            f"返回答案长度: {len(str(answer))} 字符"
+        )
+
+        return str(
+            answer
+        )
 
 
         # 如果没有 answer，说明图在中断点暂停了，需要循环处理

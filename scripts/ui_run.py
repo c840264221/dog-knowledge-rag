@@ -2,10 +2,8 @@ import gradio as gr
 from src.graph.graph_run import run_main_graph_with_stream
 from src.logger import logger
 
-import src.runtime.events.setup
 from src.runtime.hooks.tool_counter_hook import ToolCounterHook
 
-# from src.runtime.trace import trace_ctx
 
 from src.runtime.trace.init import trace_manager
 
@@ -16,6 +14,60 @@ from src.runtime.container.init import (
 )
 
 from src.runtime.timeline.timeline_reporter import TimelineReporter
+
+from src.settings import settings
+
+
+
+def print_runtime_reports_if_enabled(
+        runtime,
+) -> None:
+    """
+    按配置打印 Runtime 可观测报告。
+
+    功能：
+        根据 settings.observability 控制 Timeline Report 和 Runtime Report
+        是否打印到控制台。
+
+        当前阶段：
+            1. 控制台默认不打印完整 Timeline。
+            2. 控制台默认不打印完整 Runtime Report。
+            3. 后续 RAG Debug Report 会单独输出到文件。
+
+    参数：
+        runtime:
+            当前 RuntimeContext。
+
+    返回值：
+        None。
+
+    专业名词：
+        Console：
+            控制台。开发运行时直接看到的终端输出。
+
+        Report：
+            报告。结构化整理后的运行信息。
+    """
+
+    if settings.observability.ENABLE_CONSOLE_TIMELINE_REPORT:
+        TimelineReporter.report()
+
+    if settings.observability.ENABLE_CONSOLE_RUNTIME_REPORT:
+        from src.runtime.observability.report_builder import (
+            ReportBuilder
+        )
+
+        from src.runtime.observability.report_printer import (
+            ReportPrinter
+        )
+
+        report = ReportBuilder.build(
+            runtime
+        )
+
+        ReportPrinter.print(
+            report
+        )
 
 
 async def respond_and_process(
@@ -176,25 +228,30 @@ async def respond_and_process(
         logger.info(f'运行结束，metrics为：{metrics_scope}')
 
         #==============时间线打印==============
-        TimelineReporter.report()
+        # TimelineReporter.report()
+        #
+        #
+        # # ============可观测性完整日志==============
+        #
+        # from src.runtime.observability.report_builder import (
+        #     ReportBuilder
+        # )
+        #
+        # from src.runtime.observability.report_printer import (
+        #     ReportPrinter
+        # )
+        #
+        # report = ReportBuilder.build(
+        #     runtime_ctx.get()
+        # )
+        #
+        # ReportPrinter.print(
+        #     report
+        # )
 
-
-        # ============可观测性完整日志==============
-
-        from src.runtime.observability.report_builder import (
-            ReportBuilder
-        )
-
-        from src.runtime.observability.report_printer import (
-            ReportPrinter
-        )
-
-        report = ReportBuilder.build(
-            runtime_ctx.get()
-        )
-
-        ReportPrinter.print(
-            report
+        # 打印日志 这里是经过处理的  不在打印完全版的timeline和report了
+        print_runtime_reports_if_enabled(
+            runtime=runtime_ctx.get()
         )
 
         # 销毁所有作用域scope
@@ -374,28 +431,39 @@ async def resume_agent(
     })
 
     # ==============时间线打印==============
-    TimelineReporter.report()
+    # TimelineReporter.report()
+    #
+    # # ==============可观测性完整日志==============
+    # from src.runtime.observability.report_builder import (
+    #     ReportBuilder
+    # )
+    #
+    # from src.runtime.observability.report_printer import (
+    #     ReportPrinter
+    # )
+    #
+    # report = ReportBuilder.build(
+    #     runtime_ctx.get()
+    # )
+    #
+    # ReportPrinter.print(
+    #     report
+    # )
 
-    # ==============可观测性完整日志==============
-    from src.runtime.observability.report_builder import (
-        ReportBuilder
-    )
-
-    from src.runtime.observability.report_printer import (
-        ReportPrinter
-    )
-
-    report = ReportBuilder.build(
-        runtime_ctx.get()
-    )
-
-    ReportPrinter.print(
-        report
+    # 打印日志 这里是打印经过处理的日志 而不是打印全部内容
+    print_runtime_reports_if_enabled(
+        runtime=runtime_ctx.get()
     )
 
     from src.runtime.scopes.metrics_scope import MetricsScope
     metrics_scope = runtime_ctx.get().service(MetricsScope).get_metrics()
-    logger.info(f'运行结束，metrics为：{metrics_scope}')
+    logger.info(
+        "运行结束，"
+        f"tools={metrics_scope.get('tool_count', 0)}, "
+        f"llm={metrics_scope.get('llm_count', 0)}, "
+        f"errors={metrics_scope.get('error_count', 0)}, "
+        f"tool_latency={metrics_scope.get('tool_latency', 0)}"
+    )
 
     checkpoint = container.get("checkpoint").manager
     checkpoint.clear_checkpoint(trace_id)
