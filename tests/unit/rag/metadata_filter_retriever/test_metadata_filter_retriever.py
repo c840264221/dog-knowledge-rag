@@ -287,6 +287,17 @@ def get_chunk_content(
                 value,
             )
 
+    nested_chunk = getattr(
+        chunk,
+        "chunk",
+        None,
+    )
+
+    if nested_chunk is not None:
+        return get_chunk_content(
+            chunk=nested_chunk,
+        )
+
     return ""
 
 

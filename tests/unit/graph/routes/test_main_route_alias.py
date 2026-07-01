@@ -1,10 +1,13 @@
 from src.graph.routes.main_route_alias import (
     DOG_KNOWLEDGE_AGENT_NODE,
+    DOG_KNOWLEDGE_AGENT_ROUTE,
     EXACT_AGENT_ROUTE,
+    EXACT_SEARCH_AGENT_ROUTE,
     FINISH_ROUTE,
     GENERAL_AGENT_NODE,
     GENERAL_AGENT_ROUTE,
     RECOMMENDATION_AGENT_ROUTE,
+    TOOL_AGENT_ROUTE,
     build_main_route_alias_map,
 )
 
@@ -125,8 +128,11 @@ def test_main_route_alias_map_contains_only_expected_routes():
     )
 
     assert set(route_map.keys()) == {
+        DOG_KNOWLEDGE_AGENT_ROUTE,
         RECOMMENDATION_AGENT_ROUTE,
         EXACT_AGENT_ROUTE,
+        EXACT_SEARCH_AGENT_ROUTE,
         GENERAL_AGENT_ROUTE,
+        TOOL_AGENT_ROUTE,
         FINISH_ROUTE,
     }

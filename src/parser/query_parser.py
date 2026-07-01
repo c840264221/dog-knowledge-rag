@@ -1,3 +1,15 @@
+"""
+Deprecated legacy query parsing module.
+
+兼容性说明：
+    该模块属于旧版 query_parse（查询解析）链路，仅为历史代码兼容保留。
+    V1.7.1 之后，新的主图路由链路不应该再依赖这里的解析函数。
+
+新代码要求：
+    RootAgent 只负责 coarse routing（粗粒度路由）。
+    狗狗知识相关的详细 RAG 解析应放在 dog_knowledge_agent / RAG 层中完成。
+"""
+
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.runnables import  RunnableLambda
 from src.parser.schema import QueryParseResult

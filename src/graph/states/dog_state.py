@@ -130,6 +130,8 @@ class DogState(TypedDict, total=False):
     # =========================
 
     route_decision: Dict[str, Any]
+    root_observability: Dict[str, Any]
+    root_debug_report: Dict[str, Any]
 
     # =========================
     # 11. Memory 记忆上下文

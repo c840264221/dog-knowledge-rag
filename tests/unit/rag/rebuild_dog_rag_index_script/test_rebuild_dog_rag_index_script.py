@@ -314,7 +314,7 @@ def test_parse_args_should_use_default_values():
     )
 
     assert parsed_args.data_dir == "data/dog_markdown"
-    assert parsed_args.vector_store_provider == "vector_store_provider"
+    assert parsed_args.vector_store_provider == "vectorstore"
     assert parsed_args.vector_store_attr == "db"
     assert parsed_args.batch_size == 64
     assert parsed_args.overwrite_existing is True

@@ -25,10 +25,10 @@ from src.graph.routes. route_after_retrieval import (
     route_after_retrieval,
 )
 
-# 这个 import 也请根据你的真实文件位置调整
 # 重点：这里建议 import 整个模块，而不是只 import 函数
 # 因为 route_after_semantic 内部用了 runtime_ctx，测试时需要 monkeypatch 替换它
 import src.graph.routes.route_after_semantic as semantic_route_module
+import src.agents.root_agent.routes as root_route_module
 
 
 def test_route_after_confirm_should_call_tool_when_need_tool_and_tool_calls_exist():
@@ -535,7 +535,7 @@ def test_route_after_semantic_should_return_valid_next_agent(monkeypatch):
     fake_ctx = FakeRuntimeContext()
 
     monkeypatch.setattr(
-        semantic_route_module,
+        root_route_module,
         "runtime_ctx",
         FakeRuntimeCtxVar(
             fake_ctx,
@@ -550,12 +550,12 @@ def test_route_after_semantic_should_return_valid_next_agent(monkeypatch):
         state,
     )
 
-    assert result == "exact_agent"
-    assert fake_ctx.state_scope.current_agent == "exact_agent"
+    assert result == "dog_knowledge_agent"
+    assert fake_ctx.state_scope.current_agent == "dog_knowledge_agent"
     assert fake_ctx.timeline_scope.events == [
         {
             "event_type": "route",
-            "name": "route_after_semantic",
+            "name": "route_after_root_supervisor",
             "metadata": None,
         }
     ]
@@ -576,7 +576,7 @@ def test_route_after_semantic_should_fallback_to_general_agent_when_next_agent_m
     fake_ctx = FakeRuntimeContext()
 
     monkeypatch.setattr(
-        semantic_route_module,
+        root_route_module,
         "runtime_ctx",
         FakeRuntimeCtxVar(
             fake_ctx,
@@ -608,7 +608,7 @@ def test_route_after_semantic_should_fallback_to_general_agent_when_next_agent_e
     fake_ctx = FakeRuntimeContext()
 
     monkeypatch.setattr(
-        semantic_route_module,
+        root_route_module,
         "runtime_ctx",
         FakeRuntimeCtxVar(
             fake_ctx,
@@ -642,7 +642,7 @@ def test_route_after_semantic_should_strip_next_agent(monkeypatch):
     fake_ctx = FakeRuntimeContext()
 
     monkeypatch.setattr(
-        semantic_route_module,
+        root_route_module,
         "runtime_ctx",
         FakeRuntimeCtxVar(
             fake_ctx,
@@ -657,8 +657,8 @@ def test_route_after_semantic_should_strip_next_agent(monkeypatch):
         state,
     )
 
-    assert result == "exact_agent"
-    assert fake_ctx.state_scope.current_agent == "exact_agent"
+    assert result == "dog_knowledge_agent"
+    assert fake_ctx.state_scope.current_agent == "dog_knowledge_agent"
 
 
 def test_route_after_semantic_should_fallback_to_general_agent_when_next_agent_invalid(monkeypatch):
@@ -680,7 +680,7 @@ def test_route_after_semantic_should_fallback_to_general_agent_when_next_agent_i
     fake_ctx = FakeRuntimeContext()
 
     monkeypatch.setattr(
-        semantic_route_module,
+        root_route_module,
         "runtime_ctx",
         FakeRuntimeCtxVar(
             fake_ctx,
@@ -700,17 +700,21 @@ def test_route_after_semantic_should_fallback_to_general_agent_when_next_agent_i
 
 
 @pytest.mark.parametrize(
-    "next_agent",
+    "next_agent, expected_route",
     [
-        "recommendation_agent",
-        "exact_agent",
-        "general_agent",
-        "FINISH",
+        ("dog_knowledge_agent", "dog_knowledge_agent"),
+        ("recommendation_agent", "dog_knowledge_agent"),
+        ("exact_agent", "dog_knowledge_agent"),
+        ("exact_search_agent", "dog_knowledge_agent"),
+        ("general_agent", "general_agent"),
+        ("tool_agent", "general_agent"),
+        ("FINISH", "FINISH"),
     ],
 )
 def test_route_after_semantic_should_allow_all_valid_routes(
     monkeypatch,
     next_agent,
+    expected_route,
 ):
     """
     测试 route_after_semantic 是否允许所有合法路由。
@@ -732,7 +736,7 @@ def test_route_after_semantic_should_allow_all_valid_routes(
     fake_ctx = FakeRuntimeContext()
 
     monkeypatch.setattr(
-        semantic_route_module,
+        root_route_module,
         "runtime_ctx",
         FakeRuntimeCtxVar(
             fake_ctx,
@@ -747,8 +751,8 @@ def test_route_after_semantic_should_allow_all_valid_routes(
         state,
     )
 
-    assert result == next_agent
-    assert fake_ctx.state_scope.current_agent == next_agent
+    assert result == expected_route
+    assert fake_ctx.state_scope.current_agent == expected_route
 
 
 def test_route_after_semantic_should_still_return_route_when_runtime_context_failed(monkeypatch):
@@ -790,7 +794,7 @@ def test_route_after_semantic_should_still_return_route_when_runtime_context_fai
             )
 
     monkeypatch.setattr(
-        semantic_route_module,
+        root_route_module,
         "runtime_ctx",
         BrokenRuntimeCtxVar(),
     )
@@ -803,4 +807,4 @@ def test_route_after_semantic_should_still_return_route_when_runtime_context_fai
         state,
     )
 
-    assert result == "exact_agent"
+    assert result == "dog_knowledge_agent"

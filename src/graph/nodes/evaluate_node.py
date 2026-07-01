@@ -23,7 +23,7 @@ def evaluate_retrieval_node(
     评估 RAG 召回结果质量。
 
     功能：
-        判断 retrieve_node 返回的 rag_context / docs 是否足够支持 generate_node 生成答案。
+        判断 retrieve_node 返回的 rag_context 是否足够支持后续 rerank / generate 链路
 
         v1.5 改造点：
         1. 不再只依赖 docs 数量。

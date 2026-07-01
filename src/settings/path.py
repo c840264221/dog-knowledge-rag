@@ -40,6 +40,8 @@ class PathSettings(BaseAppSettings):
 
     RAG_DEBUG_REPORT_DIR: Path = REPORT_DIR / "rag_debug"
 
+    RAG_EVALUATE_REPORT_DIR: Path = REPORT_DIR / "rag_evaluate"
+
     CACHE_DIR: Path = BASE_DIR / "models_cache"
 
     CHROMA_DB_DIR: Path = BASE_DIR / "chroma_db"
@@ -120,6 +122,7 @@ class PathSettings(BaseAppSettings):
             "LOG_DIR",
             "REPORT_DIR",
             "RAG_DEBUG_REPORT_DIR",
+            "RAG_EVALUATE_REPORT_DIR",
             "CACHE_DIR",
             "CHROMA_DB_DIR",
             "MEMORY_CHROMA_DB_DIR",

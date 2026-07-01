@@ -1,11 +1,25 @@
-from typing import Any
+from __future__ import annotations
+
+from typing import (
+    Any,
+)
+
+from src.agents.root_agent.routes import (
+    build_root_route_alias_map,
+)
 
 
 RECOMMENDATION_AGENT_ROUTE = "recommendation_agent"
 
 EXACT_AGENT_ROUTE = "exact_agent"
 
+EXACT_SEARCH_AGENT_ROUTE = "exact_search_agent"
+
+DOG_KNOWLEDGE_AGENT_ROUTE = "dog_knowledge_agent"
+
 GENERAL_AGENT_ROUTE = "general_agent"
+
+TOOL_AGENT_ROUTE = "tool_agent"
 
 FINISH_ROUTE = "FINISH"
 
@@ -21,49 +35,41 @@ def build_main_route_alias_map(
     构建主图路由别名映射表。
 
     功能：
-        将 semantic_router_node 输出的旧 route key 映射到当前主图中真实执行的节点。
+        V1.7 兼容适配层。
+        主图仍然调用 build_main_route_alias_map，
+        但新版标准路由映射由 root_agent.routes.build_root_route_alias_map 管理。
 
-        v1.5 当前迁移策略：
-        1. semantic_router_node 继续输出 recommendation_agent。
-        2. semantic_router_node 继续输出 exact_agent。
-        3. 主图不再构建旧 recommendation_agent / exact_search_agent。
-        4. recommendation_agent 和 exact_agent 都映射到 dog_knowledge_agent。
-        5. general_agent 仍然映射到 general。
-        6. FINISH 映射到 LangGraph END。
+        当前支持两类 route key：
+        1. 新版 route key：
+           - dog_knowledge_agent
+           - general_agent
+           - tool_agent
+           - FINISH
+
+        2. 旧版 route key：
+           - recommendation_agent -> dog_knowledge_agent
+           - exact_agent -> dog_knowledge_agent
+           - exact_search_agent -> dog_knowledge_agent
 
     参数：
         end_node:
-            LangGraph 的 END 节点。
-            这里通过参数传入，而不是在本文件直接 import END，
-            可以避免 route 工具文件依赖 LangGraph 运行时对象，
-            同时方便单元测试传入假 END。
+            LangGraph END 节点。
 
     返回值：
         dict[str, Any]:
             主图 conditional_edges 使用的路由映射表。
-
-    输出格式：
-        {
-            "recommendation_agent": "dog_knowledge_agent",
-            "exact_agent": "dog_knowledge_agent",
-            "general_agent": "general",
-            "FINISH": END
-        }
-
-    专业名词：
-        Route Alias：
-            路由别名。旧路由 key 不变，但实际执行新节点。
-
-        Main Graph：
-            主图。Dog Agent Framework 最外层 LangGraph。
-
-        END：
-            LangGraph 的结束节点，表示图执行完成。
     """
 
-    return {
-        RECOMMENDATION_AGENT_ROUTE: DOG_KNOWLEDGE_AGENT_NODE,
-        EXACT_AGENT_ROUTE: DOG_KNOWLEDGE_AGENT_NODE,
-        GENERAL_AGENT_ROUTE: GENERAL_AGENT_NODE,
-        FINISH_ROUTE: end_node,
-    }
+    route_map = build_root_route_alias_map(
+        end_node=end_node,
+    )
+
+    route_map.update(
+        {
+            RECOMMENDATION_AGENT_ROUTE: DOG_KNOWLEDGE_AGENT_NODE,
+            EXACT_AGENT_ROUTE: DOG_KNOWLEDGE_AGENT_NODE,
+            EXACT_SEARCH_AGENT_ROUTE: DOG_KNOWLEDGE_AGENT_NODE,
+        }
+    )
+
+    return route_map
