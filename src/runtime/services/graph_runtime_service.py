@@ -40,6 +40,10 @@ from src.graph.routes.main_route_alias import (
     build_main_route_alias_map,
 )
 
+from src.agents.dog_knowledge_agent.entry_integration import (
+    build_integrated_dog_knowledge_entry_node,
+)
+
 
 class GraphRuntimeService:
     """
@@ -318,7 +322,9 @@ class GraphRuntimeService:
 
         graph.add_node(
             "dog_knowledge_agent",
-            dog_knowledge_agent,
+            build_integrated_dog_knowledge_entry_node(
+                delegate_node=dog_knowledge_agent,
+            ),
         )
 
         graph.add_node(

@@ -134,7 +134,23 @@ class DogState(TypedDict, total=False):
     root_debug_report: Dict[str, Any]
 
     # =========================
-    # 11. Memory 记忆上下文
+    # 11. DogKnowledgeAgent pipeline skeleton(狗狗知识智能体的管线骨架)相关字段
+    # =========================
+
+    dog_knowledge_pipeline_status: str
+
+    dog_knowledge_pipeline_version: str
+
+    dog_knowledge_pipeline_question: str
+
+    dog_knowledge_pipeline_steps: list[dict[str, Any]]
+
+    dog_knowledge_pipeline_trace: list[dict[str, Any]]
+
+    dog_knowledge_debug_report: dict[str, Any]
+
+    # =========================
+    # 12. Memory 记忆上下文
     # =========================
 
     memory_context: str

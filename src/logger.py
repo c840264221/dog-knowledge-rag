@@ -3,8 +3,6 @@ import sys
 
 from loguru import logger as base_logger
 
-# from src.runtime.trace import trace_ctx
-
 from src.runtime.context import runtime_ctx
 
 from src.config import LOG_PATH

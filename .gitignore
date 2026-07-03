@@ -9,6 +9,7 @@ venv/
 
 # 数据
 chroma_db/
+chroma_memory_db/
 models_cache/
 data
 logs
@@ -20,3 +21,6 @@ test_scripts
 .vscode/
 
 *.md
+
+*.sqlite3
+*.bin
