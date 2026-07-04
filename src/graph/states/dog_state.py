@@ -97,6 +97,13 @@ class DogState(TypedDict, total=False):
     answer_strategy: Dict[str, Any]
 
     # =========================
+    # 6.1 DogKnowledgeAgent v1.7.3 标准答案契约字段
+    # =========================
+
+    dog_knowledge_answer: Any
+    dog_knowledge_answer_public: Dict[str, Any]
+
+    # =========================
     # 7. 人机交互 / 澄清字段
     # =========================
 

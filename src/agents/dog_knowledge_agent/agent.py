@@ -42,6 +42,10 @@ from src.logger import (
     logger,
 )
 
+from src.agents.dog_knowledge_agent.nodes.finalize_answer_node import (
+    build_finalize_dog_knowledge_answer_node,
+)
+
 
 def build_dog_knowledge_agent(
         llm_provider=None,
@@ -199,6 +203,10 @@ def build_dog_knowledge_agent(
         checkpoint_provider=checkpoint_provider,
     )
 
+    finalize_answer_node = build_finalize_dog_knowledge_answer_node(
+        include_debug=False,
+    )
+
     # =========================
     # 1. 内部 model 分支
     # =========================
@@ -240,6 +248,11 @@ def build_dog_knowledge_agent(
     builder.add_node(
         "generate",
         generate_node,
+    )
+
+    builder.add_node(
+        "finalize_answer",
+        finalize_answer_node,
     )
 
     # =========================
@@ -337,6 +350,11 @@ def build_dog_knowledge_agent(
 
     builder.add_edge(
         "generate",
+        "finalize_answer",
+    )
+
+    builder.add_edge(
+        "finalize_answer",
         END,
     )
 
