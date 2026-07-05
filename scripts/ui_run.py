@@ -1,5 +1,6 @@
 import gradio as gr
-from src.graph.graph_run import run_main_graph_with_stream
+import src.runtime.events.setup  # noqa: F401
+from src.graph.graph_run import run_main_graph_with_result
 from src.logger import logger
 
 from src.runtime.hooks.tool_counter_hook import ToolCounterHook
@@ -12,11 +13,111 @@ import uuid
 from src.runtime.container.init import (
     container
 )
+from src.runtime.resume.contracts import (
+    GraphFinalResult,
+    GraphInterruptResult,
+)
 
 from src.runtime.timeline.timeline_reporter import TimelineReporter
 
 from src.settings import settings
 
+
+
+def ensure_trace_exists(
+        trace_id: str,
+) -> None:
+    """
+    确保 trace_manager 中存在当前 trace。
+
+    功能：
+        在新请求或 resume（恢复运行）前检查 trace_manager。
+        如果当前 trace_id 对应的 Trace 不存在，则重新创建一个。
+        这样可以避免 UI 恢复时 RuntimeContext 已恢复，但内存中的 Trace 丢失，
+        导致工具 TraceMiddleware 创建 span 失败。
+
+    参数：
+        trace_id：
+            当前请求链路追踪 ID。
+
+    返回值：
+        None：
+            无业务返回值，只保证 trace_manager 内部状态存在。
+    """
+
+    if not trace_id:
+        return
+
+    trace_manager.ensure_trace(
+        trace_id
+    )
+
+
+def build_resume_runtime_context(
+        trace_id: str,
+        session_id: str,
+        state: dict,
+        checkpoint_manager,
+):
+    """
+    构建恢复阶段使用的 RuntimeContext。
+
+    功能：
+        优先从 checkpoint（检查点）恢复 RuntimeContext。
+        如果检查点缺失，则创建一个最小可用 RuntimeContext 作为兜底。
+        同时恢复 trace_id、session_id、user_id、component 和 tool.before hook。
+
+    参数：
+        trace_id：
+            当前请求链路追踪 ID。
+        session_id：
+            Gradio 当前会话 ID，同时作为 LangGraph thread_id 使用。
+        state：
+            UI session_state，用于读取 user_id 等恢复信息。
+        checkpoint_manager：
+            CheckpointManager（检查点管理器），用于恢复 RuntimeContext 快照。
+
+    返回值：
+        RuntimeContext：
+            可用于 resume 阶段的运行时上下文。
+    """
+
+    from src.runtime.context import RuntimeContext
+
+    ctx = checkpoint_manager.restore_checkpoint(
+        trace_id
+    )
+
+    if ctx is None:
+        logger.warning(
+            "未从 checkpoint 恢复到 RuntimeContext，"
+            "将创建最小恢复上下文继续执行。"
+        )
+
+        ctx = RuntimeContext(
+            trace_id=trace_id,
+            session_id=session_id,
+            user_id=state.get(
+                "user_id",
+                "unknown"
+            ),
+            component="resume_handler",
+        )
+
+    ctx.trace_id = trace_id
+    ctx.session_id = session_id
+    ctx.user_id = state.get(
+        "user_id",
+        ctx.user_id or "unknown"
+    )
+    ctx.component = "resume_handler"
+
+    ctx.hooks().register(
+        "tool.before",
+        ToolCounterHook()
+    )
+
+    return ctx
 
 
 def print_runtime_reports_if_enabled(
@@ -83,7 +184,9 @@ async def respond_and_process(
 
     trace_id = str(uuid.uuid4())
 
-    trace_manager.create_trace(trace_id)
+    ensure_trace_exists(
+        trace_id
+    )
 
     # ===== user_id =====
 
@@ -173,7 +276,7 @@ async def respond_and_process(
 
     # ===== 调用图 =====
 
-    result = await run_main_graph_with_stream(
+    result = await run_main_graph_with_result(
 
         question,
 
@@ -184,9 +287,9 @@ async def respond_and_process(
 
     # ===== interrupt =====
 
-    if result.startswith("__INTERRUPT__:"):
+    if isinstance(result, GraphInterruptResult):
 
-        prompt = result[len("__INTERRUPT__:"):].strip()
+        prompt = result.prompt
 
         state["pending"] = True
 
@@ -216,11 +319,17 @@ async def respond_and_process(
 
         state["pending"] = False
 
+        answer = (
+            result.answer
+            if isinstance(result, GraphFinalResult)
+            else str(result)
+        )
+
         history.append({
 
             "role": "assistant",
 
-            "content": result
+            "content": answer
         })
 
         from src.runtime.scopes.metrics_scope import MetricsScope
@@ -345,10 +454,16 @@ async def resume_agent(
         "checkpoint"
     ).manager
 
-    ctx = checkpoint.restore_checkpoint(
+    ensure_trace_exists(
         trace_id
     )
-    # runtime_ctx.set(ctx)
+
+    ctx = build_resume_runtime_context(
+        trace_id=trace_id,
+        session_id=session_id,
+        state=state,
+        checkpoint_manager=checkpoint,
+    )
 
     await runtime_ctx.create(ctx)
 
@@ -370,22 +485,21 @@ async def resume_agent(
     # 恢复 graph
     # =========================
 
-    resume_msg = f"RESUME:{confirm_value}"
-
-    result = await run_main_graph_with_stream(
-        resume_msg,
+    result = await run_main_graph_with_result(
+        confirm_value,
         thread_id=session_id,
-        trace_id=trace_id
+        trace_id=trace_id,
+        resume_value=confirm_value,
     )
 
     # =========================
     # 再次中断
     # =========================
 
-    if result.startswith("__INTERRUPT__:"):
+    if isinstance(result, GraphInterruptResult):
         logger.warning("再次中断了!...")
 
-        prompt = result[len("__INTERRUPT__:"):].strip()
+        prompt = result.prompt
 
         state["pending_prompt"] = prompt
 
@@ -399,10 +513,16 @@ async def resume_agent(
             "checkpoint"
         ).manager
 
-        ctx = checkpoint.restore_checkpoint(
+        ensure_trace_exists(
             trace_id
         )
-        # runtime_ctx.set(ctx)
+
+        ctx = build_resume_runtime_context(
+            trace_id=trace_id,
+            session_id=session_id,
+            state=state,
+            checkpoint_manager=checkpoint,
+        )
 
         await runtime_ctx.create(ctx)
 
@@ -425,9 +545,15 @@ async def resume_agent(
 
     state["pending"] = False
 
+    answer = (
+        result.answer
+        if isinstance(result, GraphFinalResult)
+        else str(result)
+    )
+
     history.append({
         "role": "assistant",
-        "content": result
+        "content": answer
     })
 
     # ==============时间线打印==============

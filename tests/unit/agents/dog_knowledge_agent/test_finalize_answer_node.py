@@ -1,11 +1,6 @@
 from src.agents.dog_knowledge_agent.nodes.finalize_answer_node import (
     build_finalize_dog_knowledge_answer_node,
 )
-from src.agents.dog_knowledge_agent.schemas import (
-    DogKnowledgeAnswer,
-)
-
-
 def test_finalize_answer_node_returns_state_update():
     """
     测试 finalize answer node 可以返回 LangGraph state update。
@@ -34,9 +29,9 @@ def test_finalize_answer_node_returns_state_update():
     assert "dog_knowledge_answer_public" in update
     assert "final_answer" in update
 
-    assert isinstance(update["dog_knowledge_answer"], DogKnowledgeAnswer)
-    assert update["dog_knowledge_answer"].question == "金毛寿命多久？"
-    assert update["dog_knowledge_answer"].query_type == "exact_lookup"
+    assert isinstance(update["dog_knowledge_answer"], dict)
+    assert update["dog_knowledge_answer"]["question"] == "金毛寿命多久？"
+    assert update["dog_knowledge_answer"]["query_type"] == "exact_lookup"
     assert update["final_answer"] == "金毛寻回犬的寿命通常在 10 到 12 年左右。"
 
 
@@ -131,6 +126,7 @@ def test_finalize_answer_node_formats_recommendation_result():
 
     answer = update["dog_knowledge_answer"]
 
-    assert answer.query_type == "recommendation"
-    assert answer.has_recommendations() is True
-    assert answer.recommended_breeds[0].breed_name == "labrador_retriever"
+    assert isinstance(answer, dict)
+    assert answer["query_type"] == "recommendation"
+    assert len(answer["recommended_breeds"]) == 1
+    assert answer["recommended_breeds"][0]["breed_name"] == "labrador_retriever"

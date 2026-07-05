@@ -8,6 +8,9 @@ from src.agents.dog_knowledge_agent.v174_smoke_checks import (
     render_dog_knowledge_layer_contract_smoke_markdown,
     validate_dog_knowledge_layer_contract_state,
 )
+from src.runtime.services.checkpoint_config import (
+    build_graph_checkpoint_config,
+)
 
 
 def build_fake_layer_contract_state() -> dict[str, Any]:
@@ -117,12 +120,10 @@ async def run_graph_mode() -> dict[str, Any]:
                 "session_id": "smoke_session_v174",
                 "trace_id": "smoke_trace_v174",
             },
-            config={
-                "configurable": {
-                    "thread_id": "smoke_v174_dog_knowledge_layer_contract",
-                    "checkpoint_ns": "dog_knowledge_layer_contract_smoke",
-                },
-            },
+            config=build_graph_checkpoint_config(
+                thread_id="smoke_v174_dog_knowledge_layer_contract",
+                checkpoint_ns="dog_knowledge_layer_contract_smoke",
+            ),
         )
     finally:
         await container.shutdown()

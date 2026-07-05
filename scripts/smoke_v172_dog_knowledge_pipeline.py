@@ -29,6 +29,9 @@ from src.agents.dog_knowledge_agent.debug_report_smoke_checks import (
     render_dog_knowledge_debug_report_smoke_markdown,
     validate_dog_knowledge_debug_report_smoke_state,
 )
+from src.runtime.services.checkpoint_config import (
+    build_graph_checkpoint_config,
+)
 
 
 async def build_or_get_main_graph() -> Any:
@@ -119,12 +122,10 @@ def build_smoke_graph_config() -> dict[str, Any]:
             LangGraph graph.ainvoke 使用的 config 配置。
     """
 
-    return {
-        "configurable": {
-            "thread_id": "smoke_v172_dog_knowledge_pipeline",
-            "checkpoint_ns": "dog_knowledge_pipeline_smoke",
-        },
-    }
+    return build_graph_checkpoint_config(
+        thread_id="smoke_v172_dog_knowledge_pipeline",
+        checkpoint_ns="dog_knowledge_pipeline_smoke",
+    )
 
 
 async def run_smoke_test() -> int:

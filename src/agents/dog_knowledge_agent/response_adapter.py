@@ -144,7 +144,7 @@ class DogKnowledgeAgentResponseAdapter:
                 LangGraph 节点可以返回的更新字段。
                 包含：
                     dog_knowledge_answer:
-                        DogKnowledgeAnswer 对象。
+                        DogKnowledgeAnswer 的普通 dict 表示。
 
                     dog_knowledge_answer_public:
                         对外安全 dict。
@@ -171,12 +171,41 @@ class DogKnowledgeAgentResponseAdapter:
             )
 
         public_answer = answer.to_public_dict(include_debug=include_debug)
+        state_answer = self._answer_to_state_dict(
+            answer=answer,
+        )
 
         return {
-            "dog_knowledge_answer": answer,
+            "dog_knowledge_answer": state_answer,
             "dog_knowledge_answer_public": public_answer,
             "final_answer": answer.answer,
         }
+
+    def _answer_to_state_dict(
+        self,
+        answer: DogKnowledgeAnswer,
+    ) -> dict[str, Any]:
+        """
+        将 DogKnowledgeAnswer 转换成适合写入 LangGraph state 的 dict。
+
+        功能：
+            避免把 DogKnowledgeAnswer 这种自定义 Pydantic 对象直接写入 checkpoint。
+            LangGraph checkpoint 更适合保存 dict、list、str、int、float、bool、None
+            这类稳定可序列化数据。
+
+        参数：
+            answer:
+                已经格式化完成的 DogKnowledgeAnswer 对象。
+
+        返回值：
+            dict[str, Any]:
+                可以安全写入 LangGraph state / checkpoint 的普通字典。
+        """
+
+        return answer.model_dump(
+            mode="json",
+            exclude_none=True,
+        )
 
     def _extract_question(
         self,

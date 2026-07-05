@@ -3,6 +3,15 @@ from src.graph.tools.runtime.graph_stream_runtime import safe_stream_graph
 from src.runtime.container.init import (
     container
 )
+from src.runtime.resume.contracts import (
+    GraphFinalResult,
+    GraphInterruptResult,
+)
+from src.runtime.resume.legacy_protocol import (
+    encode_legacy_interrupt_result,
+    parse_legacy_resume_message,
+)
+from src.runtime.services.checkpoint_config import build_graph_checkpoint_config
 
 from typing import Any
 
@@ -328,204 +337,517 @@ def get_final_state_values(
     return {}
 
 
-async def run_main_graph_with_stream(question: str, thread_id:str="default_user", trace_id=None) -> str:
-    # 启用runtime上下文管理  废弃trace_ctx
+async def run_main_graph_with_result(
+        question: str,
+        thread_id: str = "default_user",
+        trace_id: str | None = None,
+        resume_value: str | None = None,
+        graph_app: Any | None = None,
+        runtime_context: Any | None = None,
+        stream_runner: Any | None = None,
+) -> GraphFinalResult | GraphInterruptResult:
+    """
+    运行主图并返回结构化结果。
+
+    功能：
+        执行 Dog Agent Framework 主图，并用 GraphFinalResult / GraphInterruptResult
+        表达运行结果，避免在运行入口内部继续依赖字符串前缀表示状态。
+
+    参数：
+        question:
+            用户输入的问题，或者旧 UI 传入的恢复消息。
+        thread_id:
+            LangGraph thread_id，用于定位同一条可恢复图执行线程。
+        trace_id:
+            当前请求链路追踪 ID。
+        resume_value:
+            显式恢复值。UI / API 已经知道当前是在恢复中断时，可以直接传入该值，
+            避免继续拼接旧版 RESUME 字符串。
+        graph_app:
+            可选的 LangGraph app。测试时可以传入 mock app，真实运行时默认从 container 获取。
+        runtime_context:
+            可选 RuntimeContext。测试时可以传入 mock context，真实运行时默认从 runtime_ctx 获取。
+        stream_runner:
+            可选流式执行函数。测试时可以传入 mock async generator，真实运行时默认使用 safe_stream_graph。
+
+    返回值：
+        GraphFinalResult | GraphInterruptResult:
+            GraphFinalResult 表示图正常完成；
+            GraphInterruptResult 表示图被 interrupt 暂停，需要用户继续输入。
+    """
+
+    app = graph_app or _get_graph_app_from_container()
+    resolved_runtime_context = runtime_context or _get_runtime_context()
+    resolved_stream_runner = stream_runner or safe_stream_graph
+    normalized_question = normalize_graph_question(question)
+
+    if trace_id:
+        resolved_runtime_context.trace_id = trace_id
+
+    state = create_initial_state(
+        normalized_question,
+        trace_id,
+    )
+
+    resolved_runtime_context.user_id = state.get(
+        "user_id",
+        "unknown",
+    )
+    resolved_runtime_context.session_id = thread_id
+
+    logger.info(
+        f"收到用户 [{state['user_id']}] 问题: {normalized_question}"
+    )
+
+    config = build_graph_checkpoint_config(
+        thread_id=thread_id,
+        run_name=f"query_{normalized_question[:20]}",
+        tags=[
+            "dog_agent",
+            "memory_test",
+        ],
+        metadata={
+            "trace_id": trace_id,
+        },
+    )
+    resume_checkpoint_ns = config["configurable"].pop(
+        "checkpoint_ns"
+    )
+
+    resume_request = parse_legacy_resume_message(
+        message=normalized_question,
+        thread_id=thread_id,
+        checkpoint_ns=resume_checkpoint_ns,
+        trace_id=trace_id,
+    )
+    resolved_resume_value = (
+        resume_value
+        if resume_value is not None
+        else (
+            resume_request.resume_value
+            if resume_request is not None
+            else None
+        )
+    )
+
+    if resolved_resume_value is not None:
+        return await _resume_main_graph_with_result(
+            app=app,
+            config=config,
+            resume_value=str(resolved_resume_value),
+            thread_id=thread_id,
+            checkpoint_ns=resume_checkpoint_ns,
+            trace_id=trace_id,
+        )
+
+    return await _start_main_graph_with_result(
+        app=app,
+        state=state,
+        config=config,
+        stream_runner=resolved_stream_runner,
+        thread_id=thread_id,
+        checkpoint_ns=resume_checkpoint_ns,
+        trace_id=trace_id,
+    )
+
+
+async def run_main_graph_with_stream(
+        question: str,
+        thread_id: str = "default_user",
+        trace_id: str | None = None,
+) -> str:
+    """
+    运行主图并返回旧 UI 兼容字符串。
+
+    功能：
+        兼容 Gradio UI 当前调用方式。内部调用结构化的 run_main_graph_with_result，
+        再把 GraphInterruptResult 编码为旧版中断字符串，把 GraphFinalResult 转成答案文本。
+
+    参数：
+        question:
+            用户输入问题或旧版恢复消息。
+        thread_id:
+            LangGraph thread_id。
+        trace_id:
+            当前请求链路追踪 ID。
+
+    返回值：
+        str:
+            普通完成时返回答案文本；
+            中断时返回旧 UI 可识别的中断字符串。
+    """
+
+    result = await run_main_graph_with_result(
+        question=question,
+        thread_id=thread_id,
+        trace_id=trace_id,
+    )
+
+    if isinstance(
+            result,
+            GraphInterruptResult,
+    ):
+        return encode_legacy_interrupt_result(
+            result
+        )
+
+    return result.answer
+
+
+def normalize_graph_question(
+        question: Any,
+) -> str:
+    """
+    归一化 Graph 输入问题。
+
+    功能：
+        兼容 Gradio 多模态输入中 question 可能是 [{"text": "..."}] 的情况，
+        并统一转换为字符串。
+
+    参数：
+        question:
+            原始输入，可能是 str 或包含 text 字段的 list。
+
+    返回值：
+        str:
+            归一化后的问题文本。
+    """
+
+    if (
+            isinstance(question, list)
+            and len(question) > 0
+            and isinstance(question[0], Mapping)
+            and "text" in question[0]
+    ):
+        return str(
+            question[0]["text"]
+        )
+
+    return str(
+        question
+    )
+
+
+def _get_runtime_context() -> Any:
+    """
+    获取当前 RuntimeContext。
+
+    功能：
+        从 runtime_ctx contextvar 中读取当前运行时上下文。
+        单独抽出函数后，测试可以通过 run_main_graph_with_result 的 runtime_context 参数绕过真实上下文。
+
+    参数：
+        无。
+
+    返回值：
+        Any:
+            当前 RuntimeContext。
+    """
+
     from src.runtime.context import runtime_ctx
 
-    runtime_context = runtime_ctx.get()
+    return runtime_ctx.get()
 
+
+def _get_graph_app_from_container() -> Any:
+    """
+    从 container 中获取主图 app。
+
+    功能：
+        读取 graph_runtime 服务，并返回已经 compile 的 LangGraph app。
+
+    参数：
+        无。
+
+    返回值：
+        Any:
+            LangGraph compiled graph app。
+    """
 
     graph_runtime = container.get(
         "graph_runtime"
     )
 
-    app = graph_runtime.graph
-
-    if trace_id:
-        # trace_ctx.set_trace_id(trace_id)
-        runtime_context.trace_id = trace_id
-
-    if isinstance(question, list) and len(question) > 0 and "text" in question[0]:
-        question = question[0]["text"]
-
-    # 初始化state
-    state = create_initial_state(question, trace_id)
-
-    # 设置 user_id 和 session_id 到 contextvar（确保即使没有经过 Gradio 入口也能记录）
-    # trace_ctx.set_user_id(state.get("user_id", "unknown"))
-    # trace_ctx.set_session_id(thread_id)
+    return graph_runtime.graph
 
 
-    runtime_context.user_id = state.get("user_id", "unknown")
-    runtime_context.set_session_id = thread_id
+async def _resume_main_graph_with_result(
+        app: Any,
+        config: dict[str, Any],
+        resume_value: str,
+        thread_id: str,
+        checkpoint_ns: str,
+        trace_id: str | None = None,
+) -> GraphFinalResult | GraphInterruptResult:
+    """
+    恢复已中断的主图并返回结构化结果。
 
-    logger.info(f"收到用户 [{state["user_id"]}] 问题: {question}")
+    功能：
+        使用 LangGraph Command(resume=...) 恢复图执行。
+        如果恢复后正常完成，返回 GraphFinalResult；
+        如果恢复后再次中断，返回 GraphInterruptResult。
 
-    # 用user_id作为线程的id 每次对话都可以根据线程id来获取之前对话历史  达到记忆目的
-    config = {"configurable": {"thread_id": thread_id},
-              "run_name": f"query_{question[:20]}",  # LangSmith 显示的名称
-              "tags": ["dog_agent", "memory_test"],
-              }
+    参数：
+        app:
+            LangGraph compiled graph app。
+        config:
+            LangGraph 执行配置。
+        resume_value:
+            用户确认或补充输入的恢复值。
+        thread_id:
+            LangGraph thread_id。
+        checkpoint_ns:
+            恢复契约中记录的 checkpoint namespace。
+        trace_id:
+            当前请求链路追踪 ID。
+
+    返回值：
+        GraphFinalResult | GraphInterruptResult:
+            结构化图运行结果。
+    """
 
     from langgraph.types import Command
 
+    async for event in app.astream(
+            Command(resume=resume_value),
+            config,
+            stream_mode="values",
+    ):
+        answer = extract_answer_from_state(event)
 
-    # 根据question判断是恢复断点还是新的问题
-    if question.startswith("RESUME:"):
-        user_input = question[7:].strip()
-
-        async def get_command_events():
-            events = []
-            async for chunk in app.astream(Command(resume=user_input), config, stream_mode="values"):
-                events.append(chunk)
-            return events
-
-        # events = list(app_2.astream(Command(resume=user_input), config, stream_mode="values"))
-
-        events = await get_command_events()
-
-
-        # 遍历事件  获取最后的answer
-        for ev in events:
-            if "answer" in ev and ev["answer"]:
-                return ev["answer"]
-
-
-        # 恢复后又中断了  虽然不太可能  但为了保险起见
-        current = await app.aget_state(
-            config
-        )
-
-        if current.next:
-            prompt = extract_interrupt_prompt(
-                current
+        if answer:
+            return build_graph_final_result(
+                answer=answer,
+                thread_id=thread_id,
+                checkpoint_ns=checkpoint_ns,
+                trace_id=trace_id,
+                metadata={
+                    "source": "resume_stream_event",
+                },
             )
 
-            return f"__INTERRUPT__:{prompt}"
+    current = await app.aget_state(
+        config
+    )
 
-        final_state = get_final_state_values(
-            current_state=current
+    return build_graph_result_from_current_state(
+        current_state=current,
+        thread_id=thread_id,
+        checkpoint_ns=checkpoint_ns,
+        trace_id=trace_id,
+    )
+
+
+async def _start_main_graph_with_result(
+        app: Any,
+        state: dict[str, Any],
+        config: dict[str, Any],
+        stream_runner: Any,
+        thread_id: str,
+        checkpoint_ns: str,
+        trace_id: str | None = None,
+) -> GraphFinalResult | GraphInterruptResult:
+    """
+    启动一次新的主图运行并返回结构化结果。
+
+    功能：
+        调用 safe_stream_graph 执行主图，然后读取 current state 判断是否完成或中断。
+
+    参数：
+        app:
+            LangGraph compiled graph app。
+        state:
+            Graph 初始 state。
+        config:
+            LangGraph 执行配置。
+        stream_runner:
+            图流式执行函数，真实运行使用 safe_stream_graph，测试可传 mock。
+        thread_id:
+            LangGraph thread_id。
+        checkpoint_ns:
+            恢复契约中记录的 checkpoint namespace。
+        trace_id:
+            当前请求链路追踪 ID。
+
+    返回值：
+        GraphFinalResult | GraphInterruptResult:
+            结构化图运行结果。
+    """
+
+    events = []
+
+    async for chunk in stream_runner(
+            graph=app,
+            state=state,
+            config=config,
+            stream_mode="updates",
+    ):
+        events.append(chunk)
+
+    logger.debug(
+        f"图执行产生 {len(events)} 个状态快照"
+    )
+
+    current = await app.aget_state(
+        config
+    )
+
+    return build_graph_result_from_current_state(
+        current_state=current,
+        thread_id=thread_id,
+        checkpoint_ns=checkpoint_ns,
+        trace_id=trace_id,
+    )
+
+
+def build_graph_result_from_current_state(
+        current_state: Any,
+        thread_id: str,
+        checkpoint_ns: str,
+        trace_id: str | None = None,
+) -> GraphFinalResult | GraphInterruptResult:
+    """
+    根据 LangGraph current state 构建结构化运行结果。
+
+    功能：
+        如果 current_state.next 存在，说明图停在 interrupt 上，返回 GraphInterruptResult；
+        否则提取最终 state 中的答案并返回 GraphFinalResult。
+
+    参数：
+        current_state:
+            LangGraph 当前状态对象。
+        thread_id:
+            LangGraph thread_id。
+        checkpoint_ns:
+            恢复契约中记录的 checkpoint namespace。
+        trace_id:
+            当前请求链路追踪 ID。
+
+    返回值：
+        GraphFinalResult | GraphInterruptResult:
+            结构化图运行结果。
+    """
+
+    if getattr(
+            current_state,
+            "next",
+            None,
+    ):
+        prompt = extract_interrupt_prompt(
+            current_state
         )
 
-        write_rag_debug_report_if_enabled(
-            state=final_state,
+        return GraphInterruptResult(
+            prompt=prompt,
+            thread_id=thread_id,
+            checkpoint_ns=checkpoint_ns,
             trace_id=trace_id,
         )
 
-        answer = (
-                final_state.get(
-                    "answer"
-                )
-                or final_state.get(
-            "final_answer"
-        )
-                or "无答案"
-        )
+    final_state = get_final_state_values(
+        current_state=current_state
+    )
 
+    write_rag_debug_report_if_enabled(
+        state=final_state,
+        trace_id=trace_id,
+    )
+
+    answer = (
+            extract_answer_from_state(final_state)
+            or "无答案"
+    )
+
+    logger.info(
+        f"返回答案长度: {len(str(answer))} 字符"
+    )
+
+    return build_graph_final_result(
+        answer=answer,
+        thread_id=thread_id,
+        checkpoint_ns=checkpoint_ns,
+        trace_id=trace_id,
+        metadata={
+            "source": "current_state",
+        },
+    )
+
+
+def build_graph_final_result(
+        answer: Any,
+        thread_id: str,
+        checkpoint_ns: str,
+        trace_id: str | None = None,
+        metadata: Mapping[str, Any] | None = None,
+) -> GraphFinalResult:
+    """
+    构建 GraphFinalResult。
+
+    功能：
+        统一把答案转换成字符串，并补齐 thread_id、checkpoint_ns、trace_id 和 metadata。
+
+    参数：
+        answer:
+            原始答案内容。
+        thread_id:
+            LangGraph thread_id。
+        checkpoint_ns:
+            恢复契约中记录的 checkpoint namespace。
+        trace_id:
+            当前请求链路追踪 ID。
+        metadata:
+            可选扩展元数据。
+
+    返回值：
+        GraphFinalResult:
+            结构化最终完成结果。
+    """
+
+    return GraphFinalResult(
+        answer=str(answer),
+        thread_id=thread_id,
+        checkpoint_ns=checkpoint_ns,
+        trace_id=trace_id,
+        metadata=dict(metadata or {}),
+    )
+
+
+def extract_answer_from_state(
+        state: Any,
+) -> str | None:
+    """
+    从 state 或事件中提取答案文本。
+
+    功能：
+        优先读取 answer 字段，其次读取 final_answer 字段。
+        兼容 dict / Mapping 格式的事件和最终 state。
+
+    参数：
+        state:
+            Graph state 或 stream event。
+
+    返回值：
+        str | None:
+            提取到的答案文本；没有可用答案时返回 None。
+    """
+
+    if not isinstance(
+            state,
+            Mapping,
+    ):
+        return None
+
+    answer = (
+            state.get("answer")
+            or state.get("final_answer")
+    )
+
+    if answer:
         return str(
             answer
         )
-    else:
 
-        # 使用uuid作为线程id 每次对话创建一个新的id
-        # config = {"configurable": {"thread_id": uuid.uuid4().hex}}
-
-        # 第一次调用，可能因中断而提前结束迭代
-        #     events = list(app_2.stream(state, config, stream_mode="values"))
-        #     改成safe_stream_graph方式调用 将运行和业务逻辑解耦 并添加上错误处理
-        # events = list(
-        #     safe_stream_graph(
-        #         graph=app_2,
-        #         state=state,
-        #         config=config,
-        #         # stream_mode="values"
-        #         stream_mode="updates"
-        #     )
-        # )
-
-
-        # safe_stream_graph改为异步之后 调用方式变为async for来收集
-        async def collect_stream():
-            events = []
-            async for chunk in safe_stream_graph(graph=app, state=state, config=config, stream_mode="updates"):
-                events.append(chunk)
-            return events
-
-        events = await collect_stream()
-
-        logger.debug(
-            f"图执行产生 {len(events)} 个状态快照"
-        )
-
-        current = await app.aget_state(
-            config
-        )
-
-        if current.next:
-            prompt = extract_interrupt_prompt(
-                current
-            )
-
-            return f"__INTERRUPT__:{prompt}"
-
-        final_state = get_final_state_values(
-            current_state=current
-        )
-
-        write_rag_debug_report_if_enabled(
-            state=final_state,
-            trace_id=trace_id,
-        )
-
-        answer = (
-                final_state.get(
-                    "answer"
-                )
-                or final_state.get(
-            "final_answer"
-        )
-                or "无答案"
-        )
-
-        logger.info(
-            f"返回答案长度: {len(str(answer))} 字符"
-        )
-
-        return str(
-            answer
-        )
-
-
-        # 如果没有 answer，说明图在中断点暂停了，需要循环处理
-        # while True:
-        #     # 获取当前状态，检查中断信息
-        #     current_state = app_2.get_state(config)
-        #     if not current_state.next:  # 图已结束
-        #         return current_state.values.get("answer", "无答案")
-        #
-        #     # 提取中断附带的消息（由 ask_user_node 中的 interrupt() 传入）
-        #     # 在 LangGraph 中，中断信息存储在 current_state.tasks[0].interrupts 或 __interrupt__ 字段中
-        #     # 不同版本略有差异，常用方式：
-        #     if hasattr(current_state, 'tasks') and current_state.tasks:
-        #         interrupts = current_state.tasks[0].interrupts
-        #         if interrupts:
-        #             # 取第一个中断的消息
-        #             prompt_message = interrupts[0].value  # 这就是 interrupt(question) 中的 question
-        #             logger.debug(f"第一个中断的信息: {prompt_message}")
-        #         else:
-        #             prompt_message = "请做出选择："
-        #     else:
-        #         # 备用：从状态中的某个字段获取（但这需要你在 ask_user_node 中额外保存）
-        #         prompt_message = "请做出选择："
-        #
-        #     # 显示从节点中提取的提示，而不是硬编码
-        #     logger.debug(f"节点中提取的提示信息: {prompt_message}")
-        #     user_input = input("您的输入：").strip()
-        #
-        #     # 恢复执行
-        #     for event in app_2.stream(Command(resume=user_input), config, stream_mode="values"):
-        #         if "answer" in event and event["answer"]:
-        #             return event["answer"]
+    return None
 
 
 def extract_interrupt_prompt(current_state):

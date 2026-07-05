@@ -193,10 +193,10 @@ def test_response_adapter_finalize_state_from_pipeline_result():
 
     answer = update["dog_knowledge_answer"]
 
-    assert isinstance(answer, DogKnowledgeAnswer)
-    assert answer.question == "新手适合养什么狗？"
-    assert answer.query_type == "recommendation"
-    assert answer.has_recommendations() is True
+    assert isinstance(answer, dict)
+    assert answer["question"] == "新手适合养什么狗？"
+    assert answer["query_type"] == "recommendation"
+    assert len(answer["recommended_breeds"]) == 1
     assert "拉布拉多" in update["final_answer"]
 
 
@@ -230,8 +230,9 @@ def test_response_adapter_finalize_state_fallback_to_whole_state():
 
     answer = update["dog_knowledge_answer"]
 
-    assert answer.query_type == "exact_lookup"
-    assert answer.has_evidences() is True
+    assert isinstance(answer, dict)
+    assert answer["query_type"] == "exact_lookup"
+    assert len(answer["evidences"]) == 1
     assert update["final_answer"] == "边境牧羊犬通常非常聪明，也比较容易训练。"
 
 
@@ -276,4 +277,4 @@ def test_finalize_dog_knowledge_state_convenience_function():
     )
 
     assert "dog_knowledge_answer" in update
-    assert update["dog_knowledge_answer"].question == "贵宾犬适合公寓吗？"
+    assert update["dog_knowledge_answer"]["question"] == "贵宾犬适合公寓吗？"

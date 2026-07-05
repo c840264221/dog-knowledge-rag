@@ -25,6 +25,8 @@ import pytest
 from src.agents.general_qa_agent.supervisor import (
     build_general_qa_supervisor_node,
     build_state_summary,
+    decide_forced_tool_parse_worker,
+    is_root_tool_request,
 )
 
 
@@ -392,6 +394,14 @@ def test_build_state_summary_should_extract_expected_fields():
         ],
         "answer": "北京天气晴",
         "tool_confirmed": True,
+        "tool_round": 1,
+        "next_agent": "tool_agent",
+        "current_agent": "root_agent",
+        "route_decision": {
+            "route": "tool_agent",
+            "query_type": "tool_request",
+            "requires_tool": True,
+        },
         "unused_field": "不应该进入 summary",
     }
 
@@ -418,6 +428,14 @@ def test_build_state_summary_should_extract_expected_fields():
         ],
         "has_answer": True,
         "tool_confirmed": True,
+        "tool_round": 1,
+        "next_agent": "tool_agent",
+        "current_agent": "root_agent",
+        "route_decision": {
+            "route": "tool_agent",
+            "query_type": "tool_request",
+            "requires_tool": True,
+        },
     }
 
 
@@ -506,6 +524,114 @@ async def test_supervisor_should_return_valid_worker(
     assert fake_llm_provider.calls[0]["fallback_response"] == "所有模型均不可用！"
 
     assert fake_checkpoint_manager.save_count == 1
+
+
+@pytest.mark.asyncio
+async def test_supervisor_should_force_tool_parse_when_root_route_is_tool_agent():
+    """
+    测试 RootAgent 已判定工具请求时，general supervisor 应先进入 tool_parse。
+
+    功能：
+        当前 V1.7.5 阶段 tool_agent 暂时映射到 general。
+        当 RootAgent 已经输出 tool_agent / tool_request 时，
+        general_qa_agent 不应该再让 LLM 二次决定为 answer_gen，
+        而应该确定性地先进入 tool_parse。
+
+    参数：
+        无。
+
+    返回值：
+        None。
+    """
+
+    (
+        node,
+        _fake_ctx,
+        fake_llm_provider,
+        fake_checkpoint_manager,
+    ) = build_test_node(
+        decision="answer_gen",
+    )
+
+    result = await node(
+        {
+            "question": "今天成都的天气怎么样",
+            "next_agent": "tool_agent",
+            "route_decision": {
+                "route": "tool_agent",
+                "query_type": "tool_request",
+                "requires_tool": True,
+            },
+            "tool_round": 0,
+            "tool_calls": [],
+            "tool_results": [],
+            "answer": "",
+        }
+    )
+
+    assert result["next_worker"] == "tool_parse"
+    assert result["messages"][0].content == "Supervisor决策: tool_parse"
+    assert fake_llm_provider.calls == []
+    assert fake_checkpoint_manager.save_count == 1
+
+
+def test_decide_forced_tool_parse_worker_should_not_force_after_tool_parse_ran():
+    """
+    测试 tool_parse 已经执行过后，不再强制回到 tool_parse。
+
+    功能：
+        防止 tool_parse 解析失败或返回 need_tool=False 后，
+        supervisor 因 RootAgent 的 tool_agent 路由反复进入 tool_parse 形成循环。
+
+    参数：
+        无。
+
+    返回值：
+        None。
+    """
+
+    result = decide_forced_tool_parse_worker(
+        summary={
+            "next_agent": "tool_agent",
+            "route_decision": {
+                "route": "tool_agent",
+                "query_type": "tool_request",
+                "requires_tool": True,
+            },
+            "has_answer": False,
+            "tool_calls": [],
+            "tool_results": [],
+            "tool_confirmed": "",
+            "tool_round": 1,
+        }
+    )
+
+    assert result is None
+
+
+def test_is_root_tool_request_should_detect_route_decision():
+    """
+    测试 is_root_tool_request 可以识别 RootAgent 工具路由结果。
+
+    功能：
+        验证 route_decision.query_type=tool_request 时会被判定为工具请求。
+
+    参数：
+        无。
+
+    返回值：
+        None。
+    """
+
+    assert is_root_tool_request(
+        {
+            "route_decision": {
+                "route": "general_agent",
+                "query_type": "tool_request",
+                "requires_tool": False,
+            }
+        }
+    ) is True
 
 
 @pytest.mark.asyncio

@@ -12,7 +12,6 @@ from src.agents.dog_knowledge_agent.nodes.finalize_answer_node import (
     build_finalize_dog_knowledge_answer_node,
 )
 from src.agents.dog_knowledge_agent.schemas import (
-    DogKnowledgeAnswer,
     DogKnowledgeEvidence,
     DogKnowledgeRecommendationItem,
 )
@@ -76,13 +75,13 @@ def test_layer_contract_flow_should_finalize_exact_lookup_answer() -> None:
 
     answer = final_update["dog_knowledge_answer"]
 
-    assert isinstance(answer, DogKnowledgeAnswer)
-    assert answer.question == "金毛寿命多久？"
-    assert answer.query_type == "exact_lookup"
-    assert answer.status == "success"
-    assert answer.answer == "金毛寻回犬的寿命通常在 10 到 12 年左右。"
-    assert answer.has_evidences() is True
-    assert final_update["final_answer"] == answer.answer
+    assert isinstance(answer, dict)
+    assert answer["question"] == "金毛寿命多久？"
+    assert answer["query_type"] == "exact_lookup"
+    assert answer["status"] == "success"
+    assert answer["answer"] == "金毛寻回犬的寿命通常在 10 到 12 年左右。"
+    assert len(answer["evidences"]) == 1
+    assert final_update["final_answer"] == answer["answer"]
     assert final_update["dog_knowledge_answer_public"]["query_type"] == "exact_lookup"
 
 
@@ -137,9 +136,10 @@ def test_layer_contract_flow_should_finalize_recommendation_answer() -> None:
 
     answer = final_update["dog_knowledge_answer"]
 
-    assert answer.query_type == "recommendation"
-    assert answer.has_recommendations() is True
-    assert answer.recommended_breeds[0].breed_name == "labrador_retriever"
+    assert isinstance(answer, dict)
+    assert answer["query_type"] == "recommendation"
+    assert len(answer["recommended_breeds"]) == 1
+    assert answer["recommended_breeds"][0]["breed_name"] == "labrador_retriever"
     assert final_update["dog_knowledge_answer_public"]["recommended_breeds"][0][
         "breed_name"
     ] == "labrador_retriever"
@@ -183,8 +183,9 @@ def test_layer_contract_flow_should_finalize_fallback_answer() -> None:
 
     answer = final_update["dog_knowledge_answer"]
 
-    assert answer.query_type == "fallback"
-    assert answer.status == "fallback"
-    assert answer.is_fallback is True
-    assert answer.fallback_reason == "问题超出当前犬种知识库边界。"
+    assert isinstance(answer, dict)
+    assert answer["query_type"] == "fallback"
+    assert answer["status"] == "fallback"
+    assert answer["is_fallback"] is True
+    assert answer["fallback_reason"] == "问题超出当前犬种知识库边界。"
     assert final_update["final_answer"] == "我暂时无法基于当前犬种知识库可靠回答这个问题。"

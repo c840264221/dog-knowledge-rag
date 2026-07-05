@@ -44,6 +44,36 @@ class TraceManager:
 
         return trace
 
+    def ensure_trace(self, trace_id: str):
+        """
+        确保指定 trace_id 对应的 Trace 存在。
+
+        功能：
+            如果 trace_map 中已经存在 trace_id，则直接返回已有 Trace。
+            如果不存在，则创建一个新的 Trace 并注册到 trace_map。
+            主要用于 checkpoint resume（检查点恢复）场景，避免内存中的
+            trace 数据丢失后 create_span 直接失败。
+
+        参数：
+            trace_id：
+                当前请求链路追踪 ID。
+
+        返回值：
+            Trace：
+                已存在或新创建的 Trace 对象。
+        """
+
+        trace = self.trace_map.get(
+            trace_id
+        )
+
+        if trace is not None:
+            return trace
+
+        return self.create_trace(
+            trace_id
+        )
+
     def create_span(self,trace_id,name,parent_span=None):
 
         span = TraceSpan(
@@ -58,7 +88,9 @@ class TraceManager:
 
         self.span_map[span.span_id] = span
 
-        trace = self.trace_map[trace_id]
+        trace = self.ensure_trace(
+            trace_id
+        )
 
         # root span
         if parent_span is None:

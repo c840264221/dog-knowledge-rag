@@ -116,6 +116,27 @@ def build_general_qa_supervisor_node(
             state
         )
 
+        forced_worker = decide_forced_tool_parse_worker(
+            summary=summary,
+        )
+
+        if forced_worker is not None:
+            logger.info(
+                f"Supervisor确定性决策: {forced_worker}"
+            )
+
+            if checkpoint_manager is not None:
+                checkpoint_manager.save_checkpoint()
+
+            return {
+                "next_worker": forced_worker,
+                "messages": [
+                    AIMessage(
+                        content=f"Supervisor决策: {forced_worker}"
+                    )
+                ]
+            }
+
         response = await llm_provider.safe_ainvoke(
             llm=llm_provider.main_llm,
             prompt=GENERAL_QA_SUPERVISOR_PROMPT.format_messages(
@@ -209,4 +230,140 @@ def build_state_summary(
         "tool_confirmed": state.get(
             "tool_confirmed"
         ),
+        "tool_round": state.get(
+            "tool_round",
+            0,
+        ),
+        "next_agent": state.get(
+            "next_agent"
+        ),
+        "current_agent": state.get(
+            "current_agent"
+        ),
+        "route_decision": state.get(
+            "route_decision"
+        ),
     }
+
+
+def decide_forced_tool_parse_worker(
+    summary: dict,
+) -> str | None:
+    """
+    判断是否需要确定性地进入 tool_parse。
+
+    功能：
+        当 RootAgent 已经把问题识别为 tool_agent / tool_request 时，
+        general_qa_agent 当前只是临时承接工具链路。
+        此时第一次进入 general supervisor 应优先进入 tool_parse，
+        避免再次依赖 LLM 判断导致天气等工具问题被直接送到 answer_gen。
+
+    参数：
+        summary：
+            build_state_summary 生成的状态摘要。
+
+    返回值：
+        str | None：
+            返回 "tool_parse" 表示强制进入工具解析；
+            返回 None 表示继续走原有 LLM supervisor 决策。
+    """
+
+    if not is_root_tool_request(
+        summary
+    ):
+        return None
+
+    if summary.get(
+        "has_answer"
+    ):
+        return None
+
+    if summary.get(
+        "tool_calls"
+    ):
+        return None
+
+    if summary.get(
+        "tool_results"
+    ):
+        return None
+
+    if summary.get(
+        "tool_confirmed"
+    ):
+        return None
+
+    tool_round = summary.get(
+        "tool_round",
+        0,
+    ) or 0
+
+    try:
+        normalized_tool_round = int(
+            tool_round
+        )
+    except (
+        TypeError,
+        ValueError,
+    ):
+        normalized_tool_round = 0
+
+    if normalized_tool_round > 0:
+        return None
+
+    return "tool_parse"
+
+
+def is_root_tool_request(
+    summary: dict,
+) -> bool:
+    """
+    判断 RootAgent 是否已经将当前问题路由为工具请求。
+
+    功能：
+        兼容 RootAgent 写入 state 的多个字段：
+        1. next_agent == tool_agent
+        2. route_decision.route == tool_agent
+        3. route_decision.query_type == tool_request
+        4. route_decision.requires_tool == True
+
+    参数：
+        summary：
+            build_state_summary 生成的状态摘要。
+
+    返回值：
+        bool：
+            True 表示当前问题是 RootAgent 判定的工具请求；
+            False 表示不是。
+    """
+
+    if summary.get(
+        "next_agent"
+    ) == "tool_agent":
+        return True
+
+    route_decision = summary.get(
+        "route_decision"
+    )
+
+    if not isinstance(
+        route_decision,
+        dict,
+    ):
+        return False
+
+    if route_decision.get(
+        "route"
+    ) == "tool_agent":
+        return True
+
+    if route_decision.get(
+        "query_type"
+    ) == "tool_request":
+        return True
+
+    return bool(
+        route_decision.get(
+            "requires_tool"
+        )
+    )

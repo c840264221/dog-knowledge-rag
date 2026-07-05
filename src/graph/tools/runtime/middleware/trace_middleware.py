@@ -1,5 +1,3 @@
-from src.runtime.trace.init import trace_manager
-
 from src.graph.tools.runtime.middleware.base_middleware import BaseMiddleware
 
 from src.runtime.events.event_bus import (
@@ -14,6 +12,8 @@ from src.runtime.events.event_types import (
 from src.settings import settings
 
 from src.runtime.context import runtime_ctx
+
+from src.logger import logger
 
 
 class TraceMiddleware(BaseMiddleware):
@@ -50,6 +50,14 @@ class TraceMiddleware(BaseMiddleware):
 
         runtime_context = runtime_ctx.get()
 
+        if runtime_context is None:
+            logger.warning(
+                "TraceMiddleware 未获取到 RuntimeContext，"
+                "本次工具调用跳过 trace。"
+            )
+
+            return await next_func()
+
         previous_span = runtime_context.current_span
 
 
@@ -59,7 +67,17 @@ class TraceMiddleware(BaseMiddleware):
 
         span = start_event.span
 
+        if span is None:
+            logger.warning(
+                "SpanStartEvent 未被 listener 回填 span，"
+                "本次工具调用跳过 trace。"
+            )
+
+            return await next_func()
+
         runtime_context.current_span = span
+
+        ctx.current_span = span
 
         ctx.span_id = span.span_id
 
