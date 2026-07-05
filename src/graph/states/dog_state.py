@@ -104,6 +104,18 @@ class DogState(TypedDict, total=False):
     dog_knowledge_answer_public: Dict[str, Any]
 
     # =========================
+    # 6.2 DogKnowledgeAgent v1.7.4 Layer Contract 中间产物字段
+    # 这里使用 dict 保存，方便 LangGraph checkpoint 序列化。
+    # =========================
+
+    dog_query_result: Dict[str, Any]
+    dog_retrieval_result: Dict[str, Any]
+    dog_recommendation_result: Dict[str, Any]
+    dog_generation_result: Dict[str, Any]
+    dog_fallback_result: Dict[str, Any]
+    dog_knowledge_pipeline_result: Dict[str, Any]
+
+    # =========================
     # 7. 人机交互 / 澄清字段
     # =========================
 

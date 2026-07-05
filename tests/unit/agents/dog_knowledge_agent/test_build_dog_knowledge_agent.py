@@ -1,3 +1,4 @@
+from src.agents.dog_knowledge_agent import agent as dog_knowledge_agent_module
 from src.agents.dog_knowledge_agent.agent import (
     build_dog_knowledge_agent,
 )
@@ -96,6 +97,176 @@ class FakeRerankerProvider:
     pass
 
 
+class FakeCompiledGraph:
+    """
+    测试用假编译图。
+
+    功能：
+        保存 FakeStateGraph，方便测试检查节点和边是否注册正确。
+
+    参数：
+        graph:
+            FakeStateGraph 实例。
+
+    返回值：
+        FakeCompiledGraph 实例。
+    """
+
+    def __init__(
+            self,
+            graph,
+    ):
+        self.graph = graph
+
+
+class FakeStateGraph:
+    """
+    测试用假 StateGraph。
+
+    功能：
+        记录 DogKnowledgeAgent 构图时注册的节点和边。
+        这样测试可以验证图结构，不需要真正运行 LLM、RAG 或 LangGraph。
+
+    参数：
+        state_schema:
+            图使用的状态结构。
+
+    返回值：
+        FakeStateGraph 实例。
+    """
+
+    latest_instance = None
+
+    def __init__(
+            self,
+            state_schema,
+    ):
+        self.state_schema = state_schema
+        self.nodes = {}
+        self.edges = []
+        self.conditional_entry_point = None
+        self.conditional_edges = []
+        self.compile_called = False
+        FakeStateGraph.latest_instance = self
+
+    def add_node(
+            self,
+            name,
+            node,
+    ):
+        """
+        记录节点注册。
+
+        参数：
+            name:
+                节点名称。
+
+            node:
+                节点函数。
+
+        返回值：
+            None。
+        """
+
+        self.nodes[name] = node
+
+    def add_edge(
+            self,
+            start,
+            end,
+    ):
+        """
+        记录普通边注册。
+
+        参数：
+            start:
+                起始节点名称。
+
+            end:
+                目标节点名称。
+
+        返回值：
+            None。
+        """
+
+        self.edges.append(
+            {
+                "start": start,
+                "end": end,
+            }
+        )
+
+    def add_conditional_edges(
+            self,
+            source,
+            path,
+            path_map,
+    ):
+        """
+        记录条件边注册。
+
+        参数：
+            source:
+                条件边起始节点。
+
+            path:
+                路由函数。
+
+            path_map:
+                路由结果到节点名称的映射。
+
+        返回值：
+            None。
+        """
+
+        self.conditional_edges.append(
+            {
+                "source": source,
+                "path": path,
+                "path_map": path_map,
+            }
+        )
+
+    def set_conditional_entry_point(
+            self,
+            path,
+            path_map,
+    ):
+        """
+        记录条件入口注册。
+
+        参数：
+            path:
+                入口路由函数。
+
+            path_map:
+                路由结果到入口节点名称的映射。
+
+        返回值：
+            None。
+        """
+
+        self.conditional_entry_point = {
+            "path": path,
+            "path_map": path_map,
+        }
+
+    def compile(self):
+        """
+        模拟 LangGraph compile。
+
+        参数：
+            无。
+
+        返回值：
+            FakeCompiledGraph:
+                假编译图对象。
+        """
+
+        self.compile_called = True
+        return FakeCompiledGraph(self)
+
+
 def test_build_dog_knowledge_agent_success():
     """
     测试 dog_knowledge_agent 可以正常构建。
@@ -128,3 +299,101 @@ def test_build_dog_knowledge_agent_success():
     )
 
     assert graph is not None
+
+
+def test_build_dog_knowledge_agent_should_register_layer_contract_nodes(
+        monkeypatch,
+) -> None:
+    """
+    测试 DogKnowledgeAgent 构图时注册 V1.7.4 分层契约节点。
+
+    功能：
+        验证 DogKnowledgeAgent 内部已经接入：
+        1. query_layer_output
+        2. retrieve -> query_layer_output -> evaluate
+        3. evaluate 的 rerank 分支先进入 retrieval_layer_output
+        4. retrieval_layer_output -> rerank
+        5. generate -> generation_layer_output
+        6. generation_layer_output -> fallback_layer_output
+        7. fallback_layer_output 后面的分层收敛链路：
+           legacy_state_to_layer_outputs
+           aggregate_layer_outputs
+           finalize_answer
+
+        其中 fallback_layer_output 后面的分层收敛链路包括：
+        1. legacy_state_to_layer_outputs
+        2. aggregate_layer_outputs
+        3. finalize_answer
+
+    参数：
+        monkeypatch:
+            pytest 提供的临时替换工具。
+
+    返回值：
+        None。
+    """
+
+    monkeypatch.setattr(
+        dog_knowledge_agent_module,
+        "StateGraph",
+        FakeStateGraph,
+    )
+
+    compiled_graph = build_dog_knowledge_agent(
+        llm_provider=FakeLLMProvider(),
+        memory_provider=FakeMemoryProvider(),
+        checkpoint_provider=None,
+        retriever_provider=FakeRetrieverProvider(),
+        reranker_provider=FakeRerankerProvider(),
+    )
+
+    graph = compiled_graph.graph
+
+    assert graph.compile_called is True
+    assert "query_layer_output" in graph.nodes
+    assert "retrieval_layer_output" in graph.nodes
+    assert "generation_layer_output" in graph.nodes
+    assert "fallback_layer_output" in graph.nodes
+    assert "legacy_state_to_layer_outputs" in graph.nodes
+    assert "aggregate_layer_outputs" in graph.nodes
+    assert {
+        "start": "retrieve",
+        "end": "query_layer_output",
+    } in graph.edges
+    assert {
+        "start": "query_layer_output",
+        "end": "evaluate",
+    } in graph.edges
+    evaluate_edges = [
+        item
+        for item in graph.conditional_edges
+        if item["source"] == "evaluate"
+    ]
+    assert evaluate_edges[0]["path_map"]["rerank"] == "retrieval_layer_output"
+    assert evaluate_edges[0]["path_map"]["retry"] == "retry"
+    assert evaluate_edges[0]["path_map"]["ask_user"] == "ask_user"
+    assert evaluate_edges[0]["path_map"]["generate"] == "generate"
+    assert {
+        "start": "retrieval_layer_output",
+        "end": "rerank",
+    } in graph.edges
+    assert {
+        "start": "generate",
+        "end": "generation_layer_output",
+    } in graph.edges
+    assert {
+        "start": "generation_layer_output",
+        "end": "fallback_layer_output",
+    } in graph.edges
+    assert {
+        "start": "fallback_layer_output",
+        "end": "legacy_state_to_layer_outputs",
+    } in graph.edges
+    assert {
+        "start": "legacy_state_to_layer_outputs",
+        "end": "aggregate_layer_outputs",
+    } in graph.edges
+    assert {
+        "start": "aggregate_layer_outputs",
+        "end": "finalize_answer",
+    } in graph.edges

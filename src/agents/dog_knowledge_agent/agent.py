@@ -42,8 +42,26 @@ from src.logger import (
     logger,
 )
 
+from src.agents.dog_knowledge_agent.nodes.aggregate_layer_outputs_node import (
+    build_aggregate_dog_knowledge_layer_outputs_node,
+)
 from src.agents.dog_knowledge_agent.nodes.finalize_answer_node import (
     build_finalize_dog_knowledge_answer_node,
+)
+from src.agents.dog_knowledge_agent.nodes.legacy_state_to_layer_outputs_node import (
+    build_legacy_state_to_dog_knowledge_layer_outputs_node,
+)
+from src.agents.dog_knowledge_agent.nodes.generation_layer_output_node import (
+    build_dog_knowledge_generation_layer_output_node,
+)
+from src.agents.dog_knowledge_agent.nodes.fallback_layer_output_node import (
+    build_dog_knowledge_fallback_layer_output_node,
+)
+from src.agents.dog_knowledge_agent.nodes.query_layer_output_node import (
+    build_dog_knowledge_query_layer_output_node,
+)
+from src.agents.dog_knowledge_agent.nodes.retrieval_layer_output_node import (
+    build_dog_knowledge_retrieval_layer_output_node,
 )
 
 
@@ -61,15 +79,19 @@ def build_dog_knowledge_agent(
         dog_knowledge_agent 是 v1.5 阶段用于统一承载犬种知识类任务的领域 Agent。
 
         它将原来分散的：
-        1. extract_agent / exact_search_agent
-        2. recommendation_agent
+        1. 早期精确查询链路
+        2. 早期推荐链路
 
         收敛为一个统一的领域 Agent，并在内部拆分为：
         1. extract_model
         2. recommendation_model
 
         两个内部 model 分支共享同一套 RAG 执行链路：
-        retrieve -> evaluate -> retry / ask_user / rerank -> generate
+        retrieve -> query_layer_output -> evaluate -> retrieval_layer_output -> rerank -> generate
+        evaluate 的 retry / ask_user / generate 分支保持不变。
+        generate 之后会进入 V1.7.4 分层契约收敛链路：
+        generation_layer_output -> fallback_layer_output ->
+        legacy_state_to_layer_outputs -> aggregate_layer_outputs -> finalize_answer
 
     当前主流程：
         dog_knowledge_router
@@ -78,11 +100,25 @@ def build_dog_knowledge_agent(
             ↓
         retrieve
             ↓
+        query_layer_output
+            ↓
         evaluate
+            ↓
+        retrieval_layer_output
             ↓
         rerank
             ↓
         generate
+            ↓
+        generation_layer_output
+            ↓
+        fallback_layer_output
+            ↓
+        legacy_state_to_layer_outputs
+            ↓
+        aggregate_layer_outputs
+            ↓
+        finalize_answer
             ↓
         END
 
@@ -92,6 +128,7 @@ def build_dog_knowledge_agent(
         ask_user -> retry -> retrieve
         ask_user -> modify_filter -> retrieve
         ask_user -> generate
+        evaluate -> generate
 
     参数：
         llm_provider:
@@ -128,6 +165,12 @@ def build_dog_knowledge_agent(
         - answer_strategy
         - rag_query
         - rag_context
+        - dog_query_result
+        - dog_retrieval_result
+        - dog_generation_result
+        - dog_knowledge_pipeline_result
+        - dog_knowledge_answer
+        - dog_knowledge_answer_public
         - route_decision
         - messages
 
@@ -203,6 +246,22 @@ def build_dog_knowledge_agent(
         checkpoint_provider=checkpoint_provider,
     )
 
+    query_layer_output_node = build_dog_knowledge_query_layer_output_node()
+
+    retrieval_layer_output_node = build_dog_knowledge_retrieval_layer_output_node()
+
+    generation_layer_output_node = build_dog_knowledge_generation_layer_output_node()
+
+    fallback_layer_output_node = build_dog_knowledge_fallback_layer_output_node()
+
+    legacy_state_to_layer_outputs_node = (
+        build_legacy_state_to_dog_knowledge_layer_outputs_node()
+    )
+
+    aggregate_layer_outputs_node = (
+        build_aggregate_dog_knowledge_layer_outputs_node()
+    )
+
     finalize_answer_node = build_finalize_dog_knowledge_answer_node(
         include_debug=False,
     )
@@ -231,8 +290,18 @@ def build_dog_knowledge_agent(
     )
 
     builder.add_node(
+        "query_layer_output",
+        query_layer_output_node,
+    )
+
+    builder.add_node(
         "evaluate",
         evaluate_retrieval_node,
+    )
+
+    builder.add_node(
+        "retrieval_layer_output",
+        retrieval_layer_output_node,
     )
 
     builder.add_node(
@@ -248,6 +317,26 @@ def build_dog_knowledge_agent(
     builder.add_node(
         "generate",
         generate_node,
+    )
+
+    builder.add_node(
+        "generation_layer_output",
+        generation_layer_output_node,
+    )
+
+    builder.add_node(
+        "fallback_layer_output",
+        fallback_layer_output_node,
+    )
+
+    builder.add_node(
+        "legacy_state_to_layer_outputs",
+        legacy_state_to_layer_outputs_node,
+    )
+
+    builder.add_node(
+        "aggregate_layer_outputs",
+        aggregate_layer_outputs_node,
     )
 
     builder.add_node(
@@ -301,6 +390,11 @@ def build_dog_knowledge_agent(
 
     builder.add_edge(
         "retrieve",
+        "query_layer_output",
+    )
+
+    builder.add_edge(
+        "query_layer_output",
         "evaluate",
     )
 
@@ -308,7 +402,7 @@ def build_dog_knowledge_agent(
         "evaluate",
         route_after_dog_knowledge_evaluate,
         {
-            "rerank": "rerank",
+            "rerank": "retrieval_layer_output",
             "retry": "retry",
             "ask_user": "ask_user",
             "generate": "generate",
@@ -318,6 +412,11 @@ def build_dog_knowledge_agent(
     builder.add_edge(
         "retry",
         "retrieve",
+    )
+
+    builder.add_edge(
+        "retrieval_layer_output",
+        "rerank",
     )
 
     builder.add_edge(
@@ -345,11 +444,31 @@ def build_dog_knowledge_agent(
     )
 
     # =========================
-    # 8. 结束
+    # 8. V1.7.4 分层契约收敛链路
     # =========================
 
     builder.add_edge(
         "generate",
+        "generation_layer_output",
+    )
+
+    builder.add_edge(
+        "generation_layer_output",
+        "fallback_layer_output",
+    )
+
+    builder.add_edge(
+        "fallback_layer_output",
+        "legacy_state_to_layer_outputs",
+    )
+
+    builder.add_edge(
+        "legacy_state_to_layer_outputs",
+        "aggregate_layer_outputs",
+    )
+
+    builder.add_edge(
+        "aggregate_layer_outputs",
         "finalize_answer",
     )
 
