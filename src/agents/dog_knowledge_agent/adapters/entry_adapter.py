@@ -32,11 +32,11 @@ import json
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
-from src.agents.dog_knowledge_agent.pipeline_skeleton import (
+from src.agents.dog_knowledge_agent.skeleton.pipeline_skeleton import (
     build_dog_knowledge_pipeline_skeleton_state_update,
 )
 
-from src.agents.dog_knowledge_agent.debug_report import (
+from src.agents.dog_knowledge_agent.debug.debug_report import (
     build_dog_knowledge_debug_report,
 )
 
@@ -380,3 +380,4 @@ def build_dog_knowledge_entry_skeleton_node() -> Callable[
         delegate_node=None,
         include_pipeline_skeleton=True,
     )
+

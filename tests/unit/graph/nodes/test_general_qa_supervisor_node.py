@@ -532,8 +532,8 @@ async def test_supervisor_should_force_tool_parse_when_root_route_is_tool_agent(
     测试 RootAgent 已判定工具请求时，general supervisor 应先进入 tool_parse。
 
     功能：
-        当前 V1.7.5 阶段 tool_agent 暂时映射到 general。
-        当 RootAgent 已经输出 tool_agent / tool_request 时，
+        这是旧 GeneralQAAgent 工具链路的兼容测试。
+        当外部手动传入 tool_agent / tool_request 时，
         general_qa_agent 不应该再让 LLM 二次决定为 answer_gen，
         而应该确定性地先进入 tool_parse。
 

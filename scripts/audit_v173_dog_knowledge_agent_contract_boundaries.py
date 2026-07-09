@@ -118,15 +118,15 @@ SKIP_DIR_NAMES = {
 }
 
 REQUIRED_FILES = (
-    "src/agents/dog_knowledge_agent/schemas.py",
-    "src/agents/dog_knowledge_agent/answer_formatter.py",
-    "src/agents/dog_knowledge_agent/response_adapter.py",
+    "src/agents/dog_knowledge_agent/contracts/schemas.py",
+    "src/agents/dog_knowledge_agent/formatters/answer_formatter.py",
+    "src/agents/dog_knowledge_agent/adapters/response_adapter.py",
     "src/agents/dog_knowledge_agent/nodes/finalize_answer_node.py",
 )
 
 REQUIRED_SYMBOL_RULES = (
     RequiredSymbolRule(
-        relative_path="src/agents/dog_knowledge_agent/schemas.py",
+        relative_path="src/agents/dog_knowledge_agent/contracts/schemas.py",
         symbols=(
             "DogKnowledgeAnswer",
             "DogKnowledgeEvidence",
@@ -137,7 +137,7 @@ REQUIRED_SYMBOL_RULES = (
         reason="v1.7.3 要求 DogKnowledgeAgent 必须有统一 Response Contract 输出模型。",
     ),
     RequiredSymbolRule(
-        relative_path="src/agents/dog_knowledge_agent/answer_formatter.py",
+        relative_path="src/agents/dog_knowledge_agent/formatters/answer_formatter.py",
         symbols=(
             "DogKnowledgeAnswerFormatter",
             "format_dog_knowledge_answer",
@@ -148,7 +148,7 @@ REQUIRED_SYMBOL_RULES = (
         reason="v1.7.3 要求内部 pipeline_result 必须能统一格式化为 DogKnowledgeAnswer。",
     ),
     RequiredSymbolRule(
-        relative_path="src/agents/dog_knowledge_agent/response_adapter.py",
+        relative_path="src/agents/dog_knowledge_agent/adapters/response_adapter.py",
         symbols=(
             "DogKnowledgeAgentResponseAdapter",
             "finalize_dog_knowledge_response",

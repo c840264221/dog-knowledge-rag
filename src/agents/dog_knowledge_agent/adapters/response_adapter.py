@@ -1,10 +1,10 @@
 from collections.abc import Mapping
 from typing import Any
 
-from src.agents.dog_knowledge_agent.answer_formatter import (
+from src.agents.dog_knowledge_agent.formatters.answer_formatter import (
     DogKnowledgeAnswerFormatter,
 )
-from src.agents.dog_knowledge_agent.schemas import (
+from src.agents.dog_knowledge_agent.contracts.schemas import (
     DogKnowledgeAnswer,
 )
 
@@ -417,3 +417,4 @@ def finalize_dog_knowledge_state(
         state=state,
         include_debug=include_debug,
     )
+

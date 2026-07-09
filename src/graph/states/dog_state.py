@@ -129,11 +129,26 @@ class DogState(TypedDict, total=False):
     # =========================
 
     tool_calls: List[Dict[str, Any]]
-    tool_results: List[str]
+    tool_results: List[Any]
     need_tool: bool
     tool_round: int
     tool_confirmed: str
     tool_executed: bool
+
+    # =========================
+    # 8.1 ToolAgent v1.8 新版工具智能体字段
+    # 这些字段用于新版 ToolAgent 子图在 LangGraph state 中保留确认、执行和响应契约。
+    # =========================
+
+    tool_confirmation_required: bool
+    tool_confirmation_mode: str
+    tool_confirmation_prompt: str
+    tool_agent_permission: Dict[str, Any]
+    tool_agent_response: Dict[str, Any]
+    tool_agent_runtime_execution_records: List[Dict[str, Any]]
+    tool_agent_execute_skipped: bool
+    tool_agent_execute_skip_reason: str
+    tool_agent_answer_source: str
 
     # =========================
     # 9. 旧版 Supervisor 路由字段

@@ -1,7 +1,7 @@
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from src.agents.dog_knowledge_agent.schemas import (
+from src.agents.dog_knowledge_agent.contracts.schemas import (
     DogKnowledgeAnswer,
     DogKnowledgeAnswerStatus,
     DogKnowledgeEvidence,
@@ -1436,3 +1436,4 @@ def format_dog_knowledge_answer(
         pipeline_result=pipeline_result,
         question=question,
     )
+

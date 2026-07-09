@@ -1,9 +1,9 @@
-from src.agents.dog_knowledge_agent.response_adapter import (
+from src.agents.dog_knowledge_agent.adapters.response_adapter import (
     DogKnowledgeAgentResponseAdapter,
     finalize_dog_knowledge_response,
     finalize_dog_knowledge_state,
 )
-from src.agents.dog_knowledge_agent.schemas import (
+from src.agents.dog_knowledge_agent.contracts.schemas import (
     DogKnowledgeAnswer,
 )
 
@@ -278,3 +278,4 @@ def test_finalize_dog_knowledge_state_convenience_function():
 
     assert "dog_knowledge_answer" in update
     assert update["dog_knowledge_answer"]["question"] == "贵宾犬适合公寓吗？"
+

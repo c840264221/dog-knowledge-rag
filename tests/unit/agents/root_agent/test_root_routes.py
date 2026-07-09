@@ -8,7 +8,7 @@ RootAgent Routes 单元测试。
     1. 新版 route key 可以正常返回。
     2. 旧版 route key 可以兼容映射。
     3. 非法 route key 会兜底到 general_agent。
-    4. tool_agent 当前仍作为逻辑路由存在。
+    4. tool_agent 当前会归一化到新版工具智能体路由。
 """
 
 import pytest
@@ -32,7 +32,7 @@ from src.agents.root_agent.routes import (
         ),
         (
             "tool_agent",
-            "general_agent",
+            "tool_agent",
         ),
         (
             "FINISH",
@@ -102,7 +102,7 @@ def test_normalize_root_route(
         ),
         (
             "tool_agent",
-            "general_agent",
+            "tool_agent",
         ),
         (
             "FINISH",

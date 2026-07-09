@@ -16,7 +16,7 @@ DogKnowledgeAgent Debug Report Smoke Check 单元测试。
 
 from __future__ import annotations
 
-from src.agents.dog_knowledge_agent.debug_report_smoke_checks import (
+from src.agents.dog_knowledge_agent.debug.debug_report_smoke_checks import (
     EXPECTED_DOG_KNOWLEDGE_DEBUG_SECTIONS,
     EXPECTED_DOG_KNOWLEDGE_PIPELINE_LAYERS,
     extract_debug_report_pipeline_layers,

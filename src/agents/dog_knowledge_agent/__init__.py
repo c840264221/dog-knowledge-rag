@@ -2,7 +2,7 @@ from src.agents.dog_knowledge_agent.agent import (
     build_dog_knowledge_agent,
 )
 
-from src.agents.dog_knowledge_agent.schemas import (
+from src.agents.dog_knowledge_agent.contracts.schemas import (
     DogKnowledgeAnswer,
     DogKnowledgeAnswerStatus,
     DogKnowledgeEvidence,
@@ -11,11 +11,11 @@ from src.agents.dog_knowledge_agent.schemas import (
     DogKnowledgeSourceKind,
 )
 
-from src.agents.dog_knowledge_agent.answer_formatter import (
+from src.agents.dog_knowledge_agent.formatters.answer_formatter import (
     DogKnowledgeAnswerFormatter,
     format_dog_knowledge_answer,
 )
-from src.agents.dog_knowledge_agent.response_adapter import (
+from src.agents.dog_knowledge_agent.adapters.response_adapter import (
     DogKnowledgeAgentResponseAdapter,
     finalize_dog_knowledge_response,
     finalize_dog_knowledge_state,

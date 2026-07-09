@@ -7,6 +7,10 @@ from langgraph.graph import (
     END,
 )
 
+from langgraph.types import (
+    interrupt,
+)
+
 from src.graph.states.dog_state import (
     DogState,
 )
@@ -31,6 +35,10 @@ from src.agents.dog_knowledge_agent.agent import (
     build_dog_knowledge_agent,
 )
 
+from src.agents.tool_agent.graph import (
+    build_tool_agent_graph,
+)
+
 from src.graph.routes.route_after_semantic import (
     route_after_semantic,
 )
@@ -40,7 +48,7 @@ from src.graph.routes.main_route_alias import (
     build_main_route_alias_map,
 )
 
-from src.agents.dog_knowledge_agent.entry_integration import (
+from src.agents.dog_knowledge_agent.adapters.entry_integration import (
     build_integrated_dog_knowledge_entry_node,
 )
 
@@ -244,6 +252,7 @@ class GraphRuntimeService:
                     ├── recommendation_agent -> dog_knowledge_agent
                     ├── exact_agent          -> dog_knowledge_agent
                     ├── general_agent        -> general
+                    ├── tool_agent           -> tool_agent
                     └── FINISH               -> END
 
             重要说明：
@@ -306,6 +315,19 @@ class GraphRuntimeService:
             )
         )
 
+        # 构建新版 ToolAgent 子图，用来承接 RootAgent 路由出的工具请求。
+        tool_agent = build_tool_agent_graph(
+            llm_provider=(
+                self.llm_provider
+            ),
+            checkpoint_manager=(
+                self.checkpoint_provider.manager
+                if self.checkpoint_provider is not None
+                else None
+            ),
+            interrupt_func=interrupt,
+        )
+
         graph = StateGraph(
             DogState
         )
@@ -332,6 +354,12 @@ class GraphRuntimeService:
             general_agent,
         )
 
+        # 注册新版 ToolAgent 节点，主图路由 key 为 tool_agent 时会进入这里。
+        graph.add_node(
+            "tool_agent",
+            tool_agent,
+        )
+
         graph.set_entry_point(
             "memory_extract"
         )
@@ -356,6 +384,11 @@ class GraphRuntimeService:
 
         graph.add_edge(
             "general",
+            END,
+        )
+
+        graph.add_edge(
+            "tool_agent",
             END,
         )
 

@@ -1,4 +1,4 @@
-from src.agents.dog_knowledge_agent.answer_formatter import (
+from src.agents.dog_knowledge_agent.formatters.answer_formatter import (
     DogKnowledgeAnswerFormatter,
     format_dog_knowledge_answer,
 )
@@ -298,3 +298,4 @@ def test_format_convenience_function():
     assert answer.question == "哈士奇适合新手吗？"
     assert answer.query_type == "general_qa"
     assert answer.status == "success"
+

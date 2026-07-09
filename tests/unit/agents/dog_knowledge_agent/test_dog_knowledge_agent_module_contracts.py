@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.agents.dog_knowledge_agent.module_contracts import (
+from src.agents.dog_knowledge_agent.contracts.module_contracts import (
     DogKnowledgeModuleContract,
     get_contract_by_layer,
     get_dog_knowledge_module_contracts,
@@ -222,3 +222,4 @@ def test_render_dog_knowledge_contract_markdown() -> None:
 
     for module_name in EXPECTED_MODULE_NAMES:
         assert module_name in markdown
+

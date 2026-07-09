@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.agents.dog_knowledge_agent.entry_adapter import (
+from src.agents.dog_knowledge_agent.adapters.entry_adapter import (
     build_dog_knowledge_entry_adapter,
     build_dog_knowledge_entry_skeleton_node,
     call_delegate_node,
@@ -562,3 +562,4 @@ async def test_entry_adapter_returns_dog_knowledge_debug_report() -> None:
     ][
         "has_final_answer"
     ] is True
+

@@ -36,7 +36,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-from src.agents.dog_knowledge_agent.module_contracts import (
+from src.agents.dog_knowledge_agent.contracts.module_contracts import (
     DogKnowledgeModuleContract,
     get_dog_knowledge_module_contracts,
     get_expected_dog_knowledge_layers,

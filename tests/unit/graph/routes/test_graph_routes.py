@@ -707,7 +707,7 @@ def test_route_after_semantic_should_fallback_to_general_agent_when_next_agent_i
         ("exact_agent", "dog_knowledge_agent"),
         ("exact_search_agent", "dog_knowledge_agent"),
         ("general_agent", "general_agent"),
-        ("tool_agent", "general_agent"),
+        ("tool_agent", "tool_agent"),
         ("FINISH", "FINISH"),
     ],
 )

@@ -254,6 +254,8 @@ async def respond_and_process(
 
             "pending_prompt": "",
 
+            "pending_agent": "",
+
             # ⭐ 新增
             "trace_id": trace_id
         }
@@ -294,6 +296,11 @@ async def respond_and_process(
         state["pending"] = True
 
         state["pending_prompt"] = prompt
+
+        state["pending_agent"] = result.metadata.get(
+            "current_agent",
+            "tool_agent",
+        )
 
         history.append({
 
@@ -467,10 +474,12 @@ async def resume_agent(
 
     await runtime_ctx.create(ctx)
 
-    #todo: 这里手动写死恢复current_agent 因为我现在的项目只有走general_agent时才会出现interrupt的情况
-    # 所以直接写死没问题  后续如果有新的分支走interrupt的话就将current_agent存到dogstate里用于恢复
+    # 根据中断时保存的 pending_agent 恢复当前 Agent，避免 ToolAgent 中断后仍写死 general_agent。
     runtime_ctx.get().state().set_agent(
-        "general_agent"
+        state.get(
+            "pending_agent",
+            "tool_agent",
+        )
     )
     # =========================
     # 添加用户确认
@@ -503,6 +512,14 @@ async def resume_agent(
 
         state["pending_prompt"] = prompt
 
+        state["pending_agent"] = result.metadata.get(
+            "current_agent",
+            state.get(
+                "pending_agent",
+                "tool_agent",
+            ),
+        )
+
         history.append({
             "role": "assistant",
             "content": f"⚠️ 再次需要确认：{prompt}"
@@ -526,10 +543,12 @@ async def resume_agent(
 
         await runtime_ctx.create(ctx)
 
-        # todo: 这里手动写死恢复current_agent 因为我现在的项目只有走general_agent时才会出现interrupt的情况
-        # 所以直接写死没问题  后续如果有新的分支走interrupt的话就将current_agent存到dogstate里用于恢复
+        # 再次中断时也继续恢复中断来源 Agent，避免 runtime 状态错位。
         runtime_ctx.get().state().set_agent(
-            "general_agent"
+            state.get(
+                "pending_agent",
+                "tool_agent",
+            )
         )
 
         return (
@@ -544,6 +563,8 @@ async def resume_agent(
     # =========================
 
     state["pending"] = False
+
+    state["pending_agent"] = ""
 
     answer = (
         result.answer

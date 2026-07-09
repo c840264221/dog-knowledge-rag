@@ -321,7 +321,7 @@ def decide_root_route(
             requires_memory=True,
             hints={
                 "matched_keywords": tool_matches,
-                "note": "V1.7.1 暂时将 tool_agent 映射到 general，由 general_qa_agent 内部工具链路处理。",
+                "note": "V1.8 起 tool_agent 路由进入新版 ToolAgent 独立子图。",
             },
         )
 

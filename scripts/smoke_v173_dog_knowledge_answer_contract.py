@@ -5,10 +5,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from src.agents.dog_knowledge_agent.response_adapter import (
+from src.agents.dog_knowledge_agent.adapters.response_adapter import (
     DogKnowledgeAgentResponseAdapter,
 )
-from src.agents.dog_knowledge_agent.schemas import (
+from src.agents.dog_knowledge_agent.contracts.schemas import (
     DogKnowledgeAnswer,
 )
 
@@ -1036,3 +1036,4 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
+

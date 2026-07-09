@@ -6,6 +6,7 @@ from src.runtime.container.init import (
 from src.runtime.resume.contracts import (
     GraphFinalResult,
     GraphInterruptResult,
+    GraphInterruptType,
 )
 from src.runtime.resume.legacy_protocol import (
     encode_legacy_interrupt_result,
@@ -736,12 +737,22 @@ def build_graph_result_from_current_state(
         prompt = extract_interrupt_prompt(
             current_state
         )
+        current_values = get_final_state_values(
+            current_state=current_state
+        )
+        interrupt_metadata = build_interrupt_metadata_from_state(
+            state=current_values,
+        )
 
         return GraphInterruptResult(
             prompt=prompt,
             thread_id=thread_id,
             checkpoint_ns=checkpoint_ns,
             trace_id=trace_id,
+            interrupt_type=resolve_interrupt_type_from_state(
+                state=current_values,
+            ),
+            metadata=interrupt_metadata,
         )
 
     final_state = get_final_state_values(
@@ -856,3 +867,106 @@ def extract_interrupt_prompt(current_state):
         if interrupts:
             return interrupts[0].value
     return "请做出选择（1/2/3）："
+
+
+def resolve_interrupt_type_from_state(
+        state: Mapping[str, Any],
+) -> GraphInterruptType:
+    """
+    根据当前 state 判断中断类型。
+
+    功能：
+        如果 state 中存在工具确认字段，则标记为工具确认中断。
+        其他情况兜底为 unknown。
+
+    参数：
+        state:
+            当前 LangGraph state。
+
+    返回值：
+        GraphInterruptType:
+            结构化中断类型。
+    """
+
+    if not isinstance(
+            state,
+            Mapping,
+    ):
+        return GraphInterruptType.UNKNOWN
+
+    if (
+            state.get("tool_confirmation_required")
+            or state.get("tool_confirmation_prompt")
+            or state.get("tool_agent_permission")
+    ):
+        return GraphInterruptType.TOOL_CONFIRMATION
+
+    return GraphInterruptType.UNKNOWN
+
+
+def build_interrupt_metadata_from_state(
+        state: Mapping[str, Any],
+) -> dict[str, Any]:
+    """
+    从当前 state 构建中断元数据。
+
+    功能：
+        提取 UI 恢复和日志排查最需要的字段，
+        避免 UI 继续写死 general_agent。
+
+    参数：
+        state:
+            当前 LangGraph state。
+
+    返回值：
+        dict[str, Any]:
+            中断元数据。
+    """
+
+    if not isinstance(
+            state,
+            Mapping,
+    ):
+        return {}
+
+    route_decision = state.get(
+        "route_decision",
+        {},
+    )
+    route = (
+        route_decision.get("route")
+        if isinstance(route_decision, Mapping)
+        else ""
+    )
+
+    current_agent = (
+            state.get("next_agent")
+            or route
+            or state.get("current_agent")
+            or ""
+    )
+
+    return {
+        "current_agent": current_agent,
+        "current_node": state.get(
+            "current_node",
+            "",
+        ),
+        "route": route,
+        "tool_calls": state.get(
+            "tool_calls",
+            [],
+        ),
+        "tool_confirmed": state.get(
+            "tool_confirmed",
+            "",
+        ),
+        "tool_confirmation_required": state.get(
+            "tool_confirmation_required",
+            False,
+        ),
+        "tool_agent_permission": state.get(
+            "tool_agent_permission",
+            {},
+        ),
+    }

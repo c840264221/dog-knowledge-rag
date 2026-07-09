@@ -35,7 +35,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from src.agents.dog_knowledge_agent.debug_report import (
+from src.agents.dog_knowledge_agent.debug.debug_report import (
     render_dog_knowledge_debug_report_markdown,
 )
 

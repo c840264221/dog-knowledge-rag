@@ -10,7 +10,7 @@ from src.agents.dog_knowledge_agent.contracts.layer_outputs import (
 from src.agents.dog_knowledge_agent.nodes.query_layer_output_node import (
     build_dog_query_layer_output_from_state,
 )
-from src.agents.dog_knowledge_agent.schemas import (
+from src.agents.dog_knowledge_agent.contracts.schemas import (
     DogKnowledgeEvidence,
     DogKnowledgeRecommendationItem,
 )
@@ -637,3 +637,4 @@ def _to_dict(
 legacy_state_to_dog_knowledge_layer_outputs_node = (
     build_legacy_state_to_dog_knowledge_layer_outputs_node()
 )
+

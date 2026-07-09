@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from src.agents.dog_knowledge_agent.schemas import (
+from src.agents.dog_knowledge_agent.contracts.schemas import (
     DogKnowledgeAnswer,
     DogKnowledgeEvidence,
     DogKnowledgeRecommendationItem,

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.agents.dog_knowledge_agent.entry_integration import (
+from src.agents.dog_knowledge_agent.adapters.entry_integration import (
     build_integrated_dog_knowledge_entry_node,
     call_integrated_delegate_node,
 )
@@ -266,3 +266,4 @@ async def test_integrated_delegate_rejects_invalid_result_type() -> None:
             },
             delegate_node=InvalidCompiledGraph(),
         )
+

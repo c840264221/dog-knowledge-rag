@@ -4,7 +4,7 @@ from typing import Any
 from src.agents.dog_knowledge_agent.contracts.layer_outputs import (
     DogRetrievalLayerOutput,
 )
-from src.agents.dog_knowledge_agent.schemas import (
+from src.agents.dog_knowledge_agent.contracts.schemas import (
     DogKnowledgeEvidence,
 )
 
@@ -380,3 +380,4 @@ def _to_dict(
 dog_knowledge_retrieval_layer_output_node = (
     build_dog_knowledge_retrieval_layer_output_node()
 )
+

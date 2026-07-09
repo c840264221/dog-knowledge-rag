@@ -2,7 +2,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.agents.dog_knowledge_agent.schemas import (
+from src.agents.dog_knowledge_agent.contracts.schemas import (
     DogKnowledgeAnswerStatus,
     DogKnowledgeEvidence,
     DogKnowledgeQueryType,
@@ -439,3 +439,4 @@ class DogKnowledgePipelineResult(BaseModel):
         default_factory=dict,
         description="聚合层调试信息。",
     )
+

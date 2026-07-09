@@ -11,7 +11,8 @@ class WeatherTool(BaseTool):
         name='weather',
         description='查询天气',
         timeout=5,
-        retries=3
+        retries=3,
+        require_confirm=True
     )
 
     args_schema = WeatherArgs

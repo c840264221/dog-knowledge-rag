@@ -1,6 +1,6 @@
 from typing import Any
 
-from src.agents.dog_knowledge_agent.response_adapter import (
+from src.agents.dog_knowledge_agent.adapters.response_adapter import (
     DogKnowledgeAgentResponseAdapter,
 )
 

@@ -6,6 +6,7 @@ from src.graph import graph_run
 from src.runtime.resume.contracts import (
     GraphFinalResult,
     GraphInterruptResult,
+    GraphInterruptType,
 )
 
 
@@ -340,6 +341,70 @@ async def test_run_main_graph_with_result_should_return_interrupt_result(
     assert result.prompt == "是否允许调用天气工具？"
     assert result.thread_id == "thread_002"
     assert result.trace_id == "trace_002"
+
+
+@pytest.mark.asyncio
+async def test_run_main_graph_with_result_should_return_tool_interrupt_metadata(
+    runtime_context: FakeRuntimeContext,
+) -> None:
+    """
+    测试工具确认中断会返回 ToolAgent 元数据。
+
+    功能：
+        当当前 state 中包含工具确认字段时，
+        GraphInterruptResult 应该标记为 tool_confirmation，
+        并携带 current_agent、tool_calls 等恢复所需信息。
+
+    参数含义：
+        runtime_context:
+            测试运行时上下文。
+
+    返回值含义：
+        None。
+    """
+
+    app = FakeGraphApp(
+        current_state=FakeCurrentState(
+            values={
+                "next_agent": "tool_agent",
+                "route_decision": {
+                    "route": "tool_agent",
+                },
+                "tool_calls": [
+                    {
+                        "name": "weather",
+                        "args": {
+                            "city": "成都",
+                        },
+                    }
+                ],
+                "tool_confirmed": "pending",
+                "tool_confirmation_required": True,
+                "tool_agent_permission": {
+                    "status": "pending",
+                },
+            },
+            next_nodes=("tool_confirm",),
+            prompt="是否允许调用天气工具？",
+        )
+    )
+
+    result = await graph_run.run_main_graph_with_result(
+        question="今天成都天气怎么样？",
+        thread_id="thread_tool_interrupt",
+        trace_id="trace_tool_interrupt",
+        graph_app=app,
+        runtime_context=runtime_context,
+        stream_runner=fake_stream_runner,
+    )
+
+    assert isinstance(result, GraphInterruptResult)
+    assert result.interrupt_type == GraphInterruptType.TOOL_CONFIRMATION
+    assert result.metadata["current_agent"] == "tool_agent"
+    assert result.metadata["route"] == "tool_agent"
+    assert result.metadata["tool_confirmed"] == "pending"
+    assert result.metadata["tool_confirmation_required"] is True
+    assert result.metadata["tool_calls"][0]["name"] == "weather"
 
 
 @pytest.mark.asyncio

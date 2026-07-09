@@ -27,6 +27,8 @@ DOG_KNOWLEDGE_AGENT_NODE = "dog_knowledge_agent"
 
 GENERAL_AGENT_NODE = "general"
 
+TOOL_AGENT_NODE = "tool_agent"
+
 
 def build_main_route_alias_map(
         end_node: Any,

@@ -12,9 +12,8 @@ RootAgent Supervisor 单元测试。
     5. 结束类问题应该路由到 FINISH。
 
 注意：
-    当前 V1.7.1 阶段 tool_agent 只是逻辑路由结果。
-    主图真实节点映射中，tool_agent 暂时映射到 general_agent。
-    后续独立 ToolAgent / MCP 阶段再改为真实 tool_agent 节点。
+    V1.8 起 tool_agent 不再只是逻辑路由结果。
+    主图真实节点映射中，tool_agent 会进入新版 ToolAgent 子图。
 """
 
 import pytest

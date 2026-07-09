@@ -9,7 +9,7 @@ from src.agents.dog_knowledge_agent.nodes.aggregate_layer_outputs_node import (
     aggregate_dog_knowledge_layer_outputs,
     build_aggregate_dog_knowledge_layer_outputs_node,
 )
-from src.agents.dog_knowledge_agent.schemas import (
+from src.agents.dog_knowledge_agent.contracts.schemas import (
     DogKnowledgeEvidence,
     DogKnowledgeRecommendationItem,
 )
@@ -191,3 +191,4 @@ def test_aggregate_layer_outputs_should_record_available_layers_in_debug() -> No
         "query",
         "generation",
     ]
+

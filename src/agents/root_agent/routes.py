@@ -24,12 +24,8 @@ ROUTE_ALIASES: dict[str, RootRoute] = {
     "exact_search_agent": "dog_knowledge_agent",
     "general_agent": "general_agent",
     "general": "general_agent",
-    # "tool_agent": "tool_agent",
-    # "tool": "tool_agent",
-    # todo: 当前tool_agent还未抽取出来 现融进了general_agent 所以暂时路由到general_agent
-    # todo：后续单独抽出后再改回上面的路由
-    "tool_agent": "general_agent",
-    "tool": "general_agent",
+    "tool_agent": "tool_agent",
+    "tool": "tool_agent",
     "FINISH": "FINISH",
     "finish": "FINISH",
 }
@@ -192,8 +188,8 @@ def build_root_route_alias_map(
         当前 V1.7.1 说明：
         1. dog_knowledge_agent -> dog_knowledge_agent。
         2. general_agent -> general。
-        3. tool_agent -> general。
-           因为工具链路当前仍在 general_qa_agent 内部，后续再独立拆 tool_agent。
+        3. tool_agent -> tool_agent。
+           V1.8 起工具请求进入新版 ToolAgent 独立子图。
         4. FINISH -> END。
 
     参数：
@@ -208,6 +204,6 @@ def build_root_route_alias_map(
     return {
         "dog_knowledge_agent": "dog_knowledge_agent",
         "general_agent": "general",
-        "tool_agent": "general",
+        "tool_agent": "tool_agent",
         "FINISH": end_node,
     }

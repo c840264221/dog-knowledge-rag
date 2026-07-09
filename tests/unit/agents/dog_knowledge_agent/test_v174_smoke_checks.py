@@ -1,4 +1,4 @@
-from src.agents.dog_knowledge_agent.v174_smoke_checks import (
+from src.agents.dog_knowledge_agent.smoke.v174_smoke_checks import (
     extract_v174_layer_contract_fields,
     render_dog_knowledge_layer_contract_smoke_markdown,
     validate_dog_knowledge_layer_contract_state,
@@ -168,3 +168,4 @@ def test_render_v174_layer_contract_smoke_markdown() -> None:
 
     assert "V1.7.4 DogKnowledgeAgent Layer Contract Smoke Report" in markdown
     assert "dog_query_result" in markdown
+

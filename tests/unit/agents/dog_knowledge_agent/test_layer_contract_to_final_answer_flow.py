@@ -11,7 +11,7 @@ from src.agents.dog_knowledge_agent.nodes.aggregate_layer_outputs_node import (
 from src.agents.dog_knowledge_agent.nodes.finalize_answer_node import (
     build_finalize_dog_knowledge_answer_node,
 )
-from src.agents.dog_knowledge_agent.schemas import (
+from src.agents.dog_knowledge_agent.contracts.schemas import (
     DogKnowledgeEvidence,
     DogKnowledgeRecommendationItem,
 )
@@ -189,3 +189,4 @@ def test_layer_contract_flow_should_finalize_fallback_answer() -> None:
     assert answer["is_fallback"] is True
     assert answer["fallback_reason"] == "问题超出当前犬种知识库边界。"
     assert final_update["final_answer"] == "我暂时无法基于当前犬种知识库可靠回答这个问题。"
+

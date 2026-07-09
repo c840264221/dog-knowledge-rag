@@ -29,7 +29,7 @@ import inspect
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
-from src.agents.dog_knowledge_agent.entry_adapter import (
+from src.agents.dog_knowledge_agent.adapters.entry_adapter import (
     build_dog_knowledge_entry_adapter,
 )
 
@@ -169,3 +169,4 @@ def build_integrated_dog_knowledge_entry_node(
         delegate_node=integrated_delegate_node,
         include_pipeline_skeleton=True,
     )
+

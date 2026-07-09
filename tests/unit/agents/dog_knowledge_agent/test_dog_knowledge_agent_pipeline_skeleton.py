@@ -15,7 +15,7 @@ DogKnowledgeAgent Pipeline Skeleton 单元测试。
 
 from __future__ import annotations
 
-from src.agents.dog_knowledge_agent.pipeline_skeleton import (
+from src.agents.dog_knowledge_agent.skeleton.pipeline_skeleton import (
     build_dog_knowledge_pipeline_skeleton_state_update,
     build_dog_knowledge_pipeline_steps,
     build_dog_knowledge_pipeline_trace,

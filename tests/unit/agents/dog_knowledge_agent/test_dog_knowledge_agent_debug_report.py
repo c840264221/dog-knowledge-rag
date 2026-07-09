@@ -16,7 +16,7 @@ DogKnowledgeAgent Debug Report 单元测试。
 
 from __future__ import annotations
 
-from src.agents.dog_knowledge_agent.debug_report import (
+from src.agents.dog_knowledge_agent.debug.debug_report import (
     build_dog_knowledge_debug_report,
     build_text_preview,
     extract_layers_from_steps,

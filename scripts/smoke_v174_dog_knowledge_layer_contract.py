@@ -4,7 +4,7 @@ import argparse
 import asyncio
 from typing import Any
 
-from src.agents.dog_knowledge_agent.v174_smoke_checks import (
+from src.agents.dog_knowledge_agent.smoke.v174_smoke_checks import (
     render_dog_knowledge_layer_contract_smoke_markdown,
     validate_dog_knowledge_layer_contract_state,
 )
@@ -212,3 +212,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

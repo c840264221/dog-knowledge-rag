@@ -9,7 +9,7 @@ from src.agents.dog_knowledge_agent.contracts.layer_outputs import (
     DogRecommendationLayerOutput,
     DogRetrievalLayerOutput,
 )
-from src.agents.dog_knowledge_agent.schemas import (
+from src.agents.dog_knowledge_agent.contracts.schemas import (
     DogKnowledgeEvidence,
     DogKnowledgeRecommendationItem,
 )
@@ -243,3 +243,4 @@ def test_layer_outputs_should_validate_confidence_range() -> None:
             generated_answer="测试答案",
             confidence=1.5,
         )
+

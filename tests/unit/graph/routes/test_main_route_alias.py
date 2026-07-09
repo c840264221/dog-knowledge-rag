@@ -7,6 +7,7 @@ from src.graph.routes.main_route_alias import (
     GENERAL_AGENT_NODE,
     GENERAL_AGENT_ROUTE,
     RECOMMENDATION_AGENT_ROUTE,
+    TOOL_AGENT_NODE,
     TOOL_AGENT_ROUTE,
     build_main_route_alias_map,
 )
@@ -106,6 +107,31 @@ def test_finish_route_maps_to_end_node():
     )
 
     assert route_map[FINISH_ROUTE] == "__END__"
+
+
+def test_tool_agent_route_maps_to_tool_agent_node():
+    """
+    测试 tool_agent 路由会映射到新版 ToolAgent 节点。
+
+    功能：
+        V1.8 起，工具类请求不再临时回流 general 节点，
+        而是进入独立 tool_agent 子图。
+
+    参数：
+        无。
+
+    返回值：
+        无。
+    """
+
+    route_map = build_main_route_alias_map(
+        end_node="__END__",
+    )
+
+    assert (
+        route_map[TOOL_AGENT_ROUTE]
+        == TOOL_AGENT_NODE
+    )
 
 
 def test_main_route_alias_map_contains_only_expected_routes():
