@@ -37,6 +37,7 @@ TOOL_AGENT_LOG_FIELDS = (
     "tool_confirmation_required",
     "tool_confirmation_mode",
     "tool_confirmation_prompt",
+    "tool_agent_allowed_databases",
     "tool_agent_permission",
     "tool_agent_execute_skipped",
     "tool_agent_execute_skip_reason",
@@ -141,11 +142,15 @@ def log_tool_agent_state(
             ensure_ascii=False,
         )
 
-        logger.info(
+        logger.opt(
+            depth=1
+        ).info(
             f"ToolAgent state snapshot [{node_name}]:\n{formatted_payload}"
         )
     except Exception as exc:
-        logger.info(
+        logger.opt(
+            depth=1
+        ).info(
             f"ToolAgent state 日志构建失败: {exc}"
         )
 

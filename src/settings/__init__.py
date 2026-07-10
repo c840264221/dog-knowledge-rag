@@ -12,6 +12,7 @@ from src.settings.reranker import RerankerSettings
 from src.settings.memory import MemorySettings
 from src.settings.rag import RagSettings
 from src.settings.observability import ObservabilitySettings
+from src.settings.mcp import McpSettings
 
 
 class Settings:
@@ -42,6 +43,8 @@ class Settings:
         self.rag = RagSettings()
 
         self.observability = ObservabilitySettings()
+
+        self.mcp = McpSettings()
 
 
 settings = Settings()

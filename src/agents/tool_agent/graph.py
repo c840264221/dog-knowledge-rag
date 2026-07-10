@@ -36,12 +36,18 @@ from src.agents.tool_agent.nodes.tool_answer_node import (
 from src.agents.tool_agent.nodes.tool_confirm_node import (
     build_tool_agent_tool_confirm_node,
 )
+from src.agents.tool_agent.nodes.tool_catalog_node import (
+    build_tool_agent_tool_catalog_node,
+)
 from src.agents.tool_agent.nodes.tool_execute_node import (
     build_tool_agent_tool_execute_node,
     get_permission_status,
 )
 from src.agents.tool_agent.nodes.tool_parse_node import (
     build_tool_agent_tool_parse_node,
+)
+from src.agents.tool_agent.nodes.tool_validate_node import (
+    build_tool_agent_tool_validate_node,
 )
 from src.graph.states.dog_state import DogState
 
@@ -53,13 +59,20 @@ ToolConfirmRoute = Literal[
     "rejected",
     "allowed",
 ]
+ToolValidateRoute = Literal[
+    "valid",
+    "invalid",
+]
 
 
 def build_tool_agent_graph(
     parser: Any | None = None,
     llm_provider: Any | None = None,
     tool_registry: Any | None = None,
+    mcp_tool_definitions: Any | None = None,
+    sqlite_mcp_provider: Any | None = None,
     executor: Any | None = None,
+    mcp_client: Any | None = None,
     checkpoint_manager: Any | None = None,
     runtime_context_getter: Callable[[], Any] | None = None,
     interrupt_func: Callable[[str], Any] | None = None,
@@ -70,7 +83,7 @@ def build_tool_agent_graph(
     功能：
         将 ToolAgent 内部节点注册成 LangGraph 子图。
         当前流程为：
-        tool_parse -> tool_confirm -> 条件路由 ->
+        tool_catalog -> tool_parse -> tool_validate -> tool_confirm -> 条件路由 ->
         tool_execute / tool_answer / response_adapter。
 
     参数：
@@ -84,8 +97,19 @@ def build_tool_agent_graph(
         tool_registry:
             工具注册表。确认节点用它判断工具是否需要用户确认。
 
+        mcp_tool_definitions:
+            MCP 工具定义集合。工具目录节点用它合并本地工具和 MCP 工具。
+
+        sqlite_mcp_provider:
+            SQLite MCP Provider。未显式传入 mcp_tool_definitions 时，
+            工具目录节点会尝试读取它的 tool_definitions。
+
         executor:
             工具执行器。执行节点会把它传给 runtime_adapter。
+
+        mcp_client:
+            MCP Client（模型上下文协议客户端）。执行节点会用它执行 MCP 工具。
+            如果不传，则执行节点会尝试从 sqlite_mcp_provider 读取 tool_client。
 
         checkpoint_manager:
             检查点管理器。内部节点按需保存 checkpoint。
@@ -108,12 +132,32 @@ def build_tool_agent_graph(
         DogState
     )
 
-    # 先注册工具解析节点，负责从用户问题生成 tool_calls。
+    # 先注册工具目录节点，负责把本地工具和 MCP 工具写入 state。
+    graph.add_node(
+        "tool_catalog",
+        build_tool_agent_tool_catalog_node(
+            tool_registry=tool_registry,
+            mcp_tool_definitions=mcp_tool_definitions,
+            sqlite_mcp_provider=sqlite_mcp_provider,
+            runtime_context_getter=runtime_context_getter,
+        ),
+    )
+
+    # 再注册工具解析节点，负责从用户问题生成 tool_calls。
     graph.add_node(
         "tool_parse",
         build_tool_agent_tool_parse_node(
             parser=parser,
             llm_provider=llm_provider,
+            checkpoint_manager=checkpoint_manager,
+            runtime_context_getter=runtime_context_getter,
+        ),
+    )
+
+    # 注册工具校验节点，负责在确认和执行前校验 tool_calls。
+    graph.add_node(
+        "tool_validate",
+        build_tool_agent_tool_validate_node(
             checkpoint_manager=checkpoint_manager,
             runtime_context_getter=runtime_context_getter,
         ),
@@ -135,6 +179,8 @@ def build_tool_agent_graph(
         "tool_execute",
         build_tool_agent_tool_execute_node(
             executor=executor,
+            mcp_client=mcp_client,
+            sqlite_mcp_provider=sqlite_mcp_provider,
             checkpoint_manager=checkpoint_manager,
             runtime_context_getter=runtime_context_getter,
         ),
@@ -156,12 +202,27 @@ def build_tool_agent_graph(
     )
 
     graph.set_entry_point(
-        "tool_parse"
+        "tool_catalog"
+    )
+
+    graph.add_edge(
+        "tool_catalog",
+        "tool_parse",
     )
 
     graph.add_edge(
         "tool_parse",
-        "tool_confirm",
+        "tool_validate",
+    )
+
+    # 校验失败时直接进入答案节点，避免非法工具调用继续流向确认或执行节点。
+    graph.add_conditional_edges(
+        "tool_validate",
+        route_after_tool_validate,
+        {
+            "valid": "tool_confirm",
+            "invalid": "tool_answer",
+        },
     )
 
     # 确认节点之后根据权限状态决定是否执行工具。
@@ -191,6 +252,57 @@ def build_tool_agent_graph(
     logger.info("✅ tool_agent 构建完成")
 
     return graph.compile()
+
+
+def route_after_tool_validate(
+    state: Mapping[str, Any],
+) -> ToolValidateRoute:
+    """
+    根据工具调用校验结果决定下一步路由。
+
+    功能：
+        validation_ok=True 或 validation_skipped=True 时继续进入确认节点。
+        validation_ok=False 时直接进入答案节点，避免非法参数进入执行节点。
+
+    参数：
+        state:
+            当前 LangGraph state。
+
+    返回值：
+        ToolValidateRoute:
+            valid 表示继续确认；invalid 表示直接生成失败回答。
+    """
+
+    validation_ok = bool(
+        state.get(
+            "tool_call_validation_ok",
+            True,
+        )
+    )
+    validation_skipped = bool(
+        state.get(
+            "tool_call_validation_skipped",
+            False,
+        )
+    )
+
+    if validation_ok or validation_skipped:
+        route = "valid"
+    else:
+        route = "invalid"
+
+    log_tool_agent_state(
+        node_name="route_after_tool_validate",
+        event="route_after_tool_validate",
+        state=state,
+        extra={
+            "validation_ok": validation_ok,
+            "validation_skipped": validation_skipped,
+            "route": route,
+        },
+    )
+
+    return route
 
 
 def route_after_tool_confirm(

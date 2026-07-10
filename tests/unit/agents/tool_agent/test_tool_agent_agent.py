@@ -21,6 +21,9 @@ from src.agents.tool_agent.agent import (
     merge_state_update,
 )
 from src.agents.tool_agent.adapters.state_adapter import TOOL_AGENT_RESPONSE_STATE_KEY
+from src.agents.tool_agent.adapters.registry_adapter import (
+    TOOL_AGENT_TOOL_CATALOG_STATE_KEY,
+)
 from src.graph.tools.schemas.tool_metadata import ToolMetadata
 from src.graph.tools.schemas.tool_result_schema import ToolResult
 
@@ -280,6 +283,8 @@ async def test_tool_agent_should_build_pending_confirmation_for_weather() -> Non
     )
 
     assert result["need_tool"] is True
+    assert TOOL_AGENT_TOOL_CATALOG_STATE_KEY in result
+    assert result["tool_call_validation_ok"] is True
     assert result["tool_calls"] == [
         {
             "name": "weather",
@@ -337,6 +342,7 @@ async def test_tool_agent_should_return_no_tool_for_general_question() -> None:
 
     assert result["need_tool"] is False
     assert result["tool_calls"] == []
+    assert result["tool_call_validation_ok"] is True
     assert result["tool_confirmed"] == "not_required"
     assert result[TOOL_AGENT_RESPONSE_STATE_KEY]["status"] == "no_tool"
 
@@ -386,6 +392,7 @@ async def test_tool_agent_should_not_reparse_existing_tool_calls() -> None:
     )
 
     assert parser.inputs == []
+    assert result["tool_call_validation_ok"] is True
     assert result["tool_confirmed"] == "pending"
     assert result["tool_confirmation_required"] is True
     assert result[TOOL_AGENT_RESPONSE_STATE_KEY]["permission"]["status"] == "pending"
@@ -440,8 +447,59 @@ async def test_tool_agent_should_execute_tool_when_confirmation_not_required() -
     ]
     assert result["tool_results"][0]["success"] is True
     assert result["tool_calls"] == []
+    assert result["tool_call_validation_ok"] is True
     assert result["final_answer"] == "今天的日期是 2026-07-07。"
     assert result[TOOL_AGENT_RESPONSE_STATE_KEY]["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_tool_agent_should_filter_invalid_tool_call_before_confirmation() -> None:
+    """
+    测试非法工具调用在确认前被过滤。
+
+    功能：
+        parser 输出未知工具时，ToolAgent 应先由 validate 节点记录错误并清空 tool_calls，
+        确认节点不应为未知工具生成确认提示，执行节点也不应调用 executor。
+
+    参数：
+        无。
+
+    返回值：
+        None。
+    """
+
+    parser = FakeAinvokeParser(
+        result={
+            "need_tool": True,
+            "tool_calls": [
+                {
+                    "name": "unknown_tool",
+                    "args": {},
+                }
+            ],
+        }
+    )
+    executor = FakeExecutor()
+    node = build_tool_agent(
+        parser=parser,
+        tool_registry=build_fake_registry(),
+        executor=executor,
+        runtime_context_getter=lambda: None,
+    )
+
+    result = await node(
+        {
+            "question": "调用不存在的工具",
+        }
+    )
+
+    assert result["need_tool"] is False
+    assert result["tool_call_validation_ok"] is False
+    assert result["tool_calls"] == []
+    assert result["tool_call_validation_errors"][0]["code"] == "unknown_tool"
+    assert result["tool_confirmed"] == "not_required"
+    assert result["tool_confirmation_required"] is False
+    assert executor.calls == []
 
 
 def test_merge_state_update_should_not_mutate_original_state() -> None:

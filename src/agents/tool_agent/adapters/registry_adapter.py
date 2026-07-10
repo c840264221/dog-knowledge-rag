@@ -18,11 +18,22 @@ ToolAgent 工具注册表适配器。
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any
 
-from src.graph.tools.registry.tool_registry import registry as default_tool_registry
+from src.agents.tool_agent.adapters.tool_catalog_item_adapter import (
+    build_tool_catalog_items_from_mcp_tools,
+    build_tool_catalog_items_from_metadata,
+    dump_tool_catalog_items_for_state,
+)
+from src.agents.tool_agent.contracts.tool_catalog_item_schema import (
+    ToolCatalogItem,
+)
+from src.graph.tools.registry.default_registry import (
+    registry as default_tool_registry,
+)
 from src.graph.tools.schemas.tool_metadata import ToolMetadata
+from src.mcp.schemas import MockMcpToolDefinition
 
 
 TOOL_AGENT_TOOL_CATALOG_STATE_KEY = "tool_agent_tool_catalog"
@@ -192,6 +203,159 @@ def build_tool_agent_tool_catalog(
         )
         for metadata in metadata_items
     ]
+
+
+def merge_tool_metadata_items(
+    base_metadata_items: Iterable[ToolMetadata],
+    extra_metadata_items: Iterable[ToolMetadata] | None = None,
+) -> list[ToolMetadata]:
+    """
+    合并工具元数据列表。
+
+    功能：
+        将本地工具元数据和扩展工具元数据合并成一个列表。
+        如果出现同名工具，本地工具优先，扩展工具不会覆盖已有工具。
+        最终按工具名排序，保证输出稳定。
+
+    参数：
+        base_metadata_items:
+            基础工具元数据列表，通常来自本地 ToolRegistry。
+
+        extra_metadata_items:
+            扩展工具元数据列表，通常来自 MCP 工具定义转换结果。
+
+    返回值：
+        list[ToolMetadata]:
+            合并、去重并按名称排序后的工具元数据列表。
+    """
+
+    metadata_by_name: dict[str, ToolMetadata] = {}
+
+    for metadata in base_metadata_items:
+        metadata_by_name[metadata.name] = metadata
+
+    for metadata in extra_metadata_items or []:
+        if metadata.name not in metadata_by_name:
+            metadata_by_name[metadata.name] = metadata
+
+    return sorted(
+        metadata_by_name.values(),
+        key=lambda item: item.name,
+    )
+
+
+def merge_tool_catalog_items(
+    base_catalog_items: Iterable[ToolCatalogItem],
+    extra_catalog_items: Iterable[ToolCatalogItem] | None = None,
+) -> list[ToolCatalogItem]:
+    """
+    合并统一工具目录条目列表。
+
+    功能：
+        将本地工具目录条目和 MCP 工具目录条目合并成一个列表。
+        如果出现同名工具，本地工具优先，扩展工具不会覆盖已有工具。
+        最终按工具名排序，保证输出稳定。
+
+    参数：
+        base_catalog_items:
+            基础工具目录条目列表，通常来自本地 ToolRegistry。
+
+        extra_catalog_items:
+            扩展工具目录条目列表，通常来自 MCP 工具定义转换结果。
+
+    返回值：
+        list[ToolCatalogItem]:
+            合并、去重并按名称排序后的统一工具目录条目列表。
+    """
+
+    catalog_by_name: dict[str, ToolCatalogItem] = {}
+
+    for item in base_catalog_items:
+        catalog_by_name[item.name] = item
+
+    for item in extra_catalog_items or []:
+        if item.name not in catalog_by_name:
+            catalog_by_name[item.name] = item
+
+    return sorted(
+        catalog_by_name.values(),
+        key=lambda item: item.name,
+    )
+
+
+def build_tool_agent_tool_catalog_with_mcp(
+    tool_registry: Any = default_tool_registry,
+    mcp_tool_definitions: Iterable[MockMcpToolDefinition] | None = None,
+) -> list[dict[str, Any]]:
+    """
+    构建包含 MCP 工具的 ToolAgent 工具目录。
+
+    功能：
+        读取本地工具注册表中的 ToolMetadata，
+        再将本地工具和 MCP 工具统一转换成 ToolCatalogItem，
+        最后合并成本地工具 + MCP 工具的普通 dict 目录。
+
+    参数：
+        tool_registry:
+            本地工具注册表对象。默认使用项目全局默认注册表。
+
+        mcp_tool_definitions:
+            MCP 工具定义集合。为空时只返回本地工具目录。
+
+    返回值：
+        list[dict[str, Any]]:
+            ToolAgent 可写入 state 的工具目录列表。
+    """
+
+    local_metadata_items = list_registered_tool_metadata(
+        tool_registry=tool_registry or default_tool_registry,
+    )
+    local_catalog_items = build_tool_catalog_items_from_metadata(
+        metadata_items=local_metadata_items,
+    )
+    mcp_catalog_items = build_tool_catalog_items_from_mcp_tools(
+        mcp_tools=mcp_tool_definitions or [],
+    )
+    merged_catalog_items = merge_tool_catalog_items(
+        base_catalog_items=local_catalog_items,
+        extra_catalog_items=mcp_catalog_items,
+    )
+
+    return dump_tool_catalog_items_for_state(
+        items=merged_catalog_items,
+    )
+
+
+def build_tool_agent_tool_catalog_state_update_with_mcp(
+    tool_registry: Any = default_tool_registry,
+    mcp_tool_definitions: Iterable[MockMcpToolDefinition] | None = None,
+) -> dict[str, Any]:
+    """
+    构建包含 MCP 工具目录的 state 更新。
+
+    功能：
+        将本地工具和 MCP 工具合并后的工具目录，
+        包装成 {"tool_agent_tool_catalog": [...]} 格式，
+        方便后续 ToolAgent 节点直接返回给 LangGraph 合并 state。
+
+    参数：
+        tool_registry:
+            本地工具注册表对象。默认使用项目全局默认注册表。
+
+        mcp_tool_definitions:
+            MCP 工具定义集合。为空时只返回本地工具目录更新。
+
+    返回值：
+        dict[str, Any]:
+            可写回 LangGraph state 的普通字典。
+    """
+
+    return {
+        TOOL_AGENT_TOOL_CATALOG_STATE_KEY: build_tool_agent_tool_catalog_with_mcp(
+            tool_registry=tool_registry or default_tool_registry,
+            mcp_tool_definitions=mcp_tool_definitions,
+        )
+    }
 
 
 def build_tool_agent_tool_catalog_state_update(

@@ -28,6 +28,7 @@ from src.agents.tool_agent.adapters.runtime_adapter import (
     dump_tool_agent_execution_records_for_state,
     execute_tool_call_with_runtime,
     execute_tool_calls_with_runtime,
+    resolve_tool_source,
 )
 from src.graph.tools.schemas.tool_call_schema import ToolCall
 from src.graph.tools.schemas.tool_result_schema import ToolResult
@@ -103,6 +104,59 @@ class FakeExecutor:
         )
 
 
+class FakeMcpClient:
+    """
+    测试用 MCP Client。
+
+    功能：
+        模拟 MCP Client.call_tool，记录调用参数并返回预设内容。
+
+    参数：
+        无。
+
+    返回值：
+        FakeMcpClient:
+            测试用 MCP 客户端。
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict]] = []
+
+    async def call_tool(
+        self,
+        name: str,
+        arguments: dict,
+    ) -> dict:
+        """
+        模拟调用 MCP 工具。
+
+        功能：
+            记录 MCP 工具名称和参数，并返回结构化内容。
+
+        参数：
+            name:
+                MCP 工具名称。
+
+            arguments:
+                MCP 工具参数。
+
+        返回值：
+            dict:
+                模拟 MCP 工具返回内容。
+        """
+
+        self.calls.append(
+            (
+                name,
+                arguments,
+            )
+        )
+        return {
+            "mcp_tool": name,
+            "arguments": arguments,
+        }
+
+
 @pytest.mark.asyncio
 async def test_execute_tool_call_with_runtime_should_return_execution_record() -> None:
     """
@@ -145,6 +199,56 @@ async def test_execute_tool_call_with_runtime_should_return_execution_record() -
     assert execution_record.tool_result.tool_name == "weather"
     assert execution_record.tool_result.retry_count == 1
     assert execution_record.duration_ms is not None
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_call_with_runtime_should_use_mcp_client_for_mcp_tool() -> None:
+    """
+    测试 MCP 工具会分发给 MCP Client。
+
+    功能：
+        当工具目录中 source=mcp 时，runtime adapter 不调用本地 executor，
+        而是调用 mcp_client.call_tool。
+
+    参数：
+        无。
+
+    返回值：
+        None。
+    """
+
+    executor = FakeExecutor()
+    mcp_client = FakeMcpClient()
+
+    execution_record = await execute_tool_call_with_runtime(
+        tool_call=ToolCall(
+            name="sqlite_list_tables",
+            args={
+                "database_name": "memory",
+            },
+        ),
+        executor=executor,
+        mcp_client=mcp_client,
+        tool_catalog=[
+            {
+                "name": "sqlite_list_tables",
+                "source": "mcp",
+            }
+        ],
+    )
+
+    assert executor.calls == []
+    assert mcp_client.calls == [
+        (
+            "sqlite_list_tables",
+            {
+                "database_name": "memory",
+            },
+        )
+    ]
+    assert execution_record.tool_result.success is True
+    assert execution_record.tool_result.metadata["source"] == "mcp"
+    assert execution_record.metadata["tool_source"] == "mcp"
 
 
 @pytest.mark.asyncio
@@ -198,6 +302,82 @@ async def test_execute_tool_calls_with_runtime_should_run_in_order() -> None:
     ] == [
         "runtime_1_date",
         "runtime_2_weather",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_calls_with_runtime_should_support_local_and_mcp_mix() -> None:
+    """
+    测试本地工具和 MCP 工具混合顺序执行。
+
+    功能：
+        date 走本地 executor，sqlite_list_tables 走 MCP Client，
+        并保持 tool_calls 中的原始执行顺序。
+
+    参数：
+        无。
+
+    返回值：
+        None。
+    """
+
+    executor = FakeExecutor()
+    mcp_client = FakeMcpClient()
+
+    execution_records = await execute_tool_calls_with_runtime(
+        tool_calls=[
+            ToolCall(
+                name="date",
+                args={},
+            ),
+            ToolCall(
+                name="sqlite_list_tables",
+                args={
+                    "database_name": "memory",
+                },
+            ),
+        ],
+        executor=executor,
+        mcp_client=mcp_client,
+        tool_catalog=[
+            {
+                "name": "date",
+                "source": "local",
+            },
+            {
+                "name": "sqlite_list_tables",
+                "source": "mcp",
+            },
+        ],
+    )
+
+    assert executor.calls == [
+        (
+            "date",
+            {},
+        )
+    ]
+    assert mcp_client.calls == [
+        (
+            "sqlite_list_tables",
+            {
+                "database_name": "memory",
+            },
+        )
+    ]
+    assert [
+        record.call_id
+        for record in execution_records
+    ] == [
+        "runtime_1_date",
+        "runtime_2_sqlite_list_tables",
+    ]
+    assert [
+        record.metadata["tool_source"]
+        for record in execution_records
+    ] == [
+        "local",
+        "mcp",
     ]
 
 
@@ -428,3 +608,50 @@ async def test_failed_runtime_state_update_should_be_compatible_with_state_adapt
     assert "模拟工具失败" in str(
         response.execution_records[0].tool_result.error
     )
+
+
+def test_resolve_tool_source_should_fallback_to_local() -> None:
+    """
+    测试工具来源解析兜底为 local。
+
+    功能：
+        工具目录缺失、工具不存在或 source 不是 mcp 时，都保守走本地工具链路。
+
+    参数：
+        无。
+
+    返回值：
+        None。
+    """
+
+    assert resolve_tool_source(
+        tool_name="date",
+        tool_catalog=None,
+    ) == "local"
+    assert resolve_tool_source(
+        tool_name="date",
+        tool_catalog=[
+            {
+                "name": "weather",
+                "source": "mcp",
+            }
+        ],
+    ) == "local"
+    assert resolve_tool_source(
+        tool_name="date",
+        tool_catalog=[
+            {
+                "name": "date",
+                "source": "local",
+            }
+        ],
+    ) == "local"
+    assert resolve_tool_source(
+        tool_name="sqlite_list_tables",
+        tool_catalog=[
+            {
+                "name": "sqlite_list_tables",
+                "source": "mcp",
+            }
+        ],
+    ) == "mcp"

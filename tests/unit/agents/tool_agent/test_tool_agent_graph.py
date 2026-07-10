@@ -15,9 +15,13 @@ from __future__ import annotations
 import pytest
 
 from src.agents.tool_agent.adapters.state_adapter import TOOL_AGENT_RESPONSE_STATE_KEY
+from src.agents.tool_agent.adapters.registry_adapter import (
+    TOOL_AGENT_TOOL_CATALOG_STATE_KEY,
+)
 from src.agents.tool_agent.graph import (
     build_tool_agent_graph,
     route_after_tool_confirm,
+    route_after_tool_validate,
 )
 from src.graph.tools.schemas.tool_metadata import ToolMetadata
 from src.graph.tools.schemas.tool_result_schema import ToolResult
@@ -278,6 +282,39 @@ def test_route_after_tool_confirm_should_return_expected_route() -> None:
     ) == "allowed"
 
 
+def test_route_after_tool_validate_should_return_expected_route() -> None:
+    """
+    测试校验后路由函数。
+
+    功能：
+        校验通过或跳过时继续进入确认节点；
+        校验失败时直接进入答案节点，避免非法工具调用进入执行节点。
+
+    参数：
+        无。
+
+    返回值：
+        None。
+    """
+
+    assert route_after_tool_validate(
+        {
+            "tool_call_validation_ok": True,
+        }
+    ) == "valid"
+    assert route_after_tool_validate(
+        {
+            "tool_call_validation_skipped": True,
+        }
+    ) == "valid"
+    assert route_after_tool_validate(
+        {
+            "tool_call_validation_ok": False,
+            "tool_call_validation_skipped": False,
+        }
+    ) == "invalid"
+
+
 @pytest.mark.asyncio
 async def test_tool_agent_graph_should_stop_before_execute_when_pending() -> None:
     """
@@ -322,6 +359,8 @@ async def test_tool_agent_graph_should_stop_before_execute_when_pending() -> Non
     )
 
     assert executor.calls == []
+    assert TOOL_AGENT_TOOL_CATALOG_STATE_KEY in result
+    assert result["tool_call_validation_ok"] is True
     assert result["tool_confirmed"] == "pending"
     assert result["tool_confirmation_required"] is True
     assert result[TOOL_AGENT_RESPONSE_STATE_KEY]["permission"]["status"] == "pending"
@@ -408,6 +447,8 @@ async def test_tool_agent_graph_should_execute_weather_when_interrupt_confirms()
             },
         }
     ]
+    assert TOOL_AGENT_TOOL_CATALOG_STATE_KEY in result
+    assert result["tool_call_validation_ok"] is True
     assert result["tool_confirmed"] == "confirmed"
     assert result["tool_calls"] == []
     assert result["tool_results"][0]["success"] is True
@@ -462,7 +503,58 @@ async def test_tool_agent_graph_should_execute_date_when_confirmation_not_requir
             "args": {},
         }
     ]
+    assert TOOL_AGENT_TOOL_CATALOG_STATE_KEY in result
+    assert result["tool_call_validation_ok"] is True
     assert result["tool_calls"] == []
     assert result["tool_results"][0]["success"] is True
     assert result["final_answer"] == "今天的日期是 2026-07-08。"
     assert result[TOOL_AGENT_RESPONSE_STATE_KEY]["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_tool_agent_graph_should_not_confirm_or_execute_invalid_tool_call() -> None:
+    """
+    测试非法工具调用不会进入确认或执行。
+
+    功能：
+        parser 输出未知工具时，tool_validate 节点应过滤该调用，
+        后续应直接进入 tool_answer，不再进入 confirm 或 execute。
+
+    参数：
+        无。
+
+    返回值：
+        None。
+    """
+
+    parser = FakeAinvokeParser(
+        result={
+            "need_tool": True,
+            "tool_calls": [
+                {
+                    "name": "unknown_tool",
+                    "args": {},
+                }
+            ],
+        }
+    )
+    executor = FakeExecutor()
+    graph = build_tool_agent_graph(
+        parser=parser,
+        tool_registry=build_fake_registry(),
+        executor=executor,
+        runtime_context_getter=lambda: None,
+    )
+
+    result = await graph.ainvoke(
+        {
+            "question": "调用不存在的工具",
+        }
+    )
+
+    assert executor.calls == []
+    assert result["need_tool"] is False
+    assert result["tool_call_validation_ok"] is False
+    assert result["tool_calls"] == []
+    assert result["tool_call_validation_errors"][0]["code"] == "unknown_tool"
+    assert "工具调用失败" in result["final_answer"]

@@ -30,9 +30,15 @@ from src.runtime.container.providers.memory_provider import (
     MemoryProvider
 )
 
+from src.runtime.container.providers.sqlite_mcp_provider import (
+    SQLiteMcpProvider
+)
+
 from src.runtime.container.providers.retriever_provider import (
     RetrieverProvider
 )
+
+from src.settings import settings
 
 # 创建容器
 container = RuntimeContainer()
@@ -111,6 +117,23 @@ container.register(
 
 container.register(
 
+    "sqlite_mcp",
+
+    SQLiteMcpProvider(
+        allowed_databases=(
+            settings.mcp.sqlite.allowed_databases
+        ),
+        default_limit=(
+            settings.mcp.sqlite.default_limit
+        ),
+        max_limit=(
+            settings.mcp.sqlite.max_limit
+        ),
+    )
+)
+
+container.register(
+
     "graph_runtime",
 
     GraphRuntimeService(
@@ -128,6 +151,9 @@ container.register(
         ),
         reranker_provider=(
             container.get("reranker")
+        ),
+        sqlite_mcp_provider=(
+            container.get("sqlite_mcp")
         ),
     )
 )

@@ -18,10 +18,14 @@ ToolAgent 工具运行时适配器。
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 import time
 from typing import Any
 
 from src.agents.tool_agent.contracts.schemas import ToolAgentExecutionRecord
+from src.graph.tools.runtime.mcp_tool_executor_adapter import (
+    execute_mcp_tool_call,
+)
 from src.graph.tools.runtime.tool_executor import ToolExecutor
 from src.graph.tools.schemas.tool_call_schema import ToolCall
 from src.graph.tools.schemas.tool_result_schema import ToolResult
@@ -33,14 +37,17 @@ TOOL_AGENT_RUNTIME_RECORDS_STATE_KEY = "tool_agent_runtime_execution_records"
 async def execute_tool_call_with_runtime(
     tool_call: ToolCall,
     executor: Any | None = None,
+    mcp_client: Any | None = None,
+    tool_catalog: list[Mapping[str, Any]] | None = None,
     call_id: str | None = None,
 ) -> ToolAgentExecutionRecord:
     """
-    通过底层 ToolExecutor 执行单个 ToolCall。
+    通过运行时执行单个 ToolCall。
 
     功能：
-        将 ToolAgent 的 ToolCall 传给已有 ToolExecutor.execute。
-        ToolExecutor 内部会继续复用 Logging、Trace、Retry、Timeout 等中间件。
+        根据工具目录中的 source 字段判断工具来源。
+        local 工具交给已有 ToolExecutor.execute。
+        mcp 工具交给 MCP 工具执行适配器。
         如果执行失败，本函数会返回 success=False 的 ToolAgentExecutionRecord。
 
     参数：
@@ -51,6 +58,14 @@ async def execute_tool_call_with_runtime(
             工具执行器。默认创建项目已有 ToolExecutor。
             测试时可以传入 fake executor，避免执行真实工具。
 
+        mcp_client:
+            MCP Client（模型上下文协议客户端）。
+            当工具目录标记 source=mcp 时，会通过它调用 MCP 工具。
+
+        tool_catalog:
+            ToolAgent 工具目录。用于通过工具名读取 source 字段，
+            判断当前工具应该走 local 还是 mcp。
+
         call_id:
             ToolAgent 计划调用 ID。为空时根据工具名生成兜底 ID。
 
@@ -59,23 +74,34 @@ async def execute_tool_call_with_runtime(
             ToolAgent 标准工具执行记录。
     """
 
-    resolved_executor = executor or ToolExecutor()
     resolved_call_id = call_id or build_runtime_call_id(
         tool_call=tool_call,
         index=1,
     )
+    tool_source = resolve_tool_source(
+        tool_name=tool_call.name,
+        tool_catalog=tool_catalog,
+    )
     started_at = time.perf_counter()
 
-    try:
-        tool_result = await resolved_executor.execute(
-            tool_call.name,
-            tool_call.args,
-        )
-    except Exception as exc:
-        tool_result = build_failed_tool_result(
+    if tool_source == "mcp":
+        tool_result = await execute_mcp_tool_call(
             tool_call=tool_call,
-            error=exc,
+            mcp_client=mcp_client,
         )
+    else:
+        resolved_executor = executor or ToolExecutor()
+
+        try:
+            tool_result = await resolved_executor.execute(
+                tool_call.name,
+                tool_call.args,
+            )
+        except Exception as exc:
+            tool_result = build_failed_tool_result(
+                tool_call=tool_call,
+                error=exc,
+            )
 
     duration_ms = int(
         (
@@ -91,6 +117,7 @@ async def execute_tool_call_with_runtime(
         duration_ms=duration_ms,
         metadata={
             "source": "tool_agent_runtime_adapter",
+            "tool_source": tool_source,
         },
     )
 
@@ -98,12 +125,15 @@ async def execute_tool_call_with_runtime(
 async def execute_tool_calls_with_runtime(
     tool_calls: list[ToolCall],
     executor: Any | None = None,
+    mcp_client: Any | None = None,
+    tool_catalog: list[Mapping[str, Any]] | None = None,
 ) -> list[ToolAgentExecutionRecord]:
     """
-    通过底层 ToolExecutor 顺序执行多个 ToolCall。
+    通过运行时顺序执行多个 ToolCall。
 
     功能：
         逐个执行工具调用，并把每次结果转换成 ToolAgentExecutionRecord。
+        每个工具会根据工具目录 source 字段分别走 local 或 mcp 执行分支。
         当前主线先采用顺序执行，避免引入并发执行、批量确认、幂等等 Plus 复杂度。
 
     参数：
@@ -113,12 +143,17 @@ async def execute_tool_calls_with_runtime(
         executor:
             工具执行器。默认创建项目已有 ToolExecutor。
 
+        mcp_client:
+            MCP Client。用于执行 source=mcp 的工具。
+
+        tool_catalog:
+            ToolAgent 工具目录，用于按工具名判断工具来源。
+
     返回值：
         list[ToolAgentExecutionRecord]:
             ToolAgent 标准工具执行记录列表。
     """
 
-    resolved_executor = executor or ToolExecutor()
     execution_records: list[ToolAgentExecutionRecord] = []
 
     for index, tool_call in enumerate(
@@ -128,7 +163,9 @@ async def execute_tool_calls_with_runtime(
         execution_records.append(
             await execute_tool_call_with_runtime(
                 tool_call=tool_call,
-                executor=resolved_executor,
+                executor=executor,
+                mcp_client=mcp_client,
+                tool_catalog=tool_catalog,
                 call_id=build_runtime_call_id(
                     tool_call=tool_call,
                     index=index,
@@ -166,6 +203,8 @@ def dump_tool_agent_execution_records_for_state(
 async def build_tool_agent_runtime_state_update(
     tool_calls: list[ToolCall],
     executor: Any | None = None,
+    mcp_client: Any | None = None,
+    tool_catalog: list[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """
     执行工具调用并构建可写回 state 的运行时结果。
@@ -182,6 +221,12 @@ async def build_tool_agent_runtime_state_update(
         executor:
             工具执行器。默认创建项目已有 ToolExecutor。
 
+        mcp_client:
+            MCP Client。用于执行工具目录中 source=mcp 的工具。
+
+        tool_catalog:
+            ToolAgent 工具目录。runtime adapter 通过它识别工具来源。
+
     返回值：
         dict[str, Any]:
             可写回 LangGraph state 的普通字典。
@@ -190,6 +235,8 @@ async def build_tool_agent_runtime_state_update(
     execution_records = await execute_tool_calls_with_runtime(
         tool_calls=tool_calls,
         executor=executor,
+        mcp_client=mcp_client,
+        tool_catalog=tool_catalog,
     )
 
     return {
@@ -268,3 +315,61 @@ def build_runtime_call_id(
     """
 
     return f"runtime_{index}_{tool_call.name}"
+
+
+def resolve_tool_source(
+    tool_name: str,
+    tool_catalog: list[Mapping[str, Any]] | None = None,
+) -> str:
+    """
+    根据工具目录解析工具来源。
+
+    功能：
+        遍历 ToolAgent 工具目录，找到 name 等于 tool_name 的条目，
+        并读取它的 source 字段。
+        当前只识别 mcp，其余情况统一兜底为 local，保证旧本地工具链路稳定。
+
+    参数：
+        tool_name:
+            当前待执行的工具名称。
+
+        tool_catalog:
+            ToolAgent 工具目录列表。每个条目通常包含 name 和 source 字段。
+
+    返回值：
+        str:
+            工具来源。mcp 表示 MCP 工具，local 表示本地工具或未知来源。
+    """
+
+    if not tool_catalog:
+        return "local"
+
+    for tool_item in tool_catalog:
+        if not isinstance(
+            tool_item,
+            Mapping,
+        ):
+            continue
+
+        if str(
+            tool_item.get(
+                "name",
+                "",
+            )
+        ) != tool_name:
+            continue
+
+        source = str(
+            tool_item.get(
+                "source",
+                "local",
+            )
+            or "local"
+        ).strip()
+
+        if source == "mcp":
+            return "mcp"
+
+        return "local"
+
+    return "local"

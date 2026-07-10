@@ -6,7 +6,7 @@ ToolAgent 统一入口。
 
 当前阶段：
     V1.8 ToolAgent Graph Assembly MVP。
-    这里只把 parse -> confirm -> execute -> answer -> response_adapter 五个节点串起来，
+    这里只把 catalog -> parse -> validate -> confirm -> execute -> answer -> response_adapter 串起来，
     暂时不接入主图。
 
 专业名词：
@@ -30,11 +30,17 @@ from src.agents.tool_agent.nodes.tool_answer_node import (
 from src.agents.tool_agent.nodes.tool_confirm_node import (
     build_tool_agent_tool_confirm_node,
 )
+from src.agents.tool_agent.nodes.tool_catalog_node import (
+    build_tool_agent_tool_catalog_node,
+)
 from src.agents.tool_agent.nodes.tool_execute_node import (
     build_tool_agent_tool_execute_node,
 )
 from src.agents.tool_agent.nodes.tool_parse_node import (
     build_tool_agent_tool_parse_node,
+)
+from src.agents.tool_agent.nodes.tool_validate_node import (
+    build_tool_agent_tool_validate_node,
 )
 
 
@@ -48,7 +54,10 @@ def build_tool_agent(
     parser: Any | None = None,
     llm_provider: Any | None = None,
     tool_registry: Any | None = None,
+    mcp_tool_definitions: Any | None = None,
+    sqlite_mcp_provider: Any | None = None,
     executor: Any | None = None,
+    mcp_client: Any | None = None,
     checkpoint_manager: Any | None = None,
     runtime_context_getter: Callable[[], Any] | None = None,
 ) -> ToolAgentNode:
@@ -56,7 +65,8 @@ def build_tool_agent(
     构建 ToolAgent 统一入口节点。
 
     功能：
-        将 ToolAgent 内部的工具解析、工具确认、工具执行、工具答案、响应适配五个节点串成一个 async 节点。
+        将 ToolAgent 内部的工具目录、工具解析、工具校验、工具确认、
+        工具执行、工具答案、响应适配节点串成一个 async 节点。
         当前负责生成标准工具调用计划、确认状态，并在权限允许时执行工具和生成回答。
 
     参数：
@@ -70,9 +80,20 @@ def build_tool_agent(
         tool_registry:
             工具注册表。工具确认节点会用它判断某个工具是否需要用户确认。
 
+        mcp_tool_definitions:
+            MCP 工具定义集合。工具目录节点用它合并本地工具和 MCP 工具。
+
+        sqlite_mcp_provider:
+            SQLite MCP Provider。未显式传入 mcp_tool_definitions 时，
+            工具目录节点会尝试读取它的 tool_definitions。
+
         executor:
             工具执行器。工具执行节点会把它传给 runtime_adapter。
             测试时可以传入 fake executor，避免调用真实外部工具。
+
+        mcp_client:
+            MCP Client（模型上下文协议客户端）。工具执行节点会用它执行 MCP 工具。
+            如果不传，则执行节点会尝试从 sqlite_mcp_provider 读取 tool_client。
 
         checkpoint_manager:
             检查点管理器。内部节点按需保存 checkpoint。
@@ -85,9 +106,19 @@ def build_tool_agent(
             async ToolAgent 入口节点，接收 state，返回合并后的完整 state。
     """
 
+    catalog_node = build_tool_agent_tool_catalog_node(
+        tool_registry=tool_registry,
+        mcp_tool_definitions=mcp_tool_definitions,
+        sqlite_mcp_provider=sqlite_mcp_provider,
+        runtime_context_getter=runtime_context_getter,
+    )
     parse_node = build_tool_agent_tool_parse_node(
         parser=parser,
         llm_provider=llm_provider,
+        checkpoint_manager=checkpoint_manager,
+        runtime_context_getter=runtime_context_getter,
+    )
+    validate_node = build_tool_agent_tool_validate_node(
         checkpoint_manager=checkpoint_manager,
         runtime_context_getter=runtime_context_getter,
     )
@@ -98,6 +129,8 @@ def build_tool_agent(
     )
     execute_node = build_tool_agent_tool_execute_node(
         executor=executor,
+        mcp_client=mcp_client,
+        sqlite_mcp_provider=sqlite_mcp_provider,
         checkpoint_manager=checkpoint_manager,
         runtime_context_getter=runtime_context_getter,
     )
@@ -114,12 +147,14 @@ def build_tool_agent(
         执行 ToolAgent 最小链路。
 
         功能：
-            1. 调用工具解析节点，生成 need_tool 和 tool_calls。
-            2. 调用工具确认节点，生成 permission 和确认提示。
-            3. 调用工具执行节点，在权限允许时执行工具。
-            4. 调用工具答案节点，将 tool_results 转成 final_answer。
-            5. 调用响应适配节点，刷新 tool_agent_response。
-            6. 返回合并后的完整 state，方便后续主图直接继续使用。
+            1. 调用工具目录节点，生成 tool_agent_tool_catalog。
+            2. 调用工具解析节点，生成 need_tool 和 tool_calls。
+            3. 调用工具校验节点，过滤非法 tool_calls 并记录校验错误。
+            4. 调用工具确认节点，生成 permission 和确认提示。
+            5. 调用工具执行节点，在权限允许时执行工具。
+            6. 调用工具答案节点，将 tool_results 转成 final_answer。
+            7. 调用响应适配节点，刷新 tool_agent_response。
+            8. 返回合并后的完整 state，方便后续主图直接继续使用。
 
         参数：
             state:
@@ -134,13 +169,31 @@ def build_tool_agent(
             state
         )
 
-        # 先解析用户问题，判断是否需要调用工具，并生成 tool_calls。
+        # 先构建工具目录，把本地工具和 MCP 工具写入 state。
+        catalog_update = await catalog_node(
+            working_state
+        )
+        working_state = merge_state_update(
+            state=working_state,
+            update=catalog_update,
+        )
+
+        # 再解析用户问题，判断是否需要调用工具，并生成 tool_calls。
         parse_update = await parse_node(
             working_state
         )
         working_state = merge_state_update(
             state=working_state,
             update=parse_update,
+        )
+
+        # 接着校验工具调用计划，避免不存在的工具或非法参数继续进入确认/执行。
+        validate_update = validate_node(
+            working_state
+        )
+        working_state = merge_state_update(
+            state=working_state,
+            update=validate_update,
         )
 
         # 再根据工具注册表判断是否需要用户确认。

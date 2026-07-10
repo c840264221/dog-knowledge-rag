@@ -46,6 +46,21 @@ tool_parse_output_parser = PydanticOutputParser(
 )
 
 
+DEFAULT_TOOL_CATALOG_PROMPT_TEXT = """
+1. date
+功能：
+- 获取今天日期
+是否需要确认：False
+-----------------------------------
+
+2. weather
+功能：
+- 查询天气
+是否需要确认：True
+-----------------------------------
+""".strip()
+
+
 def build_tool_agent_tool_parse_node(
     parser: Any | None = None,
     llm_provider: Any | None = None,
@@ -262,21 +277,7 @@ def build_llm_tool_parser(
 
     你可以使用以下工具：
 
-    1. date
-    功能：
-    - 获取今天日期
-    参数：
-    {{}}
-    -----------------------------------
-
-    2. weather
-    功能：
-    - 查询天气
-    参数：
-    {{
-      "city": "城市名称"
-    }}
-    -----------------------------------
+    {tool_catalog_text}
 
     规则：
 
@@ -296,9 +297,9 @@ def build_llm_tool_parser(
 
     7. tool_calls 必须是数组
 
-    8. 如果用户问到天气，则 tool_calls 中必须包含 weather 工具
+    8. 如果用户问题匹配某个工具能力，则 tool_calls 中必须包含该工具名称
 
-    9. 如果用户问今天日期、当前日期、几号，则 tool_calls 中必须包含 date 工具
+    9. 如果用户问题不需要任何工具，则 need_tool=false 且 tool_calls=[]
     -----------------------------------
 
     用户问题：
@@ -367,6 +368,12 @@ def build_llm_tool_parser(
                     "question",
                     "",
                 ),
+                "tool_catalog_text": build_tool_catalog_prompt_text(
+                    state=parser_input.get(
+                        "state",
+                        {},
+                    ),
+                ),
                 "format_instructions": (
                     tool_parse_output_parser.get_format_instructions()
                 ),
@@ -374,6 +381,377 @@ def build_llm_tool_parser(
         )
 
     return llm_tool_parser
+
+
+def build_tool_catalog_prompt_text(
+    state: Mapping[str, Any],
+) -> str:
+    """
+    构建工具目录 prompt 文本。
+
+    功能：
+        从 state["tool_agent_tool_catalog"] 读取工具目录，
+        并渲染成 LLM 可以阅读的工具列表文本。
+        如果 state 中没有工具目录，则返回默认 date/weather 工具说明。
+
+    参数：
+        state:
+            当前 LangGraph state，可能包含 tool_agent_tool_catalog。
+
+    返回值：
+        str:
+            可注入工具解析 prompt 的工具目录文本。
+    """
+
+    raw_catalog = state.get(
+        "tool_agent_tool_catalog",
+        [],
+    )
+
+    if not isinstance(
+        raw_catalog,
+        list,
+    ) or not raw_catalog:
+        return DEFAULT_TOOL_CATALOG_PROMPT_TEXT
+
+    rendered_tools: list[str] = []
+
+    for index, raw_tool in enumerate(
+        raw_catalog,
+        start=1,
+    ):
+        if not isinstance(
+            raw_tool,
+            Mapping,
+        ):
+            continue
+
+        tool_name = str(
+            raw_tool.get(
+                "name",
+                "",
+            )
+            or ""
+        ).strip()
+
+        if not tool_name:
+            continue
+
+        description = str(
+            raw_tool.get(
+                "description",
+                "",
+            )
+            or ""
+        ).strip()
+        require_confirm = bool(
+            raw_tool.get(
+                "require_confirm",
+                False,
+            )
+        )
+        input_schema = raw_tool.get(
+            "input_schema",
+            {},
+        )
+        source = str(
+            raw_tool.get(
+                "source",
+                "",
+            )
+            or ""
+        ).strip()
+
+        rendered_tools.append(
+            render_tool_catalog_item_for_prompt(
+                index=index,
+                name=tool_name,
+                description=description,
+                require_confirm=require_confirm,
+                input_schema=input_schema
+                if isinstance(
+                    input_schema,
+                    Mapping,
+                )
+                else {},
+                source=source,
+            )
+        )
+
+    if not rendered_tools:
+        return DEFAULT_TOOL_CATALOG_PROMPT_TEXT
+
+    return "\n\n".join(
+        rendered_tools
+    )
+
+
+def render_tool_catalog_item_for_prompt(
+    index: int,
+    name: str,
+    description: str,
+    require_confirm: bool,
+    input_schema: Mapping[str, Any] | None = None,
+    source: str = "",
+) -> str:
+    """
+    渲染单个工具目录条目。
+
+    功能：
+        将单个工具的名称、描述、确认标记和参数结构转换成 prompt 文本。
+
+    参数：
+        index:
+            工具序号。
+
+        name:
+            工具名称。
+
+        description:
+            工具描述。
+
+        require_confirm:
+            是否需要用户确认。
+
+        input_schema:
+            工具输入参数结构。为空时不输出参数说明。
+
+        source:
+            工具来源，例如 local 或 mcp。为空时不输出来源说明。
+
+    返回值：
+        str:
+            单个工具的 prompt 文本。
+    """
+
+    safe_description = description or "无描述"
+    rendered_parts = [
+        f"{index}. {name}",
+        "功能：",
+        f"- {safe_description}",
+    ]
+
+    if source:
+        rendered_parts.extend(
+            [
+                "工具来源：",
+                f"- {source}",
+            ]
+        )
+
+    input_schema_text = render_input_schema_for_prompt(
+        input_schema=input_schema or {},
+    )
+
+    if input_schema_text:
+        rendered_parts.extend(
+            [
+                "参数结构：",
+                input_schema_text,
+            ]
+        )
+
+    rendered_parts.extend(
+        [
+            f"是否需要确认：{require_confirm}",
+            "-----------------------------------",
+        ]
+    )
+
+    return "\n".join(
+        rendered_parts
+    )
+
+
+def render_input_schema_for_prompt(
+    input_schema: Mapping[str, Any],
+) -> str:
+    """
+    渲染工具输入参数结构。
+
+    功能：
+        从 JSON Schema 风格的 input_schema 中读取 properties 和 required，
+        转换成 LLM 更容易阅读的普通文本。
+
+    参数：
+        input_schema:
+            工具输入参数结构，通常来自 MCP 工具定义。
+
+    返回值：
+        str:
+            参数结构文本。没有可用字段时返回空字符串。
+    """
+
+    raw_properties = input_schema.get(
+        "properties",
+        {},
+    )
+
+    if not isinstance(
+        raw_properties,
+        Mapping,
+    ) or not raw_properties:
+        return ""
+
+    raw_required = input_schema.get(
+        "required",
+        [],
+    )
+    required_fields = {
+        str(
+            item
+        )
+        for item in raw_required
+        if isinstance(
+            item,
+            str,
+        )
+    } if isinstance(
+        raw_required,
+        list,
+    ) else set()
+
+    rendered_fields: list[str] = []
+
+    for field_name, raw_field_schema in raw_properties.items():
+        if not isinstance(
+            raw_field_schema,
+            Mapping,
+        ):
+            continue
+
+        rendered_fields.append(
+            render_input_schema_field_for_prompt(
+                field_name=str(
+                    field_name
+                ),
+                field_schema=raw_field_schema,
+                required=str(
+                    field_name
+                )
+                in required_fields,
+            )
+        )
+
+    if not rendered_fields:
+        return ""
+
+    return "\n".join(
+        rendered_fields
+    )
+
+
+def render_input_schema_field_for_prompt(
+    field_name: str,
+    field_schema: Mapping[str, Any],
+    required: bool,
+) -> str:
+    """
+    渲染单个工具参数字段。
+
+    功能：
+        将 JSON Schema 中的单个字段描述转换成一行 prompt 文本。
+
+    参数：
+        field_name:
+            参数字段名。
+
+        field_schema:
+            参数字段的 schema 描述。
+
+        required:
+            该参数是否必填。
+
+    返回值：
+        str:
+            单行参数说明文本。
+    """
+
+    field_type = str(
+        field_schema.get(
+            "type",
+            "unknown",
+        )
+        or "unknown"
+    )
+    description = str(
+        field_schema.get(
+            "description",
+            "",
+        )
+        or ""
+    ).strip()
+    required_text = (
+        "必填"
+        if required
+        else "可选"
+    )
+
+    if description:
+        allowed_values_text = render_schema_allowed_values_for_prompt(
+            field_schema=field_schema,
+        )
+        return (
+            f"- {field_name}: {field_type}，{required_text}，{description}"
+            f"{allowed_values_text}"
+        )
+
+    allowed_values_text = render_schema_allowed_values_for_prompt(
+        field_schema=field_schema,
+    )
+
+    return f"- {field_name}: {field_type}，{required_text}{allowed_values_text}"
+
+
+def render_schema_allowed_values_for_prompt(
+    field_schema: Mapping[str, Any],
+) -> str:
+    """
+    渲染字段允许值说明。
+
+    功能：
+        从字段 schema 中读取 enum 或 allowed_values，
+        转换成 LLM 可读的“合法值只能是...”文本。
+
+    参数：
+        field_schema:
+            单个字段的 JSON Schema 描述。
+
+    返回值：
+        str:
+            允许值说明；没有允许值时返回空字符串。
+    """
+
+    raw_allowed_values = field_schema.get(
+        "enum",
+        field_schema.get(
+            "allowed_values",
+            [],
+        ),
+    )
+
+    if not isinstance(
+        raw_allowed_values,
+        list,
+    ) or not raw_allowed_values:
+        return ""
+
+    allowed_values = [
+        str(
+            value
+        )
+        for value in raw_allowed_values
+        if str(
+            value
+        ).strip()
+    ]
+
+    if not allowed_values:
+        return ""
+
+    return " 合法值只能是：" + "、".join(
+        allowed_values
+    ) + "。"
 
 
 def write_tool_parse_runtime_event(

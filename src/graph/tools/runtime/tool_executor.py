@@ -51,7 +51,7 @@ def safe_execute_tool(func,args=None,timeout=5):
 import time
 import traceback
 
-from src.graph.tools.registry.tool_registry import (
+from src.graph.tools.registry.default_registry import (
     registry
 )
 

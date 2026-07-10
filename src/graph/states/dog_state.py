@@ -143,12 +143,18 @@ class DogState(TypedDict, total=False):
     tool_confirmation_required: bool
     tool_confirmation_mode: str
     tool_confirmation_prompt: str
+    tool_agent_tool_catalog: List[Dict[str, Any]]
+    tool_agent_allowed_databases: Dict[str, str]
     tool_agent_permission: Dict[str, Any]
     tool_agent_response: Dict[str, Any]
     tool_agent_runtime_execution_records: List[Dict[str, Any]]
     tool_agent_execute_skipped: bool
     tool_agent_execute_skip_reason: str
     tool_agent_answer_source: str
+    tool_call_validation_ok: bool
+    tool_call_validation_skipped: bool
+    tool_call_validation_errors: List[Dict[str, Any]]
+    tool_call_validation_invalid_calls: List[Dict[str, Any]]
 
     # =========================
     # 9. 旧版 Supervisor 路由字段

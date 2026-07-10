@@ -23,6 +23,8 @@ from src.agents.tool_agent.adapters.state_adapter import TOOL_AGENT_RESPONSE_STA
 from src.agents.tool_agent.nodes.tool_execute_node import (
     build_tool_agent_tool_execute_node,
     get_permission_status,
+    read_tool_catalog_from_state,
+    resolve_mcp_client,
 )
 from src.graph.tools.schemas.tool_result_schema import ToolResult
 
@@ -84,6 +86,82 @@ class FakeExecutor:
                 "source": "fake_executor",
             },
         )
+
+
+class FakeMcpClient:
+    """
+    测试用 MCP Client。
+
+    功能：
+        模拟 MCP Client.call_tool，记录 MCP 工具调用。
+
+    参数：
+        无。
+
+    返回值：
+        FakeMcpClient:
+            测试用 MCP 客户端。
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    async def call_tool(
+        self,
+        name: str,
+        arguments: dict,
+    ) -> dict:
+        """
+        模拟执行 MCP 工具。
+
+        功能：
+            记录工具名称和参数，并返回结构化 MCP 内容。
+
+        参数：
+            name:
+                MCP 工具名称。
+
+            arguments:
+                MCP 工具参数。
+
+        返回值：
+            dict:
+                模拟 MCP 工具返回内容。
+        """
+
+        self.calls.append(
+            {
+                "tool_name": name,
+                "args": arguments,
+            }
+        )
+        return {
+            "tool_name": name,
+            "args": arguments,
+        }
+
+
+class FakeSQLiteMcpProvider:
+    """
+    测试用 SQLite MCP Provider。
+
+    功能：
+        只提供 tool_client 属性，用于验证执行节点可以从 provider 读取 MCP Client。
+
+    参数：
+        tool_client:
+            测试用 MCP Client。
+
+    返回值：
+        FakeSQLiteMcpProvider:
+            测试用 SQLite MCP Provider。
+    """
+
+    def __init__(
+        self,
+        tool_client: FakeMcpClient,
+    ) -> None:
+        self.tool_client = tool_client
 
 
 class FakeCheckpointManager:
@@ -550,3 +628,149 @@ def test_get_permission_status_should_fallback_to_tool_confirmed() -> None:
             "tool_confirmed": "confirmed",
         }
     ) == "confirmed"
+
+
+@pytest.mark.asyncio
+async def test_tool_execute_node_should_execute_mcp_tool_from_catalog() -> None:
+    """
+    测试执行节点按工具目录分发 MCP 工具。
+
+    功能：
+        state 中 tool_agent_tool_catalog 标记 sqlite_list_tables 为 source=mcp 时，
+        执行节点应调用 MCP Client，不调用本地 executor。
+
+    参数：
+        无。
+
+    返回值：
+        None。
+    """
+
+    fake_executor = FakeExecutor()
+    fake_mcp_client = FakeMcpClient()
+
+    node = build_tool_agent_tool_execute_node(
+        executor=fake_executor,
+        mcp_client=fake_mcp_client,
+        runtime_context_getter=lambda: None,
+    )
+
+    update = await node(
+        {
+            "tool_calls": [
+                {
+                    "name": "sqlite_list_tables",
+                    "args": {
+                        "database_name": "memory",
+                    },
+                }
+            ],
+            "tool_agent_tool_catalog": [
+                {
+                    "name": "sqlite_list_tables",
+                    "source": "mcp",
+                }
+            ],
+            "tool_agent_permission": {
+                "status": "not_required",
+            },
+        }
+    )
+
+    assert fake_executor.calls == []
+    assert fake_mcp_client.calls == [
+        {
+            "tool_name": "sqlite_list_tables",
+            "args": {
+                "database_name": "memory",
+            },
+        }
+    ]
+    assert update["tool_results"][0]["metadata"]["source"] == "mcp"
+    assert update[TOOL_AGENT_RUNTIME_RECORDS_STATE_KEY][0]["metadata"]["tool_source"] == "mcp"
+
+
+def test_resolve_mcp_client_should_prefer_explicit_client() -> None:
+    """
+    测试 MCP Client 解析优先级。
+
+    功能：
+        显式传入 mcp_client 时，应优先使用它，而不是 provider.tool_client。
+
+    参数：
+        无。
+
+    返回值：
+        None。
+    """
+
+    explicit_client = FakeMcpClient()
+    provider_client = FakeMcpClient()
+
+    assert (
+        resolve_mcp_client(
+            mcp_client=explicit_client,
+            sqlite_mcp_provider=FakeSQLiteMcpProvider(
+                tool_client=provider_client,
+            ),
+        )
+        is explicit_client
+    )
+
+
+def test_resolve_mcp_client_should_read_sqlite_provider_tool_client() -> None:
+    """
+    测试从 SQLite MCP Provider 读取 MCP Client。
+
+    功能：
+        没有显式 mcp_client 时，应回退读取 sqlite_mcp_provider.tool_client。
+
+    参数：
+        无。
+
+    返回值：
+        None。
+    """
+
+    provider_client = FakeMcpClient()
+
+    assert (
+        resolve_mcp_client(
+            sqlite_mcp_provider=FakeSQLiteMcpProvider(
+                tool_client=provider_client,
+            ),
+        )
+        is provider_client
+    )
+
+
+def test_read_tool_catalog_from_state_should_return_mapping_items_only() -> None:
+    """
+    测试从 state 安全读取工具目录。
+
+    功能：
+        只保留 dict 这类 Mapping 条目，过滤异常数据，避免执行节点崩溃。
+
+    参数：
+        无。
+
+    返回值：
+        None。
+    """
+
+    assert read_tool_catalog_from_state(
+        {
+            "tool_agent_tool_catalog": [
+                {
+                    "name": "date",
+                    "source": "local",
+                },
+                "bad-item",
+            ],
+        }
+    ) == [
+        {
+            "name": "date",
+            "source": "local",
+        }
+    ]

@@ -43,6 +43,8 @@ ToolExecuteNode = Callable[
 
 def build_tool_agent_tool_execute_node(
     executor: Any | None = None,
+    mcp_client: Any | None = None,
+    sqlite_mcp_provider: Any | None = None,
     checkpoint_manager: Any | None = None,
     runtime_context_getter: Callable[[], Any] | None = None,
 ) -> ToolExecuteNode:
@@ -56,6 +58,14 @@ def build_tool_agent_tool_execute_node(
     参数：
         executor:
             工具执行器。测试时可以传入 fake executor，避免调用真实外部工具。
+
+        mcp_client:
+            MCP Client（模型上下文协议客户端）。当工具目录中 source=mcp 时，
+            runtime_adapter 会通过它执行 MCP 工具。
+
+        sqlite_mcp_provider:
+            SQLite MCP Provider（SQLite MCP 服务提供者）。
+            如果没有显式传入 mcp_client，则会尝试读取 provider.tool_client。
 
         checkpoint_manager:
             检查点管理器。工具执行完成后按需保存 checkpoint。
@@ -171,10 +181,17 @@ def build_tool_agent_tool_execute_node(
             )
             return update
 
-        # 权限允许后，通过 runtime_adapter 调用底层 ToolExecutor。
+        # 权限允许后，通过 runtime_adapter 按工具来源分发到本地 ToolExecutor 或 MCP Client。
         runtime_update = await build_tool_agent_runtime_state_update(
             tool_calls=tool_calls,
             executor=executor,
+            mcp_client=resolve_mcp_client(
+                mcp_client=mcp_client,
+                sqlite_mcp_provider=sqlite_mcp_provider,
+            ),
+            tool_catalog=read_tool_catalog_from_state(
+                state=state,
+            ),
         )
 
         update = build_execute_success_update(
@@ -210,6 +227,83 @@ def build_tool_agent_tool_execute_node(
         return update
 
     return tool_agent_tool_execute_node
+
+
+def resolve_mcp_client(
+    mcp_client: Any | None = None,
+    sqlite_mcp_provider: Any | None = None,
+) -> Any | None:
+    """
+    解析 MCP Client。
+
+    功能：
+        优先使用显式传入的 mcp_client。
+        如果没有传入，则尝试从 sqlite_mcp_provider.tool_client 读取。
+        如果两者都没有，则返回 None，让 runtime_adapter 生成结构化失败结果。
+
+    参数：
+        mcp_client:
+            显式传入的 MCP Client。
+
+        sqlite_mcp_provider:
+            SQLite MCP Provider，可能提供 tool_client 属性。
+
+    返回值：
+        Any | None:
+            可用于调用 MCP 工具的客户端对象，或者 None。
+    """
+
+    if mcp_client is not None:
+        return mcp_client
+
+    if sqlite_mcp_provider is None:
+        return None
+
+    return getattr(
+        sqlite_mcp_provider,
+        "tool_client",
+        None,
+    )
+
+
+def read_tool_catalog_from_state(
+    state: Mapping[str, Any],
+) -> list[Mapping[str, Any]]:
+    """
+    从 state 中读取 ToolAgent 工具目录。
+
+    功能：
+        读取 state["tool_agent_tool_catalog"]。
+        如果字段不是列表，则返回空列表，保证执行节点不会因为异常数据崩溃。
+
+    参数：
+        state:
+            当前 LangGraph state。
+
+    返回值：
+        list[Mapping[str, Any]]:
+            工具目录列表。没有目录或格式不对时返回空列表。
+    """
+
+    raw_tool_catalog = state.get(
+        "tool_agent_tool_catalog",
+        [],
+    )
+
+    if not isinstance(
+        raw_tool_catalog,
+        list,
+    ):
+        return []
+
+    return [
+        tool_item
+        for tool_item in raw_tool_catalog
+        if isinstance(
+            tool_item,
+            Mapping,
+        )
+    ]
 
 
 def write_tool_execute_runtime_event(

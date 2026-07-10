@@ -20,11 +20,17 @@ from src.agents.tool_agent.adapters.state_adapter import (
     TOOL_AGENT_RESPONSE_STATE_KEY,
 )
 from src.agents.tool_agent.nodes.tool_parse_node import (
+    build_tool_catalog_prompt_text,
     build_tool_agent_tool_parse_node,
     call_tool_parser,
     normalize_tool_parse_result,
+    render_input_schema_for_prompt,
+    render_tool_catalog_item_for_prompt,
 )
 from src.graph.tools.schemas.tool_call_schema import ToolCall, ToolParseResult
+from src.mcp.sqlite.tool_definitions import (
+    SQLITE_SELECT_ROWS_TOOL_NAME,
+)
 
 
 class FakeStateScope:
@@ -401,6 +407,191 @@ def build_test_node(
     )
 
 
+def test_build_tool_catalog_prompt_text_should_use_default_when_catalog_missing() -> None:
+    """
+    测试缺少工具目录时使用默认工具说明。
+
+    功能：
+        当 state 中没有 tool_agent_tool_catalog 时，
+        prompt 文本应回退到 date/weather 默认说明。
+
+    参数：
+        无。
+
+    返回值：
+        None。
+    """
+
+    prompt_text = build_tool_catalog_prompt_text(
+        state={},
+    )
+
+    assert "date" in prompt_text
+    assert "weather" in prompt_text
+
+
+def test_build_tool_catalog_prompt_text_should_render_state_catalog() -> None:
+    """
+    测试根据 state 工具目录渲染 prompt 文本。
+
+    功能：
+        当 state 中存在 tool_agent_tool_catalog 时，
+        prompt 文本应包含目录中的工具名称、描述和确认标记。
+
+    参数：
+        无。
+
+    返回值：
+        None。
+    """
+
+    prompt_text = build_tool_catalog_prompt_text(
+        state={
+            "tool_agent_tool_catalog": [
+                {
+                    "name": SQLITE_SELECT_ROWS_TOOL_NAME,
+                    "description": "查看 SQLite 表前 N 行数据。",
+                    "require_confirm": False,
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {
+                            "database_name": {
+                                "type": "string",
+                                "description": "数据库白名单别名。",
+                            },
+                            "table_name": {
+                                "type": "string",
+                                "description": "要读取数据的表名。",
+                            },
+                        },
+                        "required": [
+                            "database_name",
+                            "table_name",
+                        ],
+                    },
+                    "source": "mcp",
+                    "timeout": 5,
+                    "retries": 0,
+                }
+            ],
+        },
+    )
+
+    assert SQLITE_SELECT_ROWS_TOOL_NAME in prompt_text
+    assert "查看 SQLite 表前 N 行数据。" in prompt_text
+    assert "工具来源：" in prompt_text
+    assert "- mcp" in prompt_text
+    assert "- database_name: string，必填，数据库白名单别名。" in prompt_text
+    assert "- table_name: string，必填，要读取数据的表名。" in prompt_text
+    assert "是否需要确认：False" in prompt_text
+    assert "timeout" not in prompt_text
+    assert "retries" not in prompt_text
+
+
+def test_render_tool_catalog_item_for_prompt_should_return_plain_text() -> None:
+    """
+    测试单个工具条目渲染为普通文本。
+
+    功能：
+        确认工具条目不会输出复杂对象，只输出 LLM 可读文本。
+
+    参数：
+        无。
+
+    返回值：
+        None。
+    """
+
+    prompt_item = render_tool_catalog_item_for_prompt(
+        index=1,
+        name="weather",
+        description="查询天气",
+        require_confirm=True,
+    )
+
+    assert prompt_item == (
+        "1. weather\n"
+        "功能：\n"
+        "- 查询天气\n"
+        "是否需要确认：True\n"
+        "-----------------------------------"
+    )
+
+
+def test_render_input_schema_for_prompt_should_render_required_and_optional_fields() -> None:
+    """
+    测试 input_schema 渲染必填和可选字段。
+
+    功能：
+        确认 JSON Schema 风格参数结构会转换成 LLM 易读文本。
+
+    参数：
+        无。
+
+    返回值：
+        None。
+    """
+
+    rendered_schema = render_input_schema_for_prompt(
+        input_schema={
+            "type": "object",
+            "properties": {
+                "database_name": {
+                    "type": "string",
+                    "description": "数据库白名单别名。",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "最多返回多少行。",
+                },
+            },
+            "required": [
+                "database_name",
+            ],
+        }
+    )
+
+    assert "- database_name: string，必填，数据库白名单别名。" in rendered_schema
+    assert "- limit: integer，可选，最多返回多少行。" in rendered_schema
+
+
+def test_render_input_schema_for_prompt_should_render_allowed_values() -> None:
+    """
+    测试 input_schema 渲染字段允许值。
+
+    功能：
+        当 database_name schema 中包含 enum 时，
+        prompt 文本应明确告诉 LLM 合法数据库别名。
+
+    参数：
+        无。
+
+    返回值：
+        None。
+    """
+
+    rendered_schema = render_input_schema_for_prompt(
+        input_schema={
+            "type": "object",
+            "properties": {
+                "database_name": {
+                    "type": "string",
+                    "description": "数据库白名单别名。",
+                    "enum": [
+                        "memory",
+                        "rag",
+                    ],
+                },
+            },
+            "required": [
+                "database_name",
+            ],
+        }
+    )
+
+    assert "合法值只能是：memory、rag。" in rendered_schema
+
+
 @pytest.mark.asyncio
 async def test_tool_agent_tool_parse_node_should_support_llm_provider() -> None:
     """
@@ -478,6 +669,66 @@ async def test_tool_agent_tool_parse_node_should_support_llm_provider() -> None:
         llm_provider.calls
     ) == 1
     assert checkpoint_manager.save_count == 1
+
+
+@pytest.mark.asyncio
+async def test_tool_agent_tool_parse_node_should_inject_tool_catalog_into_llm_prompt() -> None:
+    """
+    测试 LLM prompt 会注入 state 中的工具目录。
+
+    功能：
+        当 state 中包含 tool_agent_tool_catalog 时，
+        LLM 工具解析 prompt 应包含 SQLite MCP 工具名称。
+
+    参数：
+        无。
+
+    返回值：
+        None。
+    """
+
+    llm_provider = FakeLLMProvider(
+        response_text="""
+        {
+          "need_tool": true,
+          "tool_calls": [
+            {
+              "name": "sqlite_select_rows",
+              "args": {
+                "database_name": "memory",
+                "table_name": "dogs"
+              }
+            }
+          ],
+          "response": ""
+        }
+        """
+    )
+    node = build_tool_agent_tool_parse_node(
+        llm_provider=llm_provider,
+        runtime_context_getter=lambda: None,
+    )
+
+    update = await node(
+        {
+            "question": "查看 memory 数据库 dogs 表",
+            "tool_agent_tool_catalog": [
+                {
+                    "name": SQLITE_SELECT_ROWS_TOOL_NAME,
+                    "description": "查看 SQLite 表前 N 行数据。",
+                    "require_confirm": False,
+                }
+            ],
+        }
+    )
+
+    rendered_prompt = str(
+        llm_provider.calls[0]["prompt"]
+    )
+
+    assert update["tool_calls"][0]["name"] == SQLITE_SELECT_ROWS_TOOL_NAME
+    assert SQLITE_SELECT_ROWS_TOOL_NAME in rendered_prompt
+    assert "查看 SQLite 表前 N 行数据。" in rendered_prompt
 
 
 @pytest.mark.asyncio

@@ -89,6 +89,7 @@ class GraphRuntimeService:
             checkpoint_provider=None,
             retriever_provider=None,
             reranker_provider=None,
+            sqlite_mcp_provider=None,
     ):
         """
         初始化 GraphRuntimeService。
@@ -118,6 +119,10 @@ class GraphRuntimeService:
                 RerankerProvider 实例。
                 中文释义：统一管理 reranker 重排序模型能力。
 
+            sqlite_mcp_provider:
+                SQLiteMcpProvider 实例。
+                中文释义：统一管理 SQLite MCP 工具定义和工具客户端能力。
+
         返回值：
             None:
                 初始化函数不返回业务数据。
@@ -132,6 +137,8 @@ class GraphRuntimeService:
         self.retriever_provider = retriever_provider
 
         self.reranker_provider = reranker_provider
+
+        self.sqlite_mcp_provider = sqlite_mcp_provider
 
         self._graph = None
 
@@ -316,17 +323,7 @@ class GraphRuntimeService:
         )
 
         # 构建新版 ToolAgent 子图，用来承接 RootAgent 路由出的工具请求。
-        tool_agent = build_tool_agent_graph(
-            llm_provider=(
-                self.llm_provider
-            ),
-            checkpoint_manager=(
-                self.checkpoint_provider.manager
-                if self.checkpoint_provider is not None
-                else None
-            ),
-            interrupt_func=interrupt,
-        )
+        tool_agent = self._build_tool_agent_node()
 
         graph = StateGraph(
             DogState
@@ -398,4 +395,37 @@ class GraphRuntimeService:
 
         return graph.compile(
             checkpointer=self._checkpointer
+        )
+
+    def _build_tool_agent_node(self):
+        """
+        构建 ToolAgent 子图节点。
+
+        功能：
+            将 GraphRuntimeService 持有的运行时依赖注入 ToolAgent。
+            当前重点是把 sqlite_mcp_provider 传入 ToolAgent，
+            让工具目录节点可以读取 MCP 工具定义，
+            让工具执行节点可以读取 MCP tool_client。
+
+        参数：
+            无。
+
+        返回值：
+            CompiledStateGraph:
+                编译后的 ToolAgent 子图节点。
+        """
+
+        return build_tool_agent_graph(
+            llm_provider=(
+                self.llm_provider
+            ),
+            sqlite_mcp_provider=(
+                self.sqlite_mcp_provider
+            ),
+            checkpoint_manager=(
+                self.checkpoint_provider.manager
+                if self.checkpoint_provider is not None
+                else None
+            ),
+            interrupt_func=interrupt,
         )
