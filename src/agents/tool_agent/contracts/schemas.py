@@ -36,6 +36,7 @@ ToolAgentPermissionStatus = Literal[
 
 ToolAgentResponseStatus = Literal[
     "no_tool",
+    "awaiting_clarification",
     "pending_confirmation",
     "completed",
     "failed",

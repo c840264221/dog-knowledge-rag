@@ -24,6 +24,9 @@ from typing import Any, Literal
 
 from langgraph.graph import END, StateGraph
 
+from src.agents.tool_agent.adapters.tool_call_validation_adapter import (
+    TOOL_AGENT_CLARIFICATION_REQUEST_STATE_KEY,
+)
 from src.agents.tool_agent.debug.state_logging import (
     log_tool_agent_state,
 )
@@ -33,8 +36,14 @@ from src.agents.tool_agent.nodes.response_adapter_node import (
 from src.agents.tool_agent.nodes.tool_answer_node import (
     build_tool_agent_tool_answer_node,
 )
+from src.agents.tool_agent.nodes.tool_answer_llm_formatter_node import (
+    build_tool_agent_tool_answer_llm_formatter_node,
+)
 from src.agents.tool_agent.nodes.tool_confirm_node import (
     build_tool_agent_tool_confirm_node,
+)
+from src.agents.tool_agent.nodes.tool_clarification_node import (
+    build_tool_agent_tool_clarification_node,
 )
 from src.agents.tool_agent.nodes.tool_catalog_node import (
     build_tool_agent_tool_catalog_node,
@@ -59,9 +68,14 @@ ToolConfirmRoute = Literal[
     "rejected",
     "allowed",
 ]
+ToolCatalogRoute = Literal[
+    "parse",
+    "clarification",
+]
 ToolValidateRoute = Literal[
     "valid",
     "invalid",
+    "clarification",
 ]
 
 
@@ -83,8 +97,10 @@ def build_tool_agent_graph(
     功能：
         将 ToolAgent 内部节点注册成 LangGraph 子图。
         当前流程为：
-        tool_catalog -> tool_parse -> tool_validate -> tool_confirm -> 条件路由 ->
-        tool_execute / tool_answer / response_adapter。
+        tool_catalog -> 条件路由 -> tool_parse / tool_clarification ->
+        tool_validate -> 条件路由 ->
+        tool_clarification / tool_confirm / tool_answer ->
+        tool_answer_llm_formatter -> response_adapter。
 
     参数：
         parser:
@@ -163,6 +179,14 @@ def build_tool_agent_graph(
         ),
     )
 
+    # 参数缺失时生成用户可读澄清问题，本轮不进入确认或执行节点。
+    graph.add_node(
+        "tool_clarification",
+        build_tool_agent_tool_clarification_node(
+            runtime_context_getter=runtime_context_getter,
+        ),
+    )
+
     # 再注册工具确认节点，负责生成权限状态和确认提示。
     graph.add_node(
         "tool_confirm",
@@ -195,6 +219,16 @@ def build_tool_agent_graph(
         ),
     )
 
+    # 规则答案之后可选调用 LLM 润色；失败时节点返回空 update 保留规则答案。
+    graph.add_node(
+        "tool_answer_llm_formatter",
+        build_tool_agent_tool_answer_llm_formatter_node(
+            llm_provider=llm_provider,
+            checkpoint_manager=checkpoint_manager,
+            runtime_context_getter=runtime_context_getter,
+        ),
+    )
+
     # 注册响应适配节点，统一生成 tool_agent_response。
     graph.add_node(
         "response_adapter",
@@ -205,9 +239,14 @@ def build_tool_agent_graph(
         "tool_catalog"
     )
 
-    graph.add_edge(
+    # 部分参数补全时直接继续澄清，避免把 memory 等短参数再次交给 LLM 解析。
+    graph.add_conditional_edges(
         "tool_catalog",
-        "tool_parse",
+        route_after_tool_catalog,
+        {
+            "parse": "tool_parse",
+            "clarification": "tool_clarification",
+        },
     )
 
     graph.add_edge(
@@ -215,14 +254,20 @@ def build_tool_agent_graph(
         "tool_validate",
     )
 
-    # 校验失败时直接进入答案节点，避免非法工具调用继续流向确认或执行节点。
+    # 缺少必填参数时进入澄清节点；其他校验失败直接进入答案节点。
     graph.add_conditional_edges(
         "tool_validate",
         route_after_tool_validate,
         {
             "valid": "tool_confirm",
             "invalid": "tool_answer",
+            "clarification": "tool_clarification",
         },
+    )
+
+    graph.add_edge(
+        "tool_clarification",
+        "response_adapter",
     )
 
     # 确认节点之后根据权限状态决定是否执行工具。
@@ -242,6 +287,10 @@ def build_tool_agent_graph(
     )
     graph.add_edge(
         "tool_answer",
+        "tool_answer_llm_formatter",
+    )
+    graph.add_edge(
+        "tool_answer_llm_formatter",
         "response_adapter",
     )
     graph.add_edge(
@@ -254,6 +303,67 @@ def build_tool_agent_graph(
     return graph.compile()
 
 
+def route_after_tool_catalog(
+    state: Mapping[str, Any],
+) -> ToolCatalogRoute:
+    """
+    根据工具参数澄清状态决定是否继续解析用户问题。
+
+    功能：
+        当 tool_agent_clarification_resolution.action 为 partial 时，
+        说明用户只补全了部分参数，应直接进入工具澄清节点继续询问；
+        其他情况进入工具解析节点，执行正常 ToolAgent 链路。
+
+    参数：
+        state:
+            当前 LangGraph state，主要读取工具参数澄清处理结果。
+
+    返回值：
+        ToolCatalogRoute:
+            clarification 表示直接进入工具澄清节点；
+            parse 表示继续进入工具解析节点。
+    """
+
+    clarification_resolution = state.get(
+        "tool_agent_clarification_resolution",
+        {},
+    )
+    is_partial = (
+        isinstance(
+            clarification_resolution,
+            Mapping,
+        )
+        and clarification_resolution.get(
+            "action"
+        ) == "partial"
+    )
+    route: ToolCatalogRoute = (
+        "clarification"
+        if is_partial
+        else "parse"
+    )
+
+    log_tool_agent_state(
+        node_name="route_after_tool_catalog",
+        event="route_after_tool_catalog",
+        state=state,
+        extra={
+            "clarification_action": clarification_resolution.get(
+                "action",
+                "",
+            )
+            if isinstance(
+                clarification_resolution,
+                Mapping,
+            )
+            else "",
+            "route": route,
+        },
+    )
+
+    return route
+
+
 def route_after_tool_validate(
     state: Mapping[str, Any],
 ) -> ToolValidateRoute:
@@ -261,8 +371,8 @@ def route_after_tool_validate(
     根据工具调用校验结果决定下一步路由。
 
     功能：
-        validation_ok=True 或 validation_skipped=True 时继续进入确认节点。
-        validation_ok=False 时直接进入答案节点，避免非法参数进入执行节点。
+        存在澄清请求时进入澄清节点；校验通过或跳过时进入确认节点；
+        其他校验失败进入答案节点，避免非法参数进入执行节点。
 
     参数：
         state:
@@ -270,9 +380,13 @@ def route_after_tool_validate(
 
     返回值：
         ToolValidateRoute:
-            valid 表示继续确认；invalid 表示直接生成失败回答。
+            clarification 表示询问缺失参数；valid 表示继续确认；
+            invalid 表示直接生成失败回答。
     """
 
+    clarification_request = state.get(
+        TOOL_AGENT_CLARIFICATION_REQUEST_STATE_KEY
+    )
     validation_ok = bool(
         state.get(
             "tool_call_validation_ok",
@@ -286,7 +400,9 @@ def route_after_tool_validate(
         )
     )
 
-    if validation_ok or validation_skipped:
+    if isinstance(clarification_request, Mapping) and clarification_request:
+        route = "clarification"
+    elif validation_ok or validation_skipped:
         route = "valid"
     else:
         route = "invalid"
@@ -298,6 +414,7 @@ def route_after_tool_validate(
         extra={
             "validation_ok": validation_ok,
             "validation_skipped": validation_skipped,
+            "clarification_required": route == "clarification",
             "route": route,
         },
     )

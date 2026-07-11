@@ -23,7 +23,9 @@ from src.agents.tool_agent.nodes.tool_parse_node import (
     build_tool_catalog_prompt_text,
     build_tool_agent_tool_parse_node,
     call_tool_parser,
+    parse_tool_parse_llm_output,
     normalize_tool_parse_result,
+    recover_incomplete_sqlite_list_tables_call,
     render_input_schema_for_prompt,
     render_tool_catalog_item_for_prompt,
 )
@@ -592,6 +594,76 @@ def test_render_input_schema_for_prompt_should_render_allowed_values() -> None:
     assert "合法值只能是：memory、rag。" in rendered_schema
 
 
+def test_render_input_schema_should_show_explicit_user_input_contract() -> None:
+    """
+    测试参数结构会向 LLM 展示显式用户输入契约。
+
+    功能：
+        database_name 标记扩展契约后，Prompt 应明确禁止模型猜测参数值。
+
+    参数：
+        无。
+
+    返回值：
+        None。
+    """
+
+    rendered_schema = render_input_schema_for_prompt(
+        input_schema={
+            "type": "object",
+            "properties": {
+                "database_name": {
+                    "type": "string",
+                    "description": "数据库白名单别名。",
+                    "x-requires-explicit-user-input": True,
+                },
+            },
+            "required": ["database_name"],
+        }
+    )
+
+    assert "必须由当前用户问题明确提供，禁止猜测" in rendered_schema
+
+
+def test_recover_incomplete_sqlite_list_tables_call_should_build_empty_args() -> None:
+    """
+    测试数据库表清单问题的空调用可以恢复为待澄清调用。
+
+    功能：
+        模拟 LLM 因缺少 database_name 而返回 no_tool，确认恢复函数只补工具名，
+        不猜测数据库参数，后续可由统一校验节点生成澄清请求。
+
+    参数：
+        无。
+
+    返回值：
+        None。
+    """
+
+    result = recover_incomplete_sqlite_list_tables_call(
+        parse_result=ToolParseResult(
+            need_tool=False,
+            tool_calls=[],
+            response="",
+        ),
+        question="帮我查一下数据库中都有什么表",
+        state={
+            "route_decision": {
+                "requires_tool": True,
+            },
+            "tool_agent_tool_catalog": [
+                {
+                    "name": "sqlite_list_tables",
+                }
+            ],
+        },
+    )
+
+    assert result.need_tool is True
+    assert result.tool_calls[0].name == "sqlite_list_tables"
+    assert result.tool_calls[0].args == {}
+
+
 @pytest.mark.asyncio
 async def test_tool_agent_tool_parse_node_should_support_llm_provider() -> None:
     """
@@ -1069,3 +1141,36 @@ def test_normalize_tool_parse_result_should_skip_invalid_tool_calls() -> None:
         "weather",
         "date",
     ]
+
+
+def test_parse_tool_parse_llm_output_should_extract_json_after_explanation() -> None:
+    """
+    测试 LLM 在 JSON 前输出解释文字时仍能解析工具调用。
+
+    功能：
+        复现真实冒烟日志中的“中文解释 + JSON”格式，
+        确认解析器可以提取并校验后面的 ToolParseResult。
+
+    参数：
+        无。
+
+    返回值：
+        None。
+    """
+
+    result = parse_tool_parse_llm_output(
+        raw_output=(
+            "字段不是 required，但为了完整可以包含。\n"
+            "下面给出结构化结果：\n"
+            '{"need_tool": true, "tool_calls": ['
+            '{"name": "sqlite_list_tables", '
+            '"args": {"database_name": "memory"}}], '
+            '"response": ""}'
+        )
+    )
+
+    assert result.need_tool is True
+    assert result.tool_calls[0].name == "sqlite_list_tables"
+    assert result.tool_calls[0].args == {
+        "database_name": "memory",
+    }

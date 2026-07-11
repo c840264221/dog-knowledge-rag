@@ -20,6 +20,7 @@ from src.agents.tool_agent.adapters.registry_adapter import (
 )
 from src.agents.tool_agent.graph import (
     build_tool_agent_graph,
+    route_after_tool_catalog,
     route_after_tool_confirm,
     route_after_tool_validate,
 )
@@ -282,6 +283,28 @@ def test_route_after_tool_confirm_should_return_expected_route() -> None:
     ) == "allowed"
 
 
+def test_route_after_tool_catalog_should_route_partial_to_clarification() -> None:
+    """测试部分补参状态会从工具目录节点直接路由到工具澄清节点。"""
+
+    assert route_after_tool_catalog(
+        {
+            "tool_agent_clarification_resolution": {
+                "action": "partial",
+            },
+        }
+    ) == "clarification"
+    assert route_after_tool_catalog(
+        {
+            "tool_agent_clarification_resolution": {
+                "action": "resumed",
+            },
+        }
+    ) == "parse"
+    assert route_after_tool_catalog(
+        {}
+    ) == "parse"
+
+
 def test_route_after_tool_validate_should_return_expected_route() -> None:
     """
     测试校验后路由函数。
@@ -313,6 +336,14 @@ def test_route_after_tool_validate_should_return_expected_route() -> None:
             "tool_call_validation_skipped": False,
         }
     ) == "invalid"
+    assert route_after_tool_validate(
+        {
+            "tool_call_validation_ok": False,
+            "tool_agent_clarification_request": {
+                "status": "pending",
+            },
+        }
+    ) == "clarification"
 
 
 @pytest.mark.asyncio
@@ -364,6 +395,71 @@ async def test_tool_agent_graph_should_stop_before_execute_when_pending() -> Non
     assert result["tool_confirmed"] == "pending"
     assert result["tool_confirmation_required"] is True
     assert result[TOOL_AGENT_RESPONSE_STATE_KEY]["permission"]["status"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_tool_agent_graph_should_skip_parse_when_clarification_is_partial() -> None:
+    """
+    测试真实 ToolAgent 子图在部分补参时直接继续澄清。
+
+    功能：
+        当工具目录节点执行后发现 action=partial，条件边应直接进入
+        tool_clarification，不能调用 parser，也不能进入确认和执行节点。
+
+    参数：
+        无。
+
+    返回值：
+        None。
+    """
+
+    parser = FakeAinvokeParser(
+        result={
+            "need_tool": False,
+            "tool_calls": [],
+        }
+    )
+    executor = FakeExecutor()
+    graph = build_tool_agent_graph(
+        parser=parser,
+        tool_registry=build_fake_registry(),
+        executor=executor,
+        runtime_context_getter=lambda: None,
+    )
+
+    result = await graph.ainvoke(
+        {
+            "question": "memory",
+            "tool_agent_clarification_resolution": {
+                "action": "partial",
+                "completed_field": "database_name",
+            },
+            "tool_agent_clarification_request": {
+                "status": "pending",
+                "tool_name": "sqlite_describe_table",
+                "missing_fields": ["table_name"],
+                "options": {
+                    "table_name": [],
+                },
+                "question": "已记录数据库别名为 memory。请继续补充：表名。",
+            },
+            "tool_agent_pending_tool_call": {
+                "name": "sqlite_describe_table",
+                "args": {
+                    "database_name": "memory",
+                },
+            },
+        }
+    )
+
+    assert parser.inputs == []
+    assert executor.calls == []
+    assert result["final_answer"] == (
+        "已记录数据库别名为 memory。请继续补充：表名。"
+    )
+    assert result[TOOL_AGENT_RESPONSE_STATE_KEY]["status"] == (
+        "awaiting_clarification"
+    )
 
 
 @pytest.mark.asyncio

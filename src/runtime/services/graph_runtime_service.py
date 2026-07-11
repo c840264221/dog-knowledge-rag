@@ -90,6 +90,7 @@ class GraphRuntimeService:
             retriever_provider=None,
             reranker_provider=None,
             sqlite_mcp_provider=None,
+            tool_parser=None,
     ):
         """
         初始化 GraphRuntimeService。
@@ -123,6 +124,10 @@ class GraphRuntimeService:
                 SQLiteMcpProvider 实例。
                 中文释义：统一管理 SQLite MCP 工具定义和工具客户端能力。
 
+            tool_parser:
+                可选 ToolAgent Parser（工具解析器）。
+                默认使用 llm_provider 构建真实 LLM 解析链；测试或 Smoke 可注入固定解析器。
+
         返回值：
             None:
                 初始化函数不返回业务数据。
@@ -139,6 +144,8 @@ class GraphRuntimeService:
         self.reranker_provider = reranker_provider
 
         self.sqlite_mcp_provider = sqlite_mcp_provider
+
+        self.tool_parser = tool_parser
 
         self._graph = None
 
@@ -416,6 +423,9 @@ class GraphRuntimeService:
         """
 
         return build_tool_agent_graph(
+            parser=(
+                self.tool_parser
+            ),
             llm_provider=(
                 self.llm_provider
             ),

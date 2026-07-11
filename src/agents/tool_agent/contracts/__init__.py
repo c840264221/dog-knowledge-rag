@@ -8,7 +8,11 @@ ToolAgent 契约子包。
 from src.agents.tool_agent.contracts.tool_catalog_item_schema import (
     ToolCatalogItem,
 )
+from src.agents.tool_agent.contracts.clarification_schema import (
+    ToolClarificationRequest,
+)
 
 __all__ = [
+    "ToolClarificationRequest",
     "ToolCatalogItem",
 ]

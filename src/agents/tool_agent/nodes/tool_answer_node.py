@@ -5,7 +5,7 @@ ToolAgent 工具答案节点。
     将工具执行结果转换成用户可读的 final_answer。
 
 设计原则：
-    1. 当前 MVP 使用规则格式化，不调用 LLM。
+    1. 本节点使用规则格式化，作为后续 LLM 答案节点的稳定 fallback。
     2. 不修改 tool_results 原始结构，只新增 final_answer。
     3. 输出普通 dict，避免 checkpoint 保存自定义对象。
     4. 节点文件放在 nodes 目录下，并以 _node.py 结尾。
@@ -490,6 +490,7 @@ def build_tool_answer_update(
     update = {
         "final_answer": final_answer,
         "tool_agent_answer_source": answer_source,
+        "tool_agent_llm_answer_used": answer_source == "llm_tool_result_formatter",
     }
     merged_state = {
         **dict(

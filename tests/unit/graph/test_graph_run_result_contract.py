@@ -304,6 +304,50 @@ async def test_run_main_graph_with_result_should_return_final_result(
 
 
 @pytest.mark.asyncio
+async def test_restore_pending_tool_clarification_state_should_use_whitelist() -> None:
+    """测试主图入口只从检查点恢复参数澄清所需字段。"""
+
+    app = FakeGraphApp(
+        current_state=FakeCurrentState(
+            values={
+                "tool_agent_clarification_request": {
+                    "status": "pending",
+                    "missing_fields": ["database_name"],
+                },
+                "tool_agent_pending_tool_call": {
+                    "name": "sqlite_list_tables",
+                    "args": {},
+                },
+                "tool_agent_pending_original_question": "查询数据库中的表",
+                "final_answer": "不应恢复的旧答案",
+                "tool_results": ["不应恢复的旧结果"],
+            }
+        )
+    )
+
+    restored = await graph_run.restore_pending_tool_clarification_state(
+        app=app,
+        config={
+            "configurable": {
+                "thread_id": "conversation-1",
+            }
+        },
+        state={
+            "question": "memory",
+            "final_answer": "",
+            "tool_results": [],
+        },
+    )
+
+    assert restored["tool_agent_pending_tool_call"]["name"] == (
+        "sqlite_list_tables"
+    )
+    assert restored["tool_agent_pending_original_question"] == "查询数据库中的表"
+    assert restored["final_answer"] == ""
+    assert restored["tool_results"] == []
+
+
+@pytest.mark.asyncio
 async def test_run_main_graph_with_result_should_return_interrupt_result(
     runtime_context: FakeRuntimeContext,
 ) -> None:

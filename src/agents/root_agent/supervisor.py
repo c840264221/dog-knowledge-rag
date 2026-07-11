@@ -233,6 +233,42 @@ def decide_root_route(
             RootAgent 路由决策对象。
     """
 
+    # 澄清适配器已补全上一轮工具参数时，优先恢复 ToolAgent 调用。
+    clarification_resolution = (
+        state.get(
+            "tool_agent_clarification_resolution",
+            {},
+        )
+        if state
+        else {}
+    )
+    if state and (
+        state.get(
+            "tool_agent_clarification_resume_ready"
+        )
+        or (
+            isinstance(
+                clarification_resolution,
+                dict,
+            )
+            and clarification_resolution.get(
+                "action"
+            ) == "partial"
+        )
+    ):
+        return RootRouteDecision(
+            route="tool_agent",
+            query_type="tool_request",
+            confidence=1.0,
+            reason="用户输入匹配待补全工具参数，继续上一轮工具调用。",
+            requires_rag=False,
+            requires_tool=True,
+            requires_memory=False,
+            hints={
+                "clarification_resume": True,
+            },
+        )
+
     finish_matches = find_matched_keywords(
         question=question,
         keywords=FINISH_KEYWORDS,

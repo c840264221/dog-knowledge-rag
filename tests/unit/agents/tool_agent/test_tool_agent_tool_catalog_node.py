@@ -273,6 +273,7 @@ async def test_tool_catalog_node_should_read_mcp_definitions_from_provider() -> 
         "memory",
         "rag",
     ]
+    assert database_name_schema["x-requires-explicit-user-input"] is True
     assert "memory、rag" in database_name_schema["description"]
 
 

@@ -102,11 +102,13 @@ def test_graph_runtime_should_pass_sqlite_mcp_provider_to_tool_agent(
     llm_provider = object()
     checkpoint_provider = FakeCheckpointProvider()
     sqlite_mcp_provider = FakeSQLiteMcpProvider()
+    tool_parser = object()
 
     service = GraphRuntimeService(
         llm_provider=llm_provider,
         checkpoint_provider=checkpoint_provider,
         sqlite_mcp_provider=sqlite_mcp_provider,
+        tool_parser=tool_parser,
     )
 
     tool_agent = service._build_tool_agent_node()
@@ -115,4 +117,5 @@ def test_graph_runtime_should_pass_sqlite_mcp_provider_to_tool_agent(
     assert captured_kwargs["llm_provider"] is llm_provider
     assert captured_kwargs["checkpoint_manager"] is checkpoint_provider.manager
     assert captured_kwargs["sqlite_mcp_provider"] is sqlite_mcp_provider
+    assert captured_kwargs["parser"] is tool_parser
     assert captured_kwargs["interrupt_func"] is graph_runtime_service.interrupt

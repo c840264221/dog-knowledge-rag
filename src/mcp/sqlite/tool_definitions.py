@@ -77,6 +77,7 @@ def build_sqlite_list_tables_tool_definition() -> MockMcpToolDefinition:
                 "database_name": {
                     "type": "string",
                     "description": "数据库白名单别名，例如 memory 或 checkpoint。",
+                    "x-requires-explicit-user-input": True,
                 },
             },
             "required": [
@@ -114,6 +115,7 @@ def build_sqlite_describe_table_tool_definition() -> MockMcpToolDefinition:
                 "database_name": {
                     "type": "string",
                     "description": "数据库白名单别名。",
+                    "x-requires-explicit-user-input": True,
                 },
                 "table_name": {
                     "type": "string",
@@ -156,6 +158,7 @@ def build_sqlite_select_rows_tool_definition() -> MockMcpToolDefinition:
                 "database_name": {
                     "type": "string",
                     "description": "数据库白名单别名。",
+                    "x-requires-explicit-user-input": True,
                 },
                 "table_name": {
                     "type": "string",
@@ -205,6 +208,7 @@ def build_sqlite_run_readonly_query_tool_definition() -> MockMcpToolDefinition:
                 "database_name": {
                     "type": "string",
                     "description": "数据库白名单别名。",
+                    "x-requires-explicit-user-input": True,
                 },
                 "sql": {
                     "type": "string",

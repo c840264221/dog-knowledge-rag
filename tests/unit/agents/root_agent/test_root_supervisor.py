@@ -195,3 +195,44 @@ async def test_root_supervisor_does_not_generate_rag_filters(
     assert route_decision.get(
         "requires_rag",
     ) is True
+
+
+@pytest.mark.asyncio
+async def test_root_supervisor_should_resume_ready_tool_clarification(
+        base_state: dict,
+) -> None:
+    """
+    测试已补全的待处理工具调用优先路由回 ToolAgent。
+
+    功能：
+        即使本轮 question 只是候选值 memory，只要恢复适配器已经标记
+        resume_ready，RootAgent 就不再按普通聊天处理。
+
+    参数：
+        base_state:
+            pytest fixture，基础测试 state。
+
+    返回值：
+        None:
+            pytest 根据断言判断测试结果。
+    """
+
+    result = await root_supervisor_node(
+        {
+            **base_state,
+            "question": "memory",
+            "tool_agent_clarification_resume_ready": True,
+            "tool_calls": [
+                {
+                    "name": "sqlite_list_tables",
+                    "args": {
+                        "database_name": "memory",
+                    },
+                }
+            ],
+        }
+    )
+
+    assert result["next_agent"] == "tool_agent"
+    assert result["route_decision"]["query_type"] == "tool_request"
+    assert result["route_decision"]["hints"]["clarification_resume"] is True

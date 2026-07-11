@@ -128,3 +128,86 @@ async def test_semantic_router_adapter_does_not_return_legacy_query_parse_fields
     assert "tags" not in result
     assert "features" not in result
     assert "dog_name" not in result
+
+
+@pytest.mark.asyncio
+async def test_semantic_router_adapter_should_restore_pending_tool_argument() -> None:
+    """
+    测试语义路由入口恢复上一轮缺失的工具参数。
+
+    功能：
+        Checkpoint state 中存在待补全 database_name 时，输入 memory 应补回参数，
+        清理澄清请求并路由到 ToolAgent。
+
+    参数：
+        无。
+
+    返回值：
+        None:
+            pytest 根据断言判断测试结果。
+    """
+
+    result = await semantic_router_node(
+        {
+            "question": "memory",
+            "user_id": "test_user",
+            "session_id": "test_session",
+            "trace_id": "test_trace",
+            "tool_agent_clarification_request": {
+                "status": "pending",
+                "missing_fields": ["database_name"],
+                "options": {
+                    "database_name": ["memory", "rag"],
+                },
+            },
+            "tool_agent_pending_tool_call": {
+                "name": "sqlite_list_tables",
+                "args": {},
+            },
+        }
+    )
+
+    assert result["next_agent"] == "tool_agent"
+    assert result["tool_calls"][0]["args"]["database_name"] == "memory"
+    assert result["tool_agent_clarification_request"] is None
+    assert result["tool_agent_clarification_resume_ready"] is True
+
+
+@pytest.mark.asyncio
+async def test_semantic_router_should_keep_partial_clarification_in_tool_agent() -> None:
+    """测试只补完一个字段时仍留在 ToolAgent 继续询问剩余字段。"""
+
+    result = await semantic_router_node(
+        {
+            "question": "memory",
+            "user_id": "test_user",
+            "session_id": "test_session",
+            "trace_id": "test_trace",
+            "tool_agent_clarification_request": {
+                "status": "pending",
+                "tool_name": "sqlite_describe_table",
+                "missing_fields": [
+                    "database_name",
+                    "table_name",
+                ],
+                "options": {
+                    "database_name": ["memory", "rag"],
+                    "table_name": [],
+                },
+                "question": "请补充数据库别名和表名。",
+            },
+            "tool_agent_pending_tool_call": {
+                "name": "sqlite_describe_table",
+                "args": {},
+            },
+        }
+    )
+
+    assert result["next_agent"] == "tool_agent"
+    assert result["tool_agent_clarification_resolution"]["action"] == "partial"
+    assert result["tool_agent_pending_tool_call"]["args"] == {
+        "database_name": "memory",
+    }
+    assert result["tool_agent_clarification_request"]["missing_fields"] == [
+        "table_name",
+    ]

@@ -19,6 +19,7 @@ ToolAgent 工具解析节点。
 from __future__ import annotations
 
 import inspect
+import json
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
@@ -190,6 +191,20 @@ def build_tool_agent_tool_parse_node(
             parse_result = normalize_tool_parse_result(
                 raw_result=raw_result,
             )
+            original_tool_call_count = len(
+                parse_result.tool_calls
+            )
+
+            # 缺少显式参数时仍需保留不完整调用，交给统一校验节点生成澄清请求。
+            parse_result = recover_incomplete_sqlite_list_tables_call(
+                parse_result=parse_result,
+                question=question,
+                state=state,
+            )
+            incomplete_call_recovered = (
+                original_tool_call_count == 0
+                and bool(parse_result.tool_calls)
+            )
         except Exception as exc:
             logger.exception(
                 f"ToolAgent 工具解析失败: {exc}"
@@ -234,6 +249,7 @@ def build_tool_agent_tool_parse_node(
                 "parsed_tool_call_count": len(
                     parse_result.tool_calls
                 ),
+                "incomplete_call_recovered": incomplete_call_recovered,
             },
         )
 
@@ -300,6 +316,15 @@ def build_llm_tool_parser(
     8. 如果用户问题匹配某个工具能力，则 tool_calls 中必须包含该工具名称
 
     9. 如果用户问题不需要任何工具，则 need_tool=false 且 tool_calls=[]
+
+    10. 参数结构中标记 x-requires-explicit-user-input=true 的字段，
+    只有当前用户问题明确给出参数值时才能写入 args；否则必须省略，禁止从历史、候选值或默认值猜测
+
+    11. 缺少参数不等于不需要工具。如果问题明确匹配某个工具，但缺少必填参数，
+    仍然必须返回 need_tool=true，并把匹配的工具放入 tool_calls；缺少的参数不要写入 args
+
+    示例：用户要求查询数据库中的表，但没有说明数据库别名时，应输出：
+    {{"need_tool": true, "tool_calls": [{{"name": "sqlite_list_tables", "args": {{}}}}], "response": ""}}
     -----------------------------------
 
     用户问题：
@@ -340,7 +365,8 @@ def build_llm_tool_parser(
         safe_llm_ainvoke
     )
 
-    chain = prompt | safe_llm | tool_parse_output_parser
+    # 先保留 LLM 原始文本，再由解析函数兼容“解释文字 + JSON”的输出。
+    chain = prompt | safe_llm
 
     async def llm_tool_parser(
         parser_input: Mapping[str, Any],
@@ -362,7 +388,7 @@ def build_llm_tool_parser(
                 LLM 解析后的工具解析结果。
         """
 
-        return await chain.ainvoke(
+        raw_output = await chain.ainvoke(
             {
                 "question": parser_input.get(
                     "question",
@@ -380,7 +406,114 @@ def build_llm_tool_parser(
             }
         )
 
+        return parse_tool_parse_llm_output(
+            raw_output=raw_output,
+        )
+
     return llm_tool_parser
+
+
+def parse_tool_parse_llm_output(
+    raw_output: Any,
+) -> ToolParseResult:
+    """
+    将 LLM 原始输出解析成 ToolParseResult。
+
+    功能：
+        第一阶段使用 PydanticOutputParser 解析标准纯 JSON；
+        第一阶段失败后，扫描文本中的 JSON 对象，并逐个执行 Pydantic 校验。
+        这样可以兼容 LLM 在 JSON 前后附加少量解释文字的情况。
+
+    参数：
+        raw_output:
+            LLM 返回的字符串或带 content 属性的消息对象。
+
+    返回值：
+        ToolParseResult:
+            通过 Pydantic 数据校验的工具解析结果。
+
+    异常：
+        Exception:
+            文本中不存在符合 ToolParseResult 的 JSON 对象时，重新抛出原始解析异常。
+    """
+
+    output_text = extract_llm_output_text(
+        raw_output=raw_output,
+    )
+
+    try:
+        return tool_parse_output_parser.parse(
+            output_text
+        )
+    except Exception as original_error:
+        decoder = json.JSONDecoder()
+
+        for index, character in enumerate(
+            output_text
+        ):
+            if character != "{":
+                continue
+
+            try:
+                candidate, _ = decoder.raw_decode(
+                    output_text[index:]
+                )
+            except json.JSONDecodeError:
+                continue
+
+            if not isinstance(
+                candidate,
+                Mapping,
+            ):
+                continue
+
+            try:
+                return ToolParseResult.model_validate(
+                    candidate
+                )
+            except ValidationError:
+                continue
+
+        raise original_error
+
+
+def extract_llm_output_text(
+    raw_output: Any,
+) -> str:
+    """
+    从 LLM 返回值中提取文本。
+
+    功能：
+        兼容普通字符串和带 content 属性的 LangChain 消息对象。
+
+    参数：
+        raw_output:
+            LLM 原始返回值。
+
+    返回值：
+        str:
+            用于 JSON 解析的文本。
+    """
+
+    if isinstance(
+        raw_output,
+        str,
+    ):
+        return raw_output.strip()
+
+    if hasattr(
+        raw_output,
+        "content",
+    ):
+        return str(
+            raw_output.content
+            or ""
+        ).strip()
+
+    return str(
+        raw_output
+        or ""
+    ).strip()
 
 
 def build_tool_catalog_prompt_text(
@@ -686,6 +819,14 @@ def render_input_schema_field_for_prompt(
         if required
         else "可选"
     )
+    explicit_input_text = (
+        "，必须由当前用户问题明确提供，禁止猜测"
+        if field_schema.get(
+            "x-requires-explicit-user-input",
+            False,
+        )
+        else ""
+    )
 
     if description:
         allowed_values_text = render_schema_allowed_values_for_prompt(
@@ -693,14 +834,17 @@ def render_input_schema_field_for_prompt(
         )
         return (
             f"- {field_name}: {field_type}，{required_text}，{description}"
-            f"{allowed_values_text}"
+            f"{explicit_input_text}{allowed_values_text}"
         )
 
     allowed_values_text = render_schema_allowed_values_for_prompt(
         field_schema=field_schema,
     )
 
-    return f"- {field_name}: {field_type}，{required_text}{allowed_values_text}"
+    return (
+        f"- {field_name}: {field_type}，{required_text}"
+        f"{explicit_input_text}{allowed_values_text}"
+    )
 
 
 def render_schema_allowed_values_for_prompt(
@@ -947,6 +1091,94 @@ def normalize_tool_parse_result(
             )
             or ""
         ),
+    )
+
+
+def recover_incomplete_sqlite_list_tables_call(
+    parse_result: ToolParseResult,
+    question: str,
+    state: Mapping[str, Any],
+) -> ToolParseResult:
+    """
+    恢复被 LLM 静默丢弃的 SQLite 表清单不完整调用。
+
+    功能：
+        当根路由已经明确要求进入工具链路、用户问题明显是在查询数据库表清单、
+        工具目录中也确实存在 sqlite_list_tables，但 LLM 返回空 tool_calls 时，
+        构造 args={} 的不完整调用，交给后续参数校验节点生成澄清请求。
+
+    参数：
+        parse_result:
+            LLM 归一化后的工具解析结果。
+        question:
+            当前轮用户原始问题。
+        state:
+            当前 ToolAgent state，用于读取根路由决策和工具目录。
+
+    返回值：
+        ToolParseResult:
+            不满足恢复条件时返回原结果；满足条件时返回包含空参数调用的新结果。
+    """
+
+    if parse_result.tool_calls:
+        return parse_result
+
+    route_decision = state.get(
+        "route_decision",
+        {},
+    )
+    if not isinstance(
+        route_decision,
+        Mapping,
+    ) or not bool(
+        route_decision.get(
+            "requires_tool",
+            False,
+        )
+    ):
+        return parse_result
+
+    normalized_question = str(
+        question
+        or ""
+    ).strip().lower()
+    if not (
+        "数据库" in normalized_question
+        and "表" in normalized_question
+    ):
+        return parse_result
+
+    tool_catalog = state.get(
+        "tool_agent_tool_catalog",
+        [],
+    )
+    has_list_tables_tool = any(
+        isinstance(item, Mapping)
+        and str(
+            item.get(
+                "name",
+                "",
+            )
+            or ""
+        ) == "sqlite_list_tables"
+        for item in tool_catalog
+    ) if isinstance(
+        tool_catalog,
+        list,
+    ) else False
+
+    if not has_list_tables_tool:
+        return parse_result
+
+    return ToolParseResult(
+        need_tool=True,
+        tool_calls=[
+            ToolCall(
+                name="sqlite_list_tables",
+                args={},
+            )
+        ],
+        response=parse_result.response,
     )
 
 

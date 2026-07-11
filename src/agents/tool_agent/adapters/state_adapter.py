@@ -700,6 +700,16 @@ def infer_response_status(
             ToolAgent 响应状态。
     """
 
+    # 参数澄清优先于普通 no_tool 判断，避免把“等待补参”误报为“不需要工具”。
+    clarification_request = state.get(
+        "tool_agent_clarification_request"
+    )
+    if isinstance(
+        clarification_request,
+        Mapping,
+    ) and clarification_request:
+        return "awaiting_clarification"
+
     if permission.status == "rejected":
         return "cancelled"
 

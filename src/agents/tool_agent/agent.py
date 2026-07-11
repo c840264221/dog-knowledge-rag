@@ -6,7 +6,8 @@ ToolAgent 统一入口。
 
 当前阶段：
     V1.8 ToolAgent Graph Assembly MVP。
-    这里只把 catalog -> parse -> validate -> confirm -> execute -> answer -> response_adapter 串起来，
+    这里只把 catalog -> parse -> validate -> confirm -> execute -> answer ->
+    LLM formatter -> response_adapter 串起来，
     暂时不接入主图。
 
 专业名词：
@@ -27,8 +28,14 @@ from src.agents.tool_agent.nodes.response_adapter_node import (
 from src.agents.tool_agent.nodes.tool_answer_node import (
     build_tool_agent_tool_answer_node,
 )
+from src.agents.tool_agent.nodes.tool_answer_llm_formatter_node import (
+    build_tool_agent_tool_answer_llm_formatter_node,
+)
 from src.agents.tool_agent.nodes.tool_confirm_node import (
     build_tool_agent_tool_confirm_node,
+)
+from src.agents.tool_agent.nodes.tool_clarification_node import (
+    build_tool_agent_tool_clarification_node,
 )
 from src.agents.tool_agent.nodes.tool_catalog_node import (
     build_tool_agent_tool_catalog_node,
@@ -41,6 +48,9 @@ from src.agents.tool_agent.nodes.tool_parse_node import (
 )
 from src.agents.tool_agent.nodes.tool_validate_node import (
     build_tool_agent_tool_validate_node,
+)
+from src.agents.tool_agent.adapters.clarification_resume_adapter import (
+    resolve_tool_clarification_input,
 )
 
 
@@ -122,6 +132,9 @@ def build_tool_agent(
         checkpoint_manager=checkpoint_manager,
         runtime_context_getter=runtime_context_getter,
     )
+    clarification_node = build_tool_agent_tool_clarification_node(
+        runtime_context_getter=runtime_context_getter,
+    )
     confirm_node = build_tool_agent_tool_confirm_node(
         tool_registry=tool_registry,
         checkpoint_manager=checkpoint_manager,
@@ -138,6 +151,11 @@ def build_tool_agent(
         checkpoint_manager=checkpoint_manager,
         runtime_context_getter=runtime_context_getter,
     )
+    answer_llm_formatter_node = build_tool_agent_tool_answer_llm_formatter_node(
+        llm_provider=llm_provider,
+        checkpoint_manager=checkpoint_manager,
+        runtime_context_getter=runtime_context_getter,
+    )
     response_adapter_node = build_tool_agent_response_adapter_node()
 
     async def tool_agent_node(
@@ -150,11 +168,12 @@ def build_tool_agent(
             1. 调用工具目录节点，生成 tool_agent_tool_catalog。
             2. 调用工具解析节点，生成 need_tool 和 tool_calls。
             3. 调用工具校验节点，过滤非法 tool_calls 并记录校验错误。
-            4. 调用工具确认节点，生成 permission 和确认提示。
-            5. 调用工具执行节点，在权限允许时执行工具。
-            6. 调用工具答案节点，将 tool_results 转成 final_answer。
-            7. 调用响应适配节点，刷新 tool_agent_response。
-            8. 返回合并后的完整 state，方便后续主图直接继续使用。
+            4. 如果缺少必填参数，调用澄清节点并结束当前轮次。
+            5. 否则调用工具确认节点，生成 permission 和确认提示。
+            6. 调用工具执行节点，在权限允许时执行工具。
+            7. 调用工具答案节点，将 tool_results 转成 final_answer。
+            8. 可选调用 LLM 答案格式化节点，失败时保留规则答案。
+            9. 调用响应适配节点并返回合并后的完整 state。
 
         参数：
             state:
@@ -168,6 +187,52 @@ def build_tool_agent(
         working_state = dict(
             state
         )
+
+        # 独立调用 ToolAgent 时，也先处理 Checkpoint 恢复出的参数澄清上下文。
+        existing_resolution = working_state.get(
+            "tool_agent_clarification_resolution",
+            {},
+        )
+        if isinstance(
+            existing_resolution,
+            Mapping,
+        ) and existing_resolution.get(
+            "action"
+        ) == "partial":
+            clarification_resolution = {
+                "action": "partial",
+                "state_update": {},
+            }
+        else:
+            clarification_resolution = resolve_tool_clarification_input(
+                state=working_state,
+            )
+        working_state = merge_state_update(
+            state=working_state,
+            update=clarification_resolution.get(
+                "state_update",
+                {},
+            ),
+        )
+
+        # 本轮只补全了部分参数时，直接展示下一条澄清问题，不重新解析当前短输入。
+        if clarification_resolution.get(
+            "action"
+        ) == "partial":
+            clarification_update = clarification_node(
+                working_state
+            )
+            working_state = merge_state_update(
+                state=working_state,
+                update=clarification_update,
+            )
+            response_update = response_adapter_node(
+                working_state
+            )
+            return merge_state_update(
+                state=working_state,
+                update=response_update,
+            )
 
         # 先构建工具目录，把本地工具和 MCP 工具写入 state。
         catalog_update = await catalog_node(
@@ -196,6 +261,25 @@ def build_tool_agent(
             update=validate_update,
         )
 
+        # 缺少必填参数时先向用户澄清，本轮不进入确认和执行阶段。
+        if working_state.get(
+            "tool_agent_clarification_request"
+        ):
+            clarification_update = clarification_node(
+                working_state
+            )
+            working_state = merge_state_update(
+                state=working_state,
+                update=clarification_update,
+            )
+            response_update = response_adapter_node(
+                working_state
+            )
+            return merge_state_update(
+                state=working_state,
+                update=response_update,
+            )
+
         # 再根据工具注册表判断是否需要用户确认。
         confirm_update = confirm_node(
             working_state
@@ -221,6 +305,15 @@ def build_tool_agent(
         working_state = merge_state_update(
             state=working_state,
             update=answer_update,
+        )
+
+        # 规则答案作为 fallback，再尝试通过 LLM 转换成自然语言回答。
+        llm_answer_update = await answer_llm_formatter_node(
+            working_state
+        )
+        working_state = merge_state_update(
+            state=working_state,
+            update=llm_answer_update,
         )
 
         # 最后统一刷新 ToolAgent 响应契约，保证输出字段稳定。

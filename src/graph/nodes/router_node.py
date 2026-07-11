@@ -7,6 +7,9 @@ from typing import (
 from src.agents.root_agent.supervisor import (
     root_supervisor_node,
 )
+from src.agents.tool_agent.adapters.clarification_resume_adapter import (
+    resolve_tool_clarification_input,
+)
 from src.graph.states.dog_state import (
     DogState,
 )
@@ -45,6 +48,22 @@ async def semantic_router_node(
             向后兼容。避免旧主图节点名、checkpoint、日志链路立刻失效。
     """
 
-    return await root_supervisor_node(
-        state,
+    clarification_resolution = resolve_tool_clarification_input(
+        state=state,
     )
+    clarification_update = clarification_resolution.get(
+        "state_update",
+        {},
+    )
+    resolved_state = {
+        **dict(state),
+        **dict(clarification_update),
+    }
+    root_update = await root_supervisor_node(
+        resolved_state,
+    )
+
+    return {
+        **dict(clarification_update),
+        **root_update,
+    }

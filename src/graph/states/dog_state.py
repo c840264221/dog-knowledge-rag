@@ -151,10 +151,18 @@ class DogState(TypedDict, total=False):
     tool_agent_execute_skipped: bool
     tool_agent_execute_skip_reason: str
     tool_agent_answer_source: str
+    tool_agent_llm_answer_used: bool
     tool_call_validation_ok: bool
     tool_call_validation_skipped: bool
     tool_call_validation_errors: List[Dict[str, Any]]
     tool_call_validation_invalid_calls: List[Dict[str, Any]]
+    # 参数缺失时保存普通 dict，供下一轮槽位补全和 checkpoint 恢复使用。
+    tool_agent_clarification_request: Optional[Dict[str, Any]]
+    tool_agent_pending_tool_call: Optional[Dict[str, Any]]
+    tool_agent_pending_original_question: str
+    tool_agent_pending_created_at: str
+    tool_agent_clarification_resume_ready: bool
+    tool_agent_clarification_resolution: Dict[str, Any]
 
     # =========================
     # 9. 旧版 Supervisor 路由字段

@@ -20,11 +20,16 @@ ToolAgent 工具调用校验适配器。
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Mapping
+from datetime import datetime, timezone
 from typing import Any
 
 from src.agents.tool_agent.adapters.registry_adapter import (
     TOOL_AGENT_TOOL_CATALOG_STATE_KEY,
+)
+from src.agents.tool_agent.contracts.clarification_schema import (
+    ToolClarificationRequest,
 )
 from src.graph.tools.schemas.tool_call_schema import ToolCall
 
@@ -33,6 +38,10 @@ TOOL_CALL_VALIDATION_OK_STATE_KEY = "tool_call_validation_ok"
 TOOL_CALL_VALIDATION_SKIPPED_STATE_KEY = "tool_call_validation_skipped"
 TOOL_CALL_VALIDATION_ERRORS_STATE_KEY = "tool_call_validation_errors"
 TOOL_CALL_VALIDATION_INVALID_CALLS_STATE_KEY = "tool_call_validation_invalid_calls"
+TOOL_AGENT_CLARIFICATION_REQUEST_STATE_KEY = "tool_agent_clarification_request"
+TOOL_AGENT_PENDING_TOOL_CALL_STATE_KEY = "tool_agent_pending_tool_call"
+TOOL_AGENT_PENDING_ORIGINAL_QUESTION_STATE_KEY = "tool_agent_pending_original_question"
+TOOL_AGENT_PENDING_CREATED_AT_STATE_KEY = "tool_agent_pending_created_at"
 
 
 def validate_tool_calls_from_state(
@@ -64,16 +73,51 @@ def validate_tool_calls_from_state(
             TOOL_AGENT_TOOL_CATALOG_STATE_KEY,
             [],
         ),
+        question=str(
+            state.get(
+                "question",
+                "",
+            )
+            or ""
+        ),
+        allow_resolved_explicit_args=(
+            isinstance(
+                state.get(
+                    "tool_agent_clarification_resolution",
+                    {},
+                ),
+                Mapping,
+            )
+            and state.get(
+                "tool_agent_clarification_resolution",
+                {},
+            ).get(
+                "action"
+            ) == "resumed"
+        ),
     )
 
     return build_tool_call_validation_state_update(
         validation_result=validation_result,
+        tool_catalog=state.get(
+            TOOL_AGENT_TOOL_CATALOG_STATE_KEY,
+            [],
+        ),
+        original_question=str(
+            state.get(
+                "question",
+                "",
+            )
+            or ""
+        ),
     )
 
 
 def validate_tool_calls_against_catalog(
     tool_calls: Iterable[Any],
     tool_catalog: Iterable[Any],
+    question: str = "",
+    allow_resolved_explicit_args: bool = False,
 ) -> dict[str, Any]:
     """
     根据工具目录校验工具调用列表。
@@ -88,6 +132,12 @@ def validate_tool_calls_against_catalog(
 
         tool_catalog:
             ToolAgent 工具目录列表，通常来自 state["tool_agent_tool_catalog"]。
+
+        question:
+            当前轮用户问题，用于校验必须由用户明确提供的参数。
+
+        allow_resolved_explicit_args:
+            是否允许使用前序澄清轮次已经确认的显式参数。
 
     返回值：
         dict[str, Any]:
@@ -126,6 +176,8 @@ def validate_tool_calls_against_catalog(
         tool_errors = validate_single_tool_call(
             tool_call=tool_call,
             catalog_by_name=catalog_by_name,
+            question=question,
+            allow_resolved_explicit_args=allow_resolved_explicit_args,
         )
 
         if tool_errors:
@@ -155,6 +207,8 @@ def validate_tool_calls_against_catalog(
 
 def build_tool_call_validation_state_update(
     validation_result: Mapping[str, Any],
+    tool_catalog: Iterable[Any] = (),
+    original_question: str = "",
 ) -> dict[str, Any]:
     """
     将工具调用校验结果转换成 state update。
@@ -166,6 +220,12 @@ def build_tool_call_validation_state_update(
     参数：
         validation_result:
             validate_tool_calls_against_catalog 返回的校验结果。
+
+        tool_catalog:
+            当前工具目录，用于读取缺失字段的描述和允许值。
+
+        original_question:
+            触发工具调用的原始用户问题，用于后续恢复和调试。
 
     返回值：
         dict[str, Any]:
@@ -185,14 +245,17 @@ def build_tool_call_validation_state_update(
             False,
         )
     )
+    validation_ok = bool(
+        validation_result.get(
+            "is_valid",
+            False,
+        )
+    )
 
     update: dict[str, Any] = {
         "tool_calls": valid_tool_calls,
         TOOL_CALL_VALIDATION_OK_STATE_KEY: bool(
-            validation_result.get(
-                "is_valid",
-                False,
-            )
+            validation_ok
         ),
         TOOL_CALL_VALIDATION_SKIPPED_STATE_KEY: validation_skipped,
         TOOL_CALL_VALIDATION_ERRORS_STATE_KEY: list(
@@ -209,9 +272,35 @@ def build_tool_call_validation_state_update(
             )
             or []
         ),
+        TOOL_AGENT_CLARIFICATION_REQUEST_STATE_KEY: None,
+        TOOL_AGENT_PENDING_TOOL_CALL_STATE_KEY: None,
+        TOOL_AGENT_PENDING_ORIGINAL_QUESTION_STATE_KEY: "",
+        TOOL_AGENT_PENDING_CREATED_AT_STATE_KEY: "",
+        "tool_agent_clarification_resume_ready": False,
     }
 
-    if not validation_skipped and not valid_tool_calls:
+    clarification_update = build_clarification_state_update(
+        validation_result=validation_result,
+        tool_catalog=tool_catalog,
+    )
+    if clarification_update:
+        update.update(
+            clarification_update
+        )
+        update["need_tool"] = False
+        update["tool_results"] = []
+        update[TOOL_AGENT_PENDING_ORIGINAL_QUESTION_STATE_KEY] = original_question
+        update[TOOL_AGENT_PENDING_CREATED_AT_STATE_KEY] = datetime.now(
+            timezone.utc
+        ).isoformat()
+        return update
+
+    # 没有工具调用是一种合法状态；只有校验确实失败时才生成失败结果。
+    if (
+        not validation_skipped
+        and not validation_ok
+        and not valid_tool_calls
+    ):
         update["need_tool"] = False
         update["tool_results"] = [
             build_validation_failed_tool_result(
@@ -220,6 +309,210 @@ def build_tool_call_validation_state_update(
         ]
 
     return update
+
+
+def build_clarification_state_update(
+    validation_result: Mapping[str, Any],
+    tool_catalog: Iterable[Any],
+) -> dict[str, Any]:
+    """
+    根据必填参数缺失错误构建澄清状态。
+
+    功能：
+        仅当一次非法调用的全部错误都属于可澄清参数错误时生成澄清请求。
+        未知工具、参数类型错误和白名单值错误继续走普通校验失败链路。
+
+    参数：
+        validation_result:
+            工具调用校验结果。
+        tool_catalog:
+            当前工具目录。
+
+    返回值：
+        dict[str, Any]:
+            包含澄清请求和待补全工具调用的 state update；不适合澄清时返回空字典。
+    """
+
+    invalid_calls = list(
+        validation_result.get(
+            "invalid_tool_calls",
+            [],
+        )
+        or []
+    )
+    if len(invalid_calls) != 1:
+        return {}
+
+    invalid_call = invalid_calls[0]
+    if not isinstance(invalid_call, Mapping):
+        return {}
+
+    errors = list(
+        invalid_call.get(
+            "errors",
+            [],
+        )
+        or []
+    )
+    clarifiable_error_codes = {
+        "missing_required_arg",
+        "implicit_required_arg",
+    }
+    if not errors or any(
+        not isinstance(error, Mapping)
+        or error.get("code") not in clarifiable_error_codes
+        for error in errors
+    ):
+        return {}
+
+    pending_tool_call = invalid_call.get(
+        "tool_call",
+        {},
+    )
+    if not isinstance(pending_tool_call, Mapping):
+        return {}
+
+    tool_name = str(
+        pending_tool_call.get(
+            "name",
+            "",
+        )
+        or ""
+    )
+    missing_fields = list(
+        dict.fromkeys(
+            str(error.get("field", ""))
+            for error in errors
+            if str(error.get("field", ""))
+        )
+    )
+    catalog_by_name = build_tool_catalog_by_name(
+        tool_catalog=tool_catalog,
+    )
+    input_schema = catalog_by_name.get(
+        tool_name,
+        {},
+    ).get(
+        "input_schema",
+        {},
+    )
+    properties = read_schema_properties(
+        input_schema=input_schema
+        if isinstance(input_schema, Mapping)
+        else {},
+    )
+    options = {
+        field_name: read_schema_allowed_values(
+            field_schema=properties.get(
+                field_name,
+                {},
+            )
+        )
+        for field_name in missing_fields
+    }
+    question = build_clarification_question(
+        tool_name=tool_name,
+        missing_fields=missing_fields,
+        properties=properties,
+        options=options,
+    )
+    request = ToolClarificationRequest(
+        tool_name=tool_name,
+        missing_fields=missing_fields,
+        question=question,
+        options=options,
+    )
+
+    sanitized_pending_tool_call = dict(
+        pending_tool_call
+    )
+    pending_args = pending_tool_call.get(
+        "args",
+        {},
+    )
+    if isinstance(pending_args, Mapping):
+        sanitized_args = dict(
+            pending_args
+        )
+        for error in errors:
+            if error.get("code") == "implicit_required_arg":
+                sanitized_args.pop(
+                    str(error.get("field", "")),
+                    None,
+                )
+        sanitized_pending_tool_call["args"] = sanitized_args
+
+    return {
+        TOOL_AGENT_CLARIFICATION_REQUEST_STATE_KEY: request.model_dump(),
+        TOOL_AGENT_PENDING_TOOL_CALL_STATE_KEY: sanitized_pending_tool_call,
+    }
+
+
+def build_clarification_question(
+    tool_name: str,
+    missing_fields: list[str],
+    properties: Mapping[str, Mapping[str, Any]],
+    options: Mapping[str, list[Any]],
+) -> str:
+    """
+    构建面向用户的参数澄清问题。
+
+    功能：
+        优先使用字段 description 解释参数，并在存在 enum 时展示候选值。
+
+    参数：
+        tool_name:
+            工具名称。
+        missing_fields:
+            缺失的必填字段。
+        properties:
+            input_schema 中的字段定义。
+        options:
+            每个缺失字段的候选值。
+
+    返回值：
+        str:
+            可直接展示给用户的中文问题。
+    """
+
+    field_prompts: list[str] = []
+    field_labels = {
+        "database_name": "数据库别名",
+        "table_name": "表名",
+        "sql": "只读 SQL",
+    }
+    for field_name in missing_fields:
+        field_schema = properties.get(
+            field_name,
+            {},
+        )
+        description = field_labels.get(
+            field_name,
+            str(
+                field_schema.get(
+                    "description",
+                    field_name,
+                )
+                or field_name
+            ).rstrip(
+                "。；; "
+            ),
+        )
+        allowed_values = options.get(
+            field_name,
+            [],
+        )
+        if allowed_values:
+            description = (
+                f"{description}（可选："
+                f"{'、'.join(str(value) for value in allowed_values)}）"
+            )
+        field_prompts.append(description)
+
+    return (
+        f"为了调用 {tool_name}，请补充："
+        f"{'；'.join(field_prompts)}。"
+    )
 
 
 def build_tool_catalog_by_name(
@@ -332,6 +625,8 @@ def normalize_tool_call_for_validation(
 def validate_single_tool_call(
     tool_call: Mapping[str, Any],
     catalog_by_name: Mapping[str, Mapping[str, Any]],
+    question: str = "",
+    allow_resolved_explicit_args: bool = False,
 ) -> list[dict[str, Any]]:
     """
     校验单个工具调用。
@@ -345,6 +640,12 @@ def validate_single_tool_call(
 
         catalog_by_name:
             按工具名索引后的工具目录。
+
+        question:
+            当前轮用户问题，用于判断参数值是否由用户明确提供。
+
+        allow_resolved_explicit_args:
+            是否信任通过澄清恢复得到的显式参数。
 
     返回值：
         list[dict[str, Any]]:
@@ -425,6 +726,8 @@ def validate_single_tool_call(
         tool_name=tool_name,
         args=args,
         input_schema=input_schema,
+        question=question,
+        allow_resolved_explicit_args=allow_resolved_explicit_args,
     )
 
 
@@ -432,6 +735,8 @@ def validate_args_against_input_schema(
     tool_name: str,
     args: Mapping[str, Any],
     input_schema: Mapping[str, Any],
+    question: str = "",
+    allow_resolved_explicit_args: bool = False,
 ) -> list[dict[str, Any]]:
     """
     根据 input_schema 校验工具参数。
@@ -449,6 +754,12 @@ def validate_args_against_input_schema(
 
         input_schema:
             工具输入参数结构。
+
+        question:
+            当前轮用户问题，用于校验显式输入参数契约。
+
+        allow_resolved_explicit_args:
+            是否允许前序澄清轮次已经确认的参数值。
 
     返回值：
         list[dict[str, Any]]:
@@ -481,6 +792,31 @@ def validate_args_against_input_schema(
         )
 
         if not field_schema:
+            continue
+
+        if (
+            field_schema.get(
+                "x-requires-explicit-user-input",
+                False,
+            )
+            and not allow_resolved_explicit_args
+            and not is_argument_value_explicitly_provided(
+                value=value,
+                question=question,
+            )
+        ):
+            errors.append(
+                build_validation_error(
+                    code="implicit_required_arg",
+                    message=(
+                        f"工具 {tool_name} 的参数 {field_name} 必须由用户在当前问题中"
+                        f"明确提供，不能使用推测值 {value}。"
+                    ),
+                    tool_name=tool_name,
+                    field=field_name,
+                    value=value,
+                )
+            )
             continue
 
         expected_type = str(
@@ -528,6 +864,49 @@ def validate_args_against_input_schema(
             )
 
     return errors
+
+
+def is_argument_value_explicitly_provided(
+    value: Any,
+    question: str,
+) -> bool:
+    """
+    判断参数值是否由用户在当前问题中明确给出。
+
+    功能：
+        对字符串参数执行忽略大小写的边界匹配。
+        英文别名可以紧邻中文，但不能只是更长英文标识符的一部分。
+
+    参数：
+        value:
+            LLM 生成的参数值。
+        question:
+            当前轮用户原始问题。
+
+    返回值：
+        bool:
+            当前问题明确包含该参数值时返回 True，否则返回 False。
+    """
+
+    value_text = str(
+        value
+        or ""
+    ).strip()
+    question_text = str(
+        question
+        or ""
+    )
+    if not value_text or not question_text:
+        return False
+
+    pattern = (
+        rf"(?<![A-Za-z0-9_]){re.escape(value_text)}(?![A-Za-z0-9_])"
+    )
+    return re.search(
+        pattern,
+        question_text,
+        flags=re.IGNORECASE,
+    ) is not None
 
 
 def read_schema_allowed_values(
@@ -780,6 +1159,7 @@ def build_validation_error(
     message: str,
     tool_name: str = "",
     field: str = "",
+    value: Any = None,
 ) -> dict[str, Any]:
     """
     构建工具调用校验错误。
@@ -800,14 +1180,21 @@ def build_validation_error(
         field:
             相关参数字段名。没有时为空字符串。
 
+        value:
+            触发错误的参数值。没有具体值时为 None。
+
     返回值：
         dict[str, Any]:
             普通字典格式的校验错误。
     """
 
-    return {
+    error = {
         "code": code,
         "message": message,
         "tool_name": tool_name,
         "field": field,
     }
+    if value is not None:
+        error["value"] = value
+
+    return error

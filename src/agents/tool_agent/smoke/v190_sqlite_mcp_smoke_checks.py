@@ -218,7 +218,8 @@ async def run_v190_sqlite_mcp_tool_agent_smoke_check() -> SQLiteMcpToolAgentSmok
 
         result_state = await tool_agent(
             {
-                "question": "帮我看看 SQLite 数据库里有哪些表",
+                # smoke 是当前测试注册的数据库别名，必须由本轮问题明确提供。
+                "question": "帮我看看 smoke SQLite 数据库里有哪些表",
             }
         )
 

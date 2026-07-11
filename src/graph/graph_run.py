@@ -171,6 +171,7 @@ def create_initial_state(
         "tool_round": 0,
         "tool_confirmed": "",
         "tool_executed": False,
+        "tool_agent_llm_answer_used": False,
 
         # ========= 记忆字段 =========
         "memory_context": "",
@@ -415,6 +416,13 @@ async def run_main_graph_with_result(
         "checkpoint_ns"
     )
 
+    # 新一轮问题启动前，只恢复参数澄清所需字段，避免完整旧 state 污染本轮输入。
+    state = await restore_pending_tool_clarification_state(
+        app=app,
+        config=config,
+        state=state,
+    )
+
     resume_request = parse_legacy_resume_message(
         message=normalized_question,
         thread_id=thread_id,
@@ -450,6 +458,78 @@ async def run_main_graph_with_result(
         checkpoint_ns=resume_checkpoint_ns,
         trace_id=trace_id,
     )
+
+
+async def restore_pending_tool_clarification_state(
+        app: Any,
+        config: Mapping[str, Any],
+        state: Mapping[str, Any],
+) -> dict[str, Any]:
+    """
+    从当前线程检查点恢复待处理的工具参数澄清字段。
+
+    功能：
+        在新一轮主图执行前读取相同 thread_id 的最新 Checkpoint，
+        只恢复澄清请求、待补全调用及其辅助字段，不恢复旧答案和旧工具结果。
+
+    参数：
+        app:
+            已编译的 LangGraph 主图对象，需要提供 aget_state 方法。
+        config:
+            当前 LangGraph 执行配置，包含 thread_id。
+        state:
+            本轮新创建的干净初始状态。
+
+    返回值：
+        dict[str, Any]:
+            合并待澄清字段后的本轮初始状态；没有待澄清状态时返回原状态副本。
+    """
+
+    restored_state = dict(
+        state
+    )
+    try:
+        current_state = await app.aget_state(
+            config
+        )
+        checkpoint_values = get_final_state_values(
+            current_state=current_state,
+        )
+    except Exception as exc:
+        logger.debug(
+            f"读取参数澄清 Checkpoint 失败，按新问题继续: {exc}"
+        )
+        return restored_state
+
+    clarification_request = checkpoint_values.get(
+        "tool_agent_clarification_request"
+    )
+    pending_tool_call = checkpoint_values.get(
+        "tool_agent_pending_tool_call"
+    )
+    if not isinstance(
+            clarification_request,
+            Mapping,
+    ) or not isinstance(
+            pending_tool_call,
+            Mapping,
+    ):
+        return restored_state
+
+    clarification_keys = (
+        "tool_agent_clarification_request",
+        "tool_agent_pending_tool_call",
+        "tool_agent_pending_original_question",
+        "tool_agent_pending_created_at",
+    )
+    for key in clarification_keys:
+        if key in checkpoint_values:
+            restored_state[key] = checkpoint_values[key]
+
+    logger.info(
+        "已从当前 thread_id 的 Checkpoint 恢复待处理工具参数澄清状态。"
+    )
+    return restored_state
 
 
 async def run_main_graph_with_stream(
