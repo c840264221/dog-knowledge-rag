@@ -186,6 +186,7 @@ def test_build_tool_agent_tool_catalog_should_return_plain_dicts() -> None:
             "timeout": 3,
             "retries": 1,
             "require_confirm": False,
+            "input_schema": {},
         },
         {
             "name": "weather",
@@ -193,6 +194,7 @@ def test_build_tool_agent_tool_catalog_should_return_plain_dicts() -> None:
             "timeout": 8,
             "retries": 2,
             "require_confirm": True,
+            "input_schema": {},
         },
     ]
 
@@ -318,6 +320,7 @@ def test_dump_tool_metadata_for_agent_should_return_plain_dict() -> None:
         "timeout": 5,
         "retries": 3,
         "require_confirm": False,
+        "input_schema": {},
     }
 
 

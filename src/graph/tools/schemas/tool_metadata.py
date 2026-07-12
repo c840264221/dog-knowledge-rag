@@ -1,4 +1,6 @@
-from pydantic import BaseModel
+from typing import Any
+
+from pydantic import BaseModel, Field
 
 
 class ToolMetadata(BaseModel):
@@ -12,3 +14,7 @@ class ToolMetadata(BaseModel):
     retries: int = 3
 
     require_confirm: bool = False
+
+    input_schema: dict[str, Any] = Field(
+        default_factory=dict
+    )

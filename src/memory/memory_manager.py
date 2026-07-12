@@ -16,6 +16,10 @@ from src.memory.memory_document_mapper import (
 from src.memory.memory_content_normalizer import (
     normalize_memory_content
 )
+from src.memory.memory_schema import (
+    VALID_MEMORY_SOURCES,
+    VALID_MEMORY_TYPES,
+)
 
 from src.logger import logger
 
@@ -183,7 +187,10 @@ class MemoryManager:
             user_id: str,
             memory_type: str,
             content: str,
-            confidence: float
+            confidence: float,
+            importance: float = 0.5,
+            source: str = "conversation",
+            expires_at: str | None = None,
     ):
         """
         保存用户记忆。
@@ -215,6 +222,18 @@ class MemoryManager:
           LLM 判断这条记忆可信度的分数。
           中文释义：取值范围建议为 0 到 1。
 
+        - importance: float
+          记忆重要程度。
+          中文释义：取值范围为 0 到 1，越高表示越值得影响后续回答。
+
+        - source: str
+          记忆来源。
+          中文释义：由系统填写，例如 conversation、tool、manual、system。
+
+        - expires_at: str | None
+          记忆过期时间。
+          中文释义：None 表示长期有效，否则保存 ISO 格式时间字符串。
+
         返回值：
         - dict
           返回本次保存动作结果。
@@ -230,6 +249,23 @@ class MemoryManager:
             memory_type
             or "preference"
         ).strip()
+
+        if clean_memory_type not in VALID_MEMORY_TYPES:
+            logger.warning(
+                f"非法 memory_type，已兜底为 preference: {clean_memory_type!r}"
+            )
+            clean_memory_type = "preference"
+
+        clean_source = str(
+            source
+            or "conversation"
+        ).strip()
+
+        if clean_source not in VALID_MEMORY_SOURCES:
+            logger.warning(
+                f"非法 memory source，已兜底为 conversation: {clean_source!r}"
+            )
+            clean_source = "conversation"
 
         clean_content = normalize_memory_content(
             memory_type=clean_memory_type,
@@ -248,6 +284,22 @@ class MemoryManager:
             0.0,
             min(
                 clean_confidence,
+                1.0
+            )
+        )
+
+        try:
+            clean_importance = float(
+                importance
+            )
+
+        except Exception:
+            clean_importance = 0.5
+
+        clean_importance = max(
+            0.0,
+            min(
+                clean_importance,
                 1.0
             )
         )
@@ -338,6 +390,12 @@ class MemoryManager:
                 or 0.0
             )
 
+            old_importance = float(
+                0.5
+                if existing.get("importance") is None
+                else existing["importance"]
+            )
+
             new_strength = (
                     old_strength
                     + clean_confidence
@@ -346,6 +404,19 @@ class MemoryManager:
             new_confidence = max(
                 old_confidence,
                 clean_confidence
+            )
+
+            new_importance = max(
+                old_importance,
+                clean_importance
+            )
+
+            final_expires_at = (
+                expires_at
+                if expires_at is not None
+                else existing.get(
+                    "expires_at"
+                )
             )
 
             memory_id = int(
@@ -357,7 +428,10 @@ class MemoryManager:
                 confidence=new_confidence,
                 strength=new_strength,
                 last_seen=datetime.now().isoformat(),
-                status="active"
+                status="active",
+                source=clean_source,
+                importance=new_importance,
+                expires_at=final_expires_at,
             )
 
             self._sync_memory_to_vectorstore(
@@ -371,7 +445,10 @@ class MemoryManager:
                 "memory_type": clean_memory_type,
                 "content": clean_content,
                 "confidence": new_confidence,
-                "strength": new_strength
+                "strength": new_strength,
+                "source": clean_source,
+                "importance": new_importance,
+                "expires_at": final_expires_at,
             }
 
         # 4. 不存在则创建
@@ -386,7 +463,10 @@ class MemoryManager:
             content=clean_content,
             confidence=clean_confidence,
             strength=initial_strength,
-            status="active"
+            status="active",
+            source=clean_source,
+            importance=clean_importance,
+            expires_at=expires_at,
         )
 
         if memory_id is not None:
@@ -401,5 +481,8 @@ class MemoryManager:
             "memory_type": clean_memory_type,
             "content": clean_content,
             "confidence": clean_confidence,
-            "strength": initial_strength
+            "strength": initial_strength,
+            "source": clean_source,
+            "importance": clean_importance,
+            "expires_at": expires_at,
         }

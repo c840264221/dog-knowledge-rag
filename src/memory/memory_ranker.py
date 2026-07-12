@@ -25,7 +25,8 @@ class MemoryRanker:
             memory_scorer: MemoryScorer | None = None,
             semantic_weight: float = 3.0,
             memory_weight: float = 1.0,
-            confidence_weight: float = 0.5
+            confidence_weight: float = 0.5,
+            importance_weight: float = 0.5,
     ):
         """
         初始化 MemoryRanker。
@@ -52,6 +53,10 @@ class MemoryRanker:
           可信度权重。
           值越大，说明 LLM 保存记忆时的 confidence 越重要。
 
+        - importance_weight: float
+          记忆重要程度权重。
+          值越大，说明通过相关性门槛后，高重要程度记忆的排序越靠前。
+
         返回值：
         - None
           初始化函数不返回业务数据。
@@ -67,6 +72,8 @@ class MemoryRanker:
         self.memory_weight = memory_weight
 
         self.confidence_weight = confidence_weight
+
+        self.importance_weight = importance_weight
 
     def score_memory(
             self,
@@ -121,6 +128,12 @@ class MemoryRanker:
             )
         )
 
+        importance_score = float(
+            0.5
+            if memory.get("importance") is None
+            else memory["importance"]
+        )
+
         memory_score = self.memory_scorer.score(
             strength=strength,
             last_seen=last_seen
@@ -130,6 +143,7 @@ class MemoryRanker:
             semantic_score * self.semantic_weight
             + memory_score * self.memory_weight
             + confidence_score * self.confidence_weight
+            + importance_score * self.importance_weight
         )
 
         return {
@@ -138,6 +152,7 @@ class MemoryRanker:
             "semantic_score": semantic_score,
             "memory_score": memory_score,
             "confidence_score": confidence_score,
+            "importance_score": importance_score,
             "final_score": final_score,
         }
 

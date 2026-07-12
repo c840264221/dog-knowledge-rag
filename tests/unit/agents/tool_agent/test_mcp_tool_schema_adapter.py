@@ -233,6 +233,7 @@ def test_build_mcp_tool_catalog_for_agent_should_return_plain_dicts() -> None:
             "timeout": 4,
             "retries": 0,
             "require_confirm": False,
+            "input_schema": {},
         }
     ]
 

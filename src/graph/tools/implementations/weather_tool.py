@@ -9,10 +9,11 @@ class WeatherTool(BaseTool):
 
     metadata = ToolMetadata(
         name='weather',
-        description='查询天气',
+        description='查询指定城市的当前天气',
         timeout=5,
         retries=3,
-        require_confirm=True
+        require_confirm=True,
+        input_schema=WeatherArgs.model_json_schema(),
     )
 
     args_schema = WeatherArgs

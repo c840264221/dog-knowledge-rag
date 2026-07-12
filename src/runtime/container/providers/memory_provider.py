@@ -156,6 +156,9 @@ class MemoryProvider:
                 confidence_weight=(
                     settings.memory.confidence_weight
                 ),
+                importance_weight=(
+                    settings.memory.importance_weight
+                ),
             )
 
         return self._ranker
@@ -194,7 +197,10 @@ class MemoryProvider:
                 ),
                 memory_ranker=(
                     self.ranker
-                )
+                ),
+                minimum_semantic_score=(
+                    settings.memory.minimum_semantic_score
+                ),
             )
 
         return self._semantic_recall

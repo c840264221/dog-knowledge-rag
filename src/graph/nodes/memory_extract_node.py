@@ -83,6 +83,7 @@ async def memory_extract_node(
         "memory_type": "preference",
         "content": "",
         "confidence": 0.0,
+        "importance": 0.0,
         "reason": "未执行 Memory 抽取",
     }
 
@@ -159,7 +160,14 @@ async def memory_extract_node(
                         "confidence",
                         0.0
                     )
-                )
+                ),
+                importance=float(
+                    memory_extract_result.get(
+                        "importance",
+                        0.5
+                    )
+                ),
+                source="conversation",
             )
 
             memory_saved = True

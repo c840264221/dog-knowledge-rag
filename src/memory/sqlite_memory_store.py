@@ -93,12 +93,83 @@ class SQLiteMemoryStore:
 
                 last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
+                source TEXT DEFAULT 'conversation',
+
+                importance REAL DEFAULT 0.5,
+
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+                expires_at TIMESTAMP,
+
                 UNIQUE(user_id, memory_type, content)
             )
             """
         )
 
+        self._ensure_contract_columns(
+            cursor
+        )
+
         self.conn.commit()
+
+    def _ensure_contract_columns(
+            self,
+            cursor: sqlite3.Cursor
+    ) -> None:
+        """
+        为已有 user_memory 表补充新版记忆契约字段。
+
+        功能：
+        - 使用 PRAGMA table_info 读取当前表结构
+        - 只对缺失字段执行 ALTER TABLE
+        - 保留旧数据库中的全部记忆数据
+
+        参数：
+        - cursor: sqlite3.Cursor
+          当前 SQLite 游标，用于查询和修改表结构。
+
+        返回值：
+        - None
+          该方法只执行兼容迁移，不返回业务数据。
+        """
+
+        cursor.execute(
+            "PRAGMA table_info(user_memory)"
+        )
+
+        existing_columns = {
+            str(row[1])
+            for row in cursor.fetchall()
+        }
+
+        contract_columns = {
+            "source": "TEXT DEFAULT 'conversation'",
+            "importance": "REAL DEFAULT 0.5",
+            "updated_at": "TIMESTAMP",
+            "expires_at": "TIMESTAMP",
+        }
+
+        for column_name, column_definition in contract_columns.items():
+            if column_name in existing_columns:
+                continue
+
+            cursor.execute(
+                f"ALTER TABLE user_memory "
+                f"ADD COLUMN {column_name} {column_definition}"
+            )
+
+        cursor.execute(
+            """
+            UPDATE user_memory
+            SET updated_at = COALESCE(
+                updated_at,
+                last_seen,
+                created_at,
+                CURRENT_TIMESTAMP
+            )
+            WHERE updated_at IS NULL
+            """
+        )
 
     def add_memory(
             self,
@@ -107,7 +178,10 @@ class SQLiteMemoryStore:
             content: str,
             confidence: float,
             strength: float = 1.0,
-            status: str = "active"
+            status: str = "active",
+            source: str = "conversation",
+            importance: float = 0.5,
+            expires_at: str | None = None,
     ) -> int | None:
         """
         新增一条用户记忆。
@@ -156,9 +230,13 @@ class SQLiteMemoryStore:
                 strength,
                 status,
                 created_at,
-                last_seen
+                last_seen,
+                source,
+                importance,
+                updated_at,
+                expires_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
@@ -168,7 +246,11 @@ class SQLiteMemoryStore:
                 strength,
                 status,
                 now,
-                now
+                now,
+                source,
+                importance,
+                now,
+                expires_at,
             )
         )
 
@@ -208,7 +290,11 @@ class SQLiteMemoryStore:
                     content,
                     confidence,
                     strength,
-                    last_seen
+                    last_seen,
+                    source,
+                    importance,
+                    updated_at,
+                    expires_at
                 FROM user_memory
                 WHERE user_id = ?
                 AND memory_type = ?
@@ -232,7 +318,11 @@ class SQLiteMemoryStore:
                     content,
                     confidence,
                     strength,
-                    last_seen
+                    last_seen,
+                    source,
+                    importance,
+                    updated_at,
+                    expires_at
                 FROM user_memory
                 WHERE user_id = ?
                 ORDER BY strength DESC, last_seen DESC
@@ -266,7 +356,11 @@ class SQLiteMemoryStore:
                 strength,
                 status,
                 created_at,
-                last_seen
+                last_seen,
+                source,
+                importance,
+                updated_at,
+                expires_at
             FROM user_memory
             WHERE user_id = ?
             AND memory_type = ?
@@ -294,7 +388,10 @@ class SQLiteMemoryStore:
             confidence: float | None = None,
             strength: float | None = None,
             last_seen: str | None = None,
-            status: str | None = None
+            status: str | None = None,
+            source: str | None = None,
+            importance: float | None = None,
+            expires_at: str | None = None,
     ):
 
         fields = []
@@ -317,9 +414,23 @@ class SQLiteMemoryStore:
             fields.append("status = ?")
             values.append(status)
 
+        if source is not None:
+            fields.append("source = ?")
+            values.append(source)
+
+        if importance is not None:
+            fields.append("importance = ?")
+            values.append(importance)
+
+        if expires_at is not None:
+            fields.append("expires_at = ?")
+            values.append(expires_at)
+
         if not fields:
             return
 
+        fields.append("updated_at = ?")
+        values.append(datetime.now().isoformat())
         values.append(memory_id)
 
         sql = f"""
@@ -355,7 +466,11 @@ class SQLiteMemoryStore:
                 strength,
                 status,
                 created_at,
-                last_seen
+                last_seen,
+                source,
+                importance,
+                updated_at,
+                expires_at
             FROM user_memory
             WHERE user_id = ?
             AND status = 'active'
@@ -392,7 +507,11 @@ class SQLiteMemoryStore:
                 strength,
                 status,
                 created_at,
-                last_seen
+                last_seen,
+                source,
+                importance,
+                updated_at,
+                expires_at
             FROM user_memory
             WHERE user_id = ?
             AND status = 'active'
@@ -471,10 +590,12 @@ class SQLiteMemoryStore:
         cursor.execute(
             """
             UPDATE user_memory
-            SET status = 'inactive'
+            SET status = 'inactive',
+                updated_at = ?
             WHERE id = ?
             """,
             (
+                datetime.now().isoformat(),
                 memory_id,
             )
         )
@@ -516,7 +637,11 @@ class SQLiteMemoryStore:
                 strength,
                 status,
                 created_at,
-                last_seen
+                last_seen,
+                source,
+                importance,
+                updated_at,
+                expires_at
             FROM user_memory
             WHERE id = ?
             LIMIT 1
@@ -579,7 +704,11 @@ class SQLiteMemoryStore:
                 strength,
                 status,
                 created_at,
-                last_seen
+                last_seen,
+                source,
+                importance,
+                updated_at,
+                expires_at
             FROM user_memory
             WHERE id IN ({placeholders})
         """
@@ -591,6 +720,11 @@ class SQLiteMemoryStore:
         if only_active:
             sql += """
                 AND status = 'active'
+                AND (
+                    expires_at IS NULL
+                    OR expires_at = ''
+                    OR datetime(expires_at) > datetime('now')
+                )
             """
 
         cursor = self.conn.cursor()

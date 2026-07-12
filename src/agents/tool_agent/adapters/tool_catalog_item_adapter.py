@@ -69,7 +69,9 @@ def build_tool_catalog_item_from_tool_metadata(
         timeout=metadata.timeout,
         retries=metadata.retries,
         require_confirm=metadata.require_confirm,
-        input_schema={},
+        input_schema=dict(
+            metadata.input_schema
+        ),
         source=source,
     )
 

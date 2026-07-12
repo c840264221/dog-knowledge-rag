@@ -49,7 +49,18 @@ def build_test_tool_catalog() -> list[dict]:
             "name": "weather",
             "description": "查询天气",
             "require_confirm": True,
-            "input_schema": {},
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "city": {
+                        "type": "string",
+                        "description": "要查询天气的城市名称",
+                    }
+                },
+                "required": [
+                    "city",
+                ],
+            },
             "source": "local",
         },
         {
@@ -185,6 +196,36 @@ def test_validate_tool_calls_against_catalog_should_reject_missing_required_arg(
     assert result["is_valid"] is False
     assert result["errors"][0]["code"] == "missing_required_arg"
     assert result["errors"][0]["field"] == "table_name"
+
+
+def test_weather_call_should_reject_missing_city_before_execution() -> None:
+    """
+    测试天气工具缺少城市时会在统一校验层被拦截。
+
+    功能：
+        防止 args 为空的天气调用通过校验后才在 WeatherTool 执行阶段失败。
+
+    参数：
+        无。
+
+    返回值：
+        None。
+    """
+
+    result = validate_tool_calls_against_catalog(
+        tool_calls=[
+            {
+                "name": "weather",
+                "args": {},
+            }
+        ],
+        tool_catalog=build_test_tool_catalog(),
+    )
+
+    assert result["is_valid"] is False
+    assert result["valid_tool_calls"] == []
+    assert result["errors"][0]["code"] == "missing_required_arg"
+    assert result["errors"][0]["field"] == "city"
 
 
 def test_validate_tool_calls_against_catalog_should_reject_invalid_arg_type() -> None:

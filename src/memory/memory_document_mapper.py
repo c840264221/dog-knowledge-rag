@@ -44,6 +44,10 @@ def memory_record_to_document(
             "status": memory.status,
             "created_at": memory.created_at or "",
             "last_seen": memory.last_seen or "",
+            "source": memory.source,
+            "importance": float(memory.importance),
+            "updated_at": memory.updated_at or "",
+            "expires_at": memory.expires_at or "",
         }
     )
 
@@ -95,6 +99,14 @@ def memory_dict_to_record(
         ),
         created_at=memory.get("created_at"),
         last_seen=memory.get("last_seen"),
+        source=memory.get("source", "conversation"),
+        importance=float(
+            0.5
+            if memory.get("importance") is None
+            else memory["importance"]
+        ),
+        updated_at=memory.get("updated_at"),
+        expires_at=memory.get("expires_at"),
     )
 
 

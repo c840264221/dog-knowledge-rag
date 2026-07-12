@@ -16,6 +16,8 @@ class MemorySettings(BaseAppSettings):
     - semantic_weight: 语义分数权重
     - memory_weight: 记忆强度与时间衰减分数权重
     - confidence_weight: 可信度分数权重
+    - importance_weight: 记忆重要程度权重
+    - minimum_semantic_score: 允许记忆进入精排的最低语义相关分数
     - default_top_k: 默认最终召回数量
     - default_candidate_k: 默认候选召回数量
     """
@@ -31,6 +33,10 @@ class MemorySettings(BaseAppSettings):
     memory_weight: float = 1.0
 
     confidence_weight: float = 0.5
+
+    importance_weight: float = 0.5
+
+    minimum_semantic_score: float = 0.45
 
     default_top_k: int = 5
 

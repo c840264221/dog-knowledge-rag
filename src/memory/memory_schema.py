@@ -1,9 +1,37 @@
-from pydantic import BaseModel, Field
-from typing import Literal
 from dataclasses import dataclass
+from typing import Literal, TypeAlias, get_args
+
+from pydantic import BaseModel, Field
 
 
-from datetime import datetime
+MemoryType: TypeAlias = Literal[
+    "favorite_dog",
+    "preference",
+    "dislike",
+    "hobby",
+    "profile",
+]
+
+MemoryStatus: TypeAlias = Literal[
+    "active",
+    "inactive",
+]
+
+MemorySource: TypeAlias = Literal[
+    "conversation",
+    "tool",
+    "manual",
+    "system",
+]
+
+VALID_MEMORY_TYPES = frozenset(
+    get_args(MemoryType)
+)
+
+VALID_MEMORY_SOURCES = frozenset(
+    get_args(MemorySource)
+)
+
 
 class MemoryOutput(BaseModel):
     """
@@ -21,15 +49,17 @@ class MemoryOutput(BaseModel):
         le=1
     )
 
-    memory_type: Literal[
-        "favorite_dog",
-        "preference",
-        "dislike"
-    ]
+    memory_type: MemoryType
 
     content: str
 
     reason: str
+
+    importance: float = Field(
+        default=0.5,
+        ge=0,
+        le=1,
+    )
 
 
 @dataclass
@@ -46,7 +76,7 @@ class MemoryRecord:
 
     user_id: str
 
-    memory_type: str
+    memory_type: MemoryType
 
     content: str
 
@@ -54,8 +84,16 @@ class MemoryRecord:
 
     strength: float
 
-    status: str = "active"
+    status: MemoryStatus = "active"
 
     created_at: str | None = None
 
     last_seen: str | None = None
+
+    source: MemorySource = "conversation"
+
+    importance: float = 0.5
+
+    updated_at: str | None = None
+
+    expires_at: str | None = None

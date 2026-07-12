@@ -25,7 +25,8 @@ class MemorySemanticRecallService:
             self,
             store: SQLiteMemoryStore,
             vectorstore_provider,
-            memory_ranker: MemoryRanker | None = None
+            memory_ranker: MemoryRanker | None = None,
+            minimum_semantic_score: float | None = None,
     ):
         """
         初始化 MemorySemanticRecallService。
@@ -49,6 +50,10 @@ class MemorySemanticRecallService:
           记忆精排器。
           中文释义：用于结合语义分数、记忆强度、可信度等信息重新排序。
 
+        - minimum_semantic_score: float | None
+          最低语义相关分数。
+          中文释义：候选低于该值时不会进入 SQLite 回查和后续精排。
+
         返回值：
         - None
           初始化函数不返回业务数据。
@@ -61,6 +66,20 @@ class MemorySemanticRecallService:
         self.memory_ranker = (
             memory_ranker
             or MemoryRanker()
+        )
+
+        configured_minimum_score = (
+            settings.memory.minimum_semantic_score
+            if minimum_semantic_score is None
+            else minimum_semantic_score
+        )
+
+        self.minimum_semantic_score = max(
+            0.0,
+            min(
+                float(configured_minimum_score),
+                1.0
+            )
         )
 
     def _distance_to_score(
@@ -220,21 +239,30 @@ class MemorySemanticRecallService:
             if memory_id in semantic_score_map:
                 continue
 
-            memory_ids.append(
-                memory_id
-            )
-
             distance_value = float(
                 distance
             )
 
+            semantic_score = self._distance_to_score(
+                distance_value
+            )
+
+            if semantic_score < self.minimum_semantic_score:
+                logger.info(
+                    "Memory 候选未通过语义相关性门槛: "
+                    f"memory_id={memory_id}, "
+                    f"semantic_score={semantic_score:.4f}, "
+                    f"minimum={self.minimum_semantic_score:.4f}"
+                )
+                continue
+
+            memory_ids.append(
+                memory_id
+            )
+
             distance_map[memory_id] = distance_value
 
-            semantic_score_map[memory_id] = (
-                self._distance_to_score(
-                    distance_value
-                )
-            )
+            semantic_score_map[memory_id] = semantic_score
 
         if not memory_ids:
             return []

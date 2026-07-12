@@ -15,6 +15,7 @@ from src.agents.tool_agent.adapters.tool_catalog_item_adapter import (
     dump_tool_catalog_item_for_state,
 )
 from src.graph.tools.schemas.tool_metadata import ToolMetadata
+from src.graph.tools.implementations.weather_tool import WeatherTool
 from src.mcp.sqlite.tool_definitions import (
     SQLITE_RUN_READONLY_QUERY_TOOL_NAME,
     build_sqlite_run_readonly_query_tool_definition,
@@ -52,6 +53,30 @@ def test_build_tool_catalog_item_from_tool_metadata_should_create_local_item() -
     assert item.require_confirm is True
     assert item.input_schema == {}
     assert item.source == "local"
+
+
+def test_build_local_tool_catalog_item_should_keep_input_schema() -> None:
+    """
+    测试本地工具参数契约会进入统一工具目录。
+
+    功能：
+        确认天气工具的 city 必填要求不会在本地工具适配过程中丢失。
+
+    参数：
+        无。
+
+    返回值：
+        None。
+    """
+
+    item = build_tool_catalog_item_from_tool_metadata(
+        metadata=WeatherTool.metadata
+    )
+
+    assert item.input_schema["required"] == [
+        "city",
+    ]
+    assert item.input_schema["properties"]["city"]["type"] == "string"
 
 
 def test_build_tool_catalog_item_from_mcp_tool_should_keep_input_schema() -> None:

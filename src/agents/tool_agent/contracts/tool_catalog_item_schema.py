@@ -50,8 +50,8 @@ class ToolCatalogItem(BaseModel):
             是否需要用户确认。
 
         input_schema:
-            工具输入参数结构。MCP 工具通常会提供该字段；
-            本地旧工具当前可以先为空字典。
+            工具输入参数结构。本地工具和 MCP 工具都通过该字段向 ToolAgent
+            暴露参数名称、类型、说明和必填要求；无参数工具使用空字典。
 
         source:
             工具来源，例如 local 表示本地工具，mcp 表示 MCP 工具。

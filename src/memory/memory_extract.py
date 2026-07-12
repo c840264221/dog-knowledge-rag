@@ -13,6 +13,10 @@ from src.retrieval.alias_loader import (
 from src.memory.memory_content_normalizer import (
     normalize_memory_content
 )
+from src.memory.memory_schema import (
+    MemoryOutput,
+    VALID_MEMORY_TYPES,
+)
 
 
 _alias_cache = get_alias_dict()
@@ -69,6 +73,12 @@ confidence 规则：
 - 用户表达含糊时，低于 0.7
 - 不值得保存时，confidence 可以是 0.0
 
+importance 规则：
+- 取值范围必须是 0 到 1
+- 明确、稳定且会明显影响后续回答的信息通常是 0.7 到 1.0
+- 普通长期兴趣通常是 0.4 到 0.7
+- 不值得保存时，importance 使用 0.0
+
 请严格输出 JSON，不要输出 Markdown，不要输出解释文字。
 
 JSON 格式必须是：
@@ -77,6 +87,7 @@ JSON 格式必须是：
   "memory_type": "favorite_dog/dislike/preference/hobby/profile",
   "content": "要保存的内容",
   "confidence": 0.0 到 1.0,
+  "importance": 0.0 到 1.0,
   "reason": "简短原因"
 }}
 
@@ -90,6 +101,7 @@ JSON 格式必须是：
   "memory_type": "favorite_dog",
   "content": "金毛",
   "confidence": 0.95,
+  "importance": 0.85,
   "reason": "用户明确表达了喜欢的狗狗品种"
 }}
 
@@ -103,6 +115,7 @@ JSON 格式必须是：
   "memory_type": "dislike",
   "content": "哈士奇",
   "confidence": 0.95,
+  "importance": 0.8,
   "reason": "用户明确表达了不喜欢的对象"
 }}
 
@@ -116,6 +129,7 @@ JSON 格式必须是：
   "memory_type": "preference",
   "content": "用户希望技术名词附带中文解释",
   "confidence": 0.95,
+  "importance": 0.9,
   "reason": "用户表达了长期回答偏好"
 }}
 
@@ -129,6 +143,7 @@ JSON 格式必须是：
   "memory_type": "preference",
   "content": "",
   "confidence": 0.0,
+  "importance": 0.0,
   "reason": "这是普通知识问题，不是用户长期偏好"
 }}
 
@@ -158,20 +173,12 @@ def normalize_memory_type(
       合法的 memory_type。
     """
 
-    valid_types = {
-        "favorite_dog",
-        "dislike",
-        "preference",
-        "hobby",
-        "profile",
-    }
-
     clean_type = str(
         memory_type
         or "preference"
     ).strip()
 
-    if clean_type not in valid_types:
+    if clean_type not in VALID_MEMORY_TYPES:
         logger.warning(
             f"非法 memory_type，已兜底为 preference: {clean_type!r}"
         )
@@ -208,6 +215,43 @@ def normalize_confidence(
 
     except Exception:
         return 0.0
+
+    return max(
+        0.0,
+        min(
+            value,
+            1.0
+        )
+    )
+
+
+def normalize_importance(
+        importance: Any
+) -> float:
+    """
+    归一化 importance 重要程度。
+
+    功能：
+    - 将 LLM 返回的 importance 转换为 float
+    - 限制结果范围在 0 到 1
+    - 转换失败时返回中性默认值 0.5
+
+    参数：
+    - importance: Any
+      LLM 返回的原始重要程度。
+
+    返回值：
+    - float
+      归一化后的重要程度。
+    """
+
+    try:
+        value = float(
+            importance
+        )
+
+    except Exception:
+        return 0.5
 
     return max(
         0.0,
@@ -268,6 +312,13 @@ def normalize_memory_result(
         )
     )
 
+    importance = normalize_importance(
+        result.get(
+            "importance",
+            0.5
+        )
+    )
+
     reason = str(
         result.get(
             "reason",
@@ -291,13 +342,18 @@ def normalize_memory_result(
     if should_save and confidence <= 0:
         confidence = 0.5
 
-    return {
+    normalized_result = {
         "should_save": should_save,
         "memory_type": memory_type,
         "content": content,
         "confidence": confidence,
+        "importance": importance,
         "reason": reason,
     }
+
+    return MemoryOutput.model_validate(
+        normalized_result
+    ).model_dump()
 
 
 def default_memory_result(
@@ -324,6 +380,7 @@ def default_memory_result(
         "memory_type": "preference",
         "content": "",
         "confidence": 0.0,
+        "importance": 0.0,
         "reason": reason,
     }
 
@@ -368,6 +425,7 @@ async def extract_memory(
   "memory_type": "preference",
   "content": "",
   "confidence": 0.0,
+  "importance": 0.0,
   "reason": "LLM 调用失败"
 }
 """
