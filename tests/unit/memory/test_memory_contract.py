@@ -6,12 +6,54 @@ from pydantic import ValidationError
 from src.memory.memory_document_mapper import (
     memory_dict_to_document,
 )
+from src.memory.memory_manager import (
+    MemoryManager,
+)
 from src.memory.memory_schema import (
     MemoryOutput,
 )
 from src.memory.sqlite_memory_store import (
     SQLiteMemoryStore,
 )
+from src.graph.nodes.memory_extract_node import (
+    is_memory_save_success,
+)
+
+
+class FakeMemoryVectorStore:
+    """记录 MemoryManager 对 Chroma 执行的删除和写入操作。"""
+
+    def __init__(self) -> None:
+        self.deleted_ids: list[list[str]] = []
+        self.added_items: list[dict] = []
+
+    def delete(self, ids: list[str]) -> None:
+        """记录删除的 Chroma 文档编号。"""
+
+        self.deleted_ids.append(
+            ids
+        )
+
+    def add_documents(
+            self,
+            documents,
+            ids: list[str],
+    ) -> None:
+        """记录重新写入的文档和 Chroma 文档编号。"""
+
+        self.added_items.append(
+            {
+                "documents": documents,
+                "ids": ids,
+            }
+        )
+
+
+class FakeVectorStoreProvider:
+    """向 MemoryManager 提供测试用 memory_db。"""
+
+    def __init__(self) -> None:
+        self.memory_db = FakeMemoryVectorStore()
 
 
 def test_memory_output_should_accept_standard_contract() -> None:
@@ -190,3 +232,204 @@ def test_memory_fields_should_flow_from_sqlite_to_chroma_metadata(
         assert document.metadata["expires_at"] == "2027-01-01T00:00:00"
     finally:
         store.close()
+
+
+def test_memory_manager_should_create_and_reinforce_memory(
+        tmp_path,
+) -> None:
+    """
+    测试记忆首次创建和重复强化使用同一条记录。
+
+    功能：
+        验证首次保存返回 created，重复保存返回 reinforced 且 strength 增加。
+
+    参数：
+        tmp_path: pytest 临时目录，用于创建隔离的 SQLite 数据库。
+
+    返回值：
+        None，pytest 根据断言判断测试是否通过。
+    """
+
+    store = SQLiteMemoryStore(
+        db_path=tmp_path / "memory_manager.sqlite3"
+    )
+    manager = MemoryManager(
+        store=store
+    )
+
+    try:
+        created = manager.save_memory(
+            user_id="user_001",
+            memory_type="favorite_dog",
+            content="金毛",
+            confidence=0.9,
+            importance=0.8,
+        )
+        reinforced = manager.save_memory(
+            user_id="user_001",
+            memory_type="favorite_dog",
+            content="用户喜欢金毛",
+            confidence=0.8,
+            importance=0.9,
+        )
+
+        assert created["action"] == "created"
+        assert reinforced["action"] == "reinforced"
+        assert reinforced["memory_id"] == created["memory_id"]
+        assert reinforced["strength"] > created["strength"]
+        assert reinforced["importance"] == 0.9
+    finally:
+        store.close()
+
+
+def test_memory_manager_should_reactivate_inactive_memory(
+        tmp_path,
+) -> None:
+    """
+    测试发生偏好反转后可以重新激活历史失效记忆。
+
+    功能：
+        依次保存喜欢、厌恶、再次喜欢金毛，验证旧 favorite_dog 记录被复用。
+
+    参数：
+        tmp_path: pytest 临时目录，用于创建隔离的 SQLite 数据库。
+
+    返回值：
+        None，pytest 根据状态和编号断言判断测试是否通过。
+    """
+
+    store = SQLiteMemoryStore(
+        db_path=tmp_path / "memory_reactivation.sqlite3"
+    )
+    vectorstore_provider = FakeVectorStoreProvider()
+    manager = MemoryManager(
+        store=store,
+        vectorstore_provider=vectorstore_provider,
+    )
+
+    try:
+        favorite = manager.save_memory(
+            user_id="user_001",
+            memory_type="favorite_dog",
+            content="金毛",
+            confidence=0.9,
+            importance=0.8,
+            expires_at="2027-01-01T00:00:00",
+        )
+        dislike = manager.save_memory(
+            user_id="user_001",
+            memory_type="dislike",
+            content="金毛",
+            confidence=0.95,
+            importance=0.9,
+        )
+        reactivated = manager.save_memory(
+            user_id="user_001",
+            memory_type="favorite_dog",
+            content="金毛",
+            confidence=0.98,
+            importance=0.95,
+        )
+
+        favorite_record = store.get_memory_by_id(
+            favorite["memory_id"]
+        )
+        dislike_record = store.get_memory_by_id(
+            dislike["memory_id"]
+        )
+
+        assert reactivated["action"] == "reactivated"
+        assert reactivated["memory_id"] == favorite["memory_id"]
+        assert favorite_record["status"] == "active"
+        assert favorite_record["expires_at"] is None
+        assert dislike_record["status"] == "inactive"
+
+        last_vector_write = (
+            vectorstore_provider
+            .memory_db
+            .added_items[-1]
+        )
+        assert last_vector_write["ids"] == [
+            f"memory_{favorite['memory_id']}"
+        ]
+        assert (
+            last_vector_write["documents"][0].metadata["status"]
+            == "active"
+        )
+        assert (
+            last_vector_write["documents"][0].metadata["expires_at"]
+            == ""
+        )
+    finally:
+        store.close()
+
+
+def test_memory_manager_should_skip_empty_content(
+        tmp_path,
+) -> None:
+    """
+    测试空记忆内容不会写入数据库。
+
+    功能：
+        验证归一化后为空的内容返回 skipped 且没有 memory_id。
+
+    参数：
+        tmp_path: pytest 临时目录，用于创建隔离的 SQLite 数据库。
+
+    返回值：
+        None，pytest 根据保存结果判断测试是否通过。
+    """
+
+    store = SQLiteMemoryStore(
+        db_path=tmp_path / "memory_skipped.sqlite3"
+    )
+    manager = MemoryManager(
+        store=store
+    )
+
+    try:
+        result = manager.save_memory(
+            user_id="user_001",
+            memory_type="preference",
+            content="   ",
+            confidence=0.9,
+        )
+
+        assert result["action"] == "skipped"
+        assert result["memory_id"] is None
+    finally:
+        store.close()
+
+
+@pytest.mark.parametrize(
+    "save_result,expected",
+    [
+        ({"action": "created", "memory_id": 1}, True),
+        ({"action": "reinforced", "memory_id": 1}, True),
+        ({"action": "reactivated", "memory_id": 1}, True),
+        ({"action": "skipped", "memory_id": None}, False),
+        ({"action": "failed", "memory_id": None}, False),
+        (None, False),
+    ],
+)
+def test_is_memory_save_success_should_match_real_write_action(
+        save_result,
+        expected: bool,
+) -> None:
+    """
+    测试节点只把真实创建或更新动作标记为保存成功。
+
+    功能：
+        验证 created、reinforced、reactivated 与 skipped、failed 的区别。
+
+    参数：
+        save_result: MemoryManager 返回的保存结果。
+        expected: 期望的成功判断。
+
+    返回值：
+        None，pytest 根据断言判断测试是否通过。
+    """
+
+    assert is_memory_save_success(
+        save_result
+    ) is expected

@@ -340,13 +340,34 @@ class SQLiteMemoryStore:
             self,
             user_id: str,
             memory_type: str,
-            content: str
+            content: str,
+            only_active: bool = True,
     ):
+        """
+        根据用户、类型和内容查找记忆。
+
+        功能：
+        - 默认只查找 active 有效记忆
+        - 可选择包含 inactive 历史记忆，供重新激活流程使用
+
+        参数：
+        - user_id: str
+          用户编号。
+        - memory_type: str
+          记忆类型。
+        - content: str
+          已归一化的记忆内容。
+        - only_active: bool
+          True 只查询有效记忆，False 查询任意状态的同一条记忆。
+
+        返回值：
+        - dict | None
+          找到时返回完整记忆字典，否则返回 None。
+        """
 
         cursor = self.conn.cursor()
 
-        cursor.execute(
-            """
+        sql = """
             SELECT
                 id,
                 user_id,
@@ -365,9 +386,20 @@ class SQLiteMemoryStore:
             WHERE user_id = ?
             AND memory_type = ?
             AND content = ?
-            AND status = 'active'
+        """
+
+        if only_active:
+            sql += """
+                AND status = 'active'
+            """
+
+        sql += """
+            ORDER BY CASE WHEN status = 'active' THEN 0 ELSE 1 END
             LIMIT 1
-            """,
+        """
+
+        cursor.execute(
+            sql,
             (
                 user_id,
                 memory_type,
@@ -392,6 +424,7 @@ class SQLiteMemoryStore:
             source: str | None = None,
             importance: float | None = None,
             expires_at: str | None = None,
+            update_expires_at: bool = False,
     ):
 
         fields = []
@@ -422,7 +455,7 @@ class SQLiteMemoryStore:
             fields.append("importance = ?")
             values.append(importance)
 
-        if expires_at is not None:
+        if expires_at is not None or update_expires_at:
             fields.append("expires_at = ?")
             values.append(expires_at)
 

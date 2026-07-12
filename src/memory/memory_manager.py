@@ -369,7 +369,8 @@ class MemoryManager:
         existing = self.store.find_memory(
             user_id=clean_user_id,
             memory_type=clean_memory_type,
-            content=clean_content
+            content=clean_content,
+            only_active=True,
         )
 
         # 3. 存在则强化
@@ -451,7 +452,81 @@ class MemoryManager:
                 "expires_at": final_expires_at,
             }
 
-        # 4. 不存在则创建
+        # 4. 同类型记忆曾经存在但已失效时，复用原记录并重新激活。
+        # 这样既保留同一 memory_id，也不会触发 SQLite 唯一约束导致插入被忽略。
+        inactive_existing = self.store.find_memory(
+            user_id=clean_user_id,
+            memory_type=clean_memory_type,
+            content=clean_content,
+            only_active=False,
+        )
+
+        if inactive_existing:
+            memory_id = int(
+                inactive_existing["id"]
+            )
+            old_strength = float(
+                inactive_existing.get(
+                    "strength",
+                    1.0
+                )
+                or 1.0
+            )
+            old_confidence = float(
+                inactive_existing.get(
+                    "confidence",
+                    0.0
+                )
+                or 0.0
+            )
+            old_importance = float(
+                0.5
+                if inactive_existing.get("importance") is None
+                else inactive_existing["importance"]
+            )
+            reactivated_strength = (
+                old_strength
+                + clean_confidence
+            )
+            reactivated_confidence = max(
+                old_confidence,
+                clean_confidence
+            )
+            reactivated_importance = max(
+                old_importance,
+                clean_importance
+            )
+
+            self.store.update_memory(
+                memory_id=memory_id,
+                confidence=reactivated_confidence,
+                strength=reactivated_strength,
+                last_seen=datetime.now().isoformat(),
+                status="active",
+                source=clean_source,
+                importance=reactivated_importance,
+                expires_at=expires_at,
+                update_expires_at=True,
+            )
+
+            self._sync_memory_to_vectorstore(
+                memory_id
+            )
+
+            return {
+                "action": "reactivated",
+                "deactivated": deactivated_count,
+                "memory_id": memory_id,
+                "memory_type": clean_memory_type,
+                "content": clean_content,
+                "confidence": reactivated_confidence,
+                "strength": reactivated_strength,
+                "source": clean_source,
+                "importance": reactivated_importance,
+                "expires_at": expires_at,
+            }
+
+        # 5. 历史中也不存在时才创建新记录。
         initial_strength = max(
             clean_confidence,
             1.0
@@ -473,6 +548,21 @@ class MemoryManager:
             self._sync_memory_to_vectorstore(
                 memory_id
             )
+
+        if memory_id is None:
+            return {
+                "action": "failed",
+                "reason": "SQLite 未能创建或定位记忆记录",
+                "deactivated": deactivated_count,
+                "memory_id": None,
+                "memory_type": clean_memory_type,
+                "content": clean_content,
+                "confidence": clean_confidence,
+                "strength": initial_strength,
+                "source": clean_source,
+                "importance": clean_importance,
+                "expires_at": expires_at,
+            }
 
         return {
             "action": "created",

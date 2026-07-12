@@ -15,6 +15,55 @@ from src.runtime.context import (
 )
 
 
+SUCCESSFUL_MEMORY_SAVE_ACTIONS = frozenset(
+    {
+        "created",
+        "reinforced",
+        "reactivated",
+    }
+)
+
+
+def is_memory_save_success(
+        save_result: dict[str, Any] | None
+) -> bool:
+    """
+    判断记忆保存结果是否代表真实写入成功。
+
+    功能：
+    - 读取 save_result.action 保存动作
+    - 只接受创建、强化和重新激活
+    - 同时要求返回有效 memory_id，避免把数据库失败误报为已保存
+
+    参数：
+    - save_result: dict[str, Any] | None
+      MemoryManager.save_memory 返回的保存结果。
+
+    返回值：
+    - bool
+      True 表示记忆已真实保存或更新，False 表示跳过或失败。
+    """
+
+    if not isinstance(
+        save_result,
+        dict
+    ):
+        return False
+
+    action = str(
+        save_result.get(
+            "action",
+            ""
+        )
+        or ""
+    )
+
+    return (
+        action in SUCCESSFUL_MEMORY_SAVE_ACTIONS
+        and save_result.get("memory_id") is not None
+    )
+
+
 async def memory_extract_node(
         state: DogState
 ) -> dict[str, Any]:
@@ -170,7 +219,9 @@ async def memory_extract_node(
                 source="conversation",
             )
 
-            memory_saved = True
+            memory_saved = is_memory_save_success(
+                save_result
+            )
 
             logger.info(
                 f"Memory Save 结果: user_id={user_id}, result={save_result}"
