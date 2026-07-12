@@ -5,6 +5,9 @@ from src.memory.sqlite_memory_store import (
 from src.memory.memory_ranker import (
     MemoryRanker
 )
+from src.memory.memory_schema import (
+    MemoryRecallResult,
+)
 
 from src.logger import logger
 from src.settings import settings
@@ -151,7 +154,8 @@ class MemorySemanticRecallService:
             user_id: str,
             question: str,
             top_k: int = 5,
-            candidate_k: int = 20
+            candidate_k: int = 20,
+            diagnostics: dict | None = None,
     ) -> list[dict]:
         """
         根据用户问题语义召回相关记忆。
@@ -187,6 +191,15 @@ class MemorySemanticRecallService:
 
         clean_question = question.strip()
 
+        if diagnostics is not None:
+            diagnostics.update(
+                {
+                    "candidate_count": 0,
+                    "threshold_passed_count": 0,
+                    "selected_count": 0,
+                }
+            )
+
         if not clean_question:
             return []
 
@@ -213,6 +226,11 @@ class MemorySemanticRecallService:
 
         if not chroma_results:
             return []
+
+        if diagnostics is not None:
+            diagnostics["candidate_count"] = len(
+                chroma_results
+            )
 
         memory_ids: list[int] = []
 
@@ -267,6 +285,11 @@ class MemorySemanticRecallService:
         if not memory_ids:
             return []
 
+        if diagnostics is not None:
+            diagnostics["threshold_passed_count"] = len(
+                memory_ids
+            )
+
         memories = self.store.get_memories_by_ids(
             memory_ids=memory_ids,
             only_active=True
@@ -283,7 +306,14 @@ class MemorySemanticRecallService:
             ranked_memories
         )
 
-        return deduped_memories[:top_k]
+        selected_memories = deduped_memories[:top_k]
+
+        if diagnostics is not None:
+            diagnostics["selected_count"] = len(
+                selected_memories
+            )
+
+        return selected_memories
 
     def format_memories(
             self,
@@ -562,10 +592,44 @@ class MemorySemanticRecallService:
           格式化后的用户记忆文本。
         """
 
+        result = self.retrieve_with_details(
+            user_id=user_id,
+            question=question,
+            limit=limit,
+        )
+
+        return str(
+            result["memory_context"]
+        )
+
+    def retrieve_with_details(
+            self,
+            user_id: str,
+            question: str,
+            limit: int | None = None,
+    ) -> dict:
+        """
+        召回用户记忆并返回结构化可观测结果。
+
+        功能：
+            执行一次语义召回，同时产出 Prompt（提示词）可用文本、
+            候选数量、门槛过滤结果、最高语义分和最终采用的记忆 ID。
+
+        参数：
+            user_id：当前用户唯一标识。
+            question：用于语义检索的当前问题。
+            limit：最终最多采用的记忆数量，为 None 时使用系统配置。
+
+        返回值：
+            dict：MemoryRecallResult（记忆召回结果）转换后的普通字典，
+            可安全写入 LangGraph state 和 checkpoint（检查点）。
+        """
+
         actual_limit = (
             limit
             or settings.memory.default_top_k
         )
+        diagnostics: dict = {}
 
         memories = self.search(
             user_id=user_id,
@@ -574,9 +638,49 @@ class MemorySemanticRecallService:
             candidate_k=max(
                 actual_limit * 4,
                 settings.memory.default_candidate_k
-            )
+            ),
+            diagnostics=diagnostics,
         )
-
-        return self.format_memories(
+        memory_context = self.format_memories(
             memories
         )
+        selected_memory_ids = [
+            int(memory["id"])
+            for memory in memories
+            if memory.get("id") is not None
+        ]
+        semantic_scores = [
+            float(memory["semantic_score"])
+            for memory in memories
+            if memory.get("semantic_score") is not None
+        ]
+
+        if memories:
+            status = "applied"
+            reason = "存在通过语义相关性门槛并最终采用的记忆。"
+        elif diagnostics.get("candidate_count", 0) > 0:
+            status = "empty"
+            reason = "检索到候选记忆，但没有记忆通过语义门槛和有效性检查。"
+        else:
+            status = "empty"
+            reason = "未检索到与当前问题相关的记忆候选。"
+
+        return MemoryRecallResult(
+            status=status,
+            memory_context=memory_context,
+            candidate_count=int(
+                diagnostics.get("candidate_count", 0)
+            ),
+            threshold_passed_count=int(
+                diagnostics.get("threshold_passed_count", 0)
+            ),
+            selected_count=len(memories),
+            semantic_threshold=self.minimum_semantic_score,
+            max_semantic_score=(
+                max(semantic_scores)
+                if semantic_scores
+                else None
+            ),
+            selected_memory_ids=selected_memory_ids,
+            reason=reason,
+        ).model_dump()

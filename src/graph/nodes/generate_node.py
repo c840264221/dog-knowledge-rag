@@ -286,6 +286,10 @@ def build_generate_node(
             user_id=user_id,
             question=question,
             memory_provider=memory_provider,
+            memory_context=state.get(
+                "memory_context",
+                "",
+            ),
         )
 
         history_text = build_history_text(
@@ -381,12 +385,14 @@ async def resolve_memory_text(
         user_id: str,
         question: str,
         memory_provider=None,
+        memory_context: Any = "",
 ) -> str:
     """
     解析用户长期记忆文本。
 
     功能：
-        如果 memory_provider 存在，则调用 retrieve_user_memory 召回用户长期记忆。
+        优先使用独立记忆召回节点已经写入 state 的 memory_context。
+        如果 memory_context 为空且 memory_provider 存在，则调用 retrieve_user_memory。
         如果 memory_provider 不存在，则返回默认文本。
 
     技术名词：
@@ -406,10 +412,21 @@ async def resolve_memory_text(
         memory_provider:
             MemoryProvider 实例，可选。
 
+        memory_context:
+            独立记忆召回节点已经写入 DogState 的记忆上下文。
+
     返回值：
         str:
             用户长期记忆文本。
     """
+
+    resolved_memory_context = str(
+        memory_context
+        or ""
+    ).strip()
+
+    if resolved_memory_context:
+        return resolved_memory_context
 
     if memory_provider is None:
         return "暂无用户记忆"

@@ -183,6 +183,54 @@ def test_search_should_return_candidate_above_semantic_threshold() -> None:
     assert store.calls[0]["memory_ids"] == [1]
 
 
+def test_retrieve_with_details_should_return_observability_contract() -> None:
+    """
+    测试结构化召回入口返回真实诊断数据。
+
+    功能：
+        使用一条通过门槛和一条未通过门槛的 Chroma 候选，
+        验证候选数、通过数、采用数和记忆 ID 都来自真实召回过程。
+
+    参数：
+        无。
+
+    返回值：
+        None。
+    """
+
+    memory_db = FakeMemoryDb(
+        [
+            (build_document(1, "用户喜欢金毛"), 0.5),
+            (build_document(2, "用户喜欢边牧"), 2.0),
+        ]
+    )
+    service = MemorySemanticRecallService(
+        store=FakeMemoryStore(
+            [
+                build_memory(1, "用户喜欢金毛"),
+                build_memory(2, "用户喜欢边牧"),
+            ]
+        ),
+        vectorstore_provider=FakeVectorStoreProvider(memory_db),
+        minimum_semantic_score=0.45,
+    )
+
+    result = service.retrieve_with_details(
+        user_id="user_001",
+        question="我喜欢什么狗？",
+        limit=5,
+    )
+
+    assert result["status"] == "applied"
+    assert result["candidate_count"] == 2
+    assert result["threshold_passed_count"] == 1
+    assert result["selected_count"] == 1
+    assert result["semantic_threshold"] == 0.45
+    assert result["max_semantic_score"] > 0.45
+    assert result["selected_memory_ids"] == [1]
+    assert "金毛" in result["memory_context"]
+
+
 def test_ranker_should_use_importance_after_semantic_gate() -> None:
     """测试相关度和其他分数相同时，高重要程度记忆排在前面。"""
 

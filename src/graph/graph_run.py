@@ -175,6 +175,10 @@ def create_initial_state(
 
         # ========= 记忆字段 =========
         "memory_context": "",
+        "memory_recall_result": {},
+        "memory_saved": False,
+        "memory_extract_result": {},
+        "memory_save_result": None,
 
         # ========= 错误字段 =========
         "error": "",

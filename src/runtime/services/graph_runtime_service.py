@@ -20,7 +20,7 @@ from src.logger import logger
 from src.settings import settings
 
 from src.graph.nodes.memory_extract_node import (
-    memory_extract_node,
+    build_memory_extract_node,
 )
 
 from src.graph.nodes.router_node import (
@@ -331,6 +331,16 @@ class GraphRuntimeService:
 
         # 构建新版 ToolAgent 子图，用来承接 RootAgent 路由出的工具请求。
         tool_agent = self._build_tool_agent_node()
+
+        memory_extract_node = build_memory_extract_node(
+            llm_provider=self.llm_provider,
+            memory_provider=self.memory_provider,
+            checkpoint_manager=(
+                self.checkpoint_provider.manager
+                if self.checkpoint_provider is not None
+                else None
+            ),
+        )
 
         graph = StateGraph(
             DogState

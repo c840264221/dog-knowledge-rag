@@ -23,6 +23,9 @@ from src.graph.nodes.generate_node import (
 from src.graph.nodes.modify_filter_node import (
     build_modify_filter_node,
 )
+from src.graph.nodes.memory_retrieve_node import (
+    build_memory_retrieve_node,
+)
 from src.graph.nodes.rerank_node import (
     build_rerank_node,
 )
@@ -87,7 +90,8 @@ def build_dog_knowledge_agent(
         2. recommendation_model
 
         两个内部 model 分支共享同一套 RAG 执行链路：
-        retrieve -> query_layer_output -> evaluate -> retrieval_layer_output -> rerank -> generate
+        retrieve -> query_layer_output -> evaluate -> retrieval_layer_output -> rerank
+        -> memory_retrieve -> generate
         evaluate 的 retry / ask_user / generate 分支保持不变。
         generate 之后会进入 V1.7.4 分层契约收敛链路：
         generation_layer_output -> fallback_layer_output ->
@@ -107,6 +111,8 @@ def build_dog_knowledge_agent(
         retrieval_layer_output
             ↓
         rerank
+            ↓
+        memory_retrieve
             ↓
         generate
             ↓
@@ -242,6 +248,25 @@ def build_dog_knowledge_agent(
         checkpoint_provider=checkpoint_provider,
     )
 
+    memory_retrieve_node = None
+
+    if memory_provider is not None:
+        checkpoint_manager = (
+            checkpoint_provider.manager
+            if checkpoint_provider is not None
+            else None
+        )
+        memory_retrieve_node = build_memory_retrieve_node(
+            semantic_recall=memory_provider.semantic_recall,
+            checkpoint_manager=checkpoint_manager,
+        )
+
+    generation_entry_node = (
+        "memory_retrieve"
+        if memory_retrieve_node is not None
+        else "generate"
+    )
+
     modify_filter_node = build_modify_filter_node(
         checkpoint_provider=checkpoint_provider,
     )
@@ -318,6 +343,12 @@ def build_dog_knowledge_agent(
         "generate",
         generate_node,
     )
+
+    if memory_retrieve_node is not None:
+        builder.add_node(
+            "memory_retrieve",
+            memory_retrieve_node,
+        )
 
     builder.add_node(
         "generation_layer_output",
@@ -405,7 +436,7 @@ def build_dog_knowledge_agent(
             "rerank": "retrieval_layer_output",
             "retry": "retry",
             "ask_user": "ask_user",
-            "generate": "generate",
+            "generate": generation_entry_node,
         },
     )
 
@@ -421,7 +452,7 @@ def build_dog_knowledge_agent(
 
     builder.add_edge(
         "rerank",
-        "generate",
+        generation_entry_node,
     )
 
     # =========================
@@ -434,7 +465,7 @@ def build_dog_knowledge_agent(
         {
             "retry": "retry",
             "modify_filter": "modify_filter",
-            "generate": "generate",
+            "generate": generation_entry_node,
         },
     )
 
@@ -442,6 +473,12 @@ def build_dog_knowledge_agent(
         "modify_filter",
         "retrieve",
     )
+
+    if memory_retrieve_node is not None:
+        builder.add_edge(
+            "memory_retrieve",
+            "generate",
+        )
 
     # =========================
     # 8. V1.7.4 分层契约收敛链路

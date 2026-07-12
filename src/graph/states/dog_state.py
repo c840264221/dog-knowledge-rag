@@ -330,6 +330,18 @@ class DogState(TypedDict, total=False):
     # 根据当前问题召回并格式化后的长期记忆文本，会注入后续答案生成提示词。
     memory_context: str
 
+    # 记忆召回的结构化可观测结果，包含召回状态、候选数量、语义门槛、采用数量和记忆 ID。
+    memory_recall_result: Dict[str, Any]
+
+    # 当前输入是否已经成功创建、强化或重新激活长期记忆。
+    memory_saved: bool
+
+    # LLM 对当前输入的记忆抽取结果，包含 should_save、类型、内容、可信度和原因。
+    memory_extract_result: Dict[str, Any]
+
+    # MemoryManager 实际保存结果，包含 action、memory_id、强度和失效数量等字段；未保存时为 None。
+    memory_save_result: Optional[Dict[str, Any]]
+
     # =========================
     # 13. 错误字段
     # =========================

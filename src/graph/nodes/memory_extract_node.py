@@ -1,6 +1,7 @@
-from typing import Any
+import inspect
+from typing import Any, Awaitable, Callable
 
-from src.graph.states.state import (
+from src.graph.states.dog_state import (
     DogState
 )
 
@@ -64,133 +65,151 @@ def is_memory_save_success(
     )
 
 
-async def memory_extract_node(
-        state: DogState
-) -> dict[str, Any]:
+def build_memory_extract_node(
+        llm_provider: Any,
+        memory_provider: Any,
+        checkpoint_manager: Any = None,
+        runtime_context_getter: Callable[[], Any] | None = None,
+        memory_extractor: Callable[..., Any] = extract_memory,
+) -> Callable[[DogState], Awaitable[dict[str, Any]]]:
     """
-    Memory 抽取节点。
+    构建 Memory（记忆）抽取节点。
 
     功能：
-    - 从 state 中读取用户问题 question
-    - 从 state 中读取当前 user_id
-    - 调用 extract_memory 抽取长期记忆
-    - 如果抽取结果 should_save=True，则调用 MemoryManager 保存记忆
-    - MemoryManager 来自 MemoryProvider，已经注入 VectorStoreProvider
-    - 保存后会自动写入 SQLite，并同步到 Chroma memory_db
-    - 接入 Runtime Context、Timeline、Checkpoint、Logger
-    - 即使 Memory 抽取或保存失败，也不阻断主图后续流程
+        在主图构建阶段接收 LLMProvider（大语言模型服务提供者）、
+        MemoryProvider（记忆服务提供者）和 CheckpointManager（检查点管理器），
+        返回一个只需接收 DogState 的 LangGraph 异步节点。
+        节点内部不再导入或查询全局 RuntimeContainer（运行时容器）。
 
     参数：
-    - state: DogState
-      LangGraph 当前状态。
-      中文释义：Graph 节点之间传递的数据结构。
+        llm_provider：
+            用于 memory_extractor 调用 LLM 并抽取长期记忆。
+        memory_provider：
+            提供 manager.save_memory，负责 SQLite 保存和 Chroma 向量同步。
+        checkpoint_manager：
+            可选的检查点管理器，节点执行后保存检查点。
+        runtime_context_getter：
+            可选的 RuntimeContext（运行时上下文）获取函数。
+            未传入时使用 runtime_ctx.get。
+        memory_extractor：
+            可选的记忆抽取函数，默认使用 extract_memory。
+            保留该参数便于单元测试注入 Fake（测试假对象）。
 
     返回值：
-    - dict[str, Any]
-      返回 Memory 抽取状态。
-      包含 memory_saved、memory_extract_result。
+        Callable[[DogState], Awaitable[dict[str, Any]]]：
+            LangGraph 可调用的异步记忆抽取节点。
     """
 
-    node_name = "memory_extract_node"
+    if runtime_context_getter is None:
+        runtime_context_getter = runtime_ctx.get
 
-    runtime_context = runtime_ctx.get()
+    async def memory_extract_node(
+            state: DogState
+    ) -> dict[str, Any]:
+        """
+        抽取当前输入中值得长期保存的记忆。
 
-    runtime_context.state().set_node(
-        node_name
-    )
+        功能：
+            从 state 读取 question 和 user_id，调用注入的记忆抽取器；
+            should_save=True 时通过 MemoryProvider.manager 保存记忆；
+            抽取、保存或 checkpoint 失败时记录日志并保持主图继续。
 
-    runtime_context.timeline().add_event(
-        event_type="node",
-        name=node_name
-    )
+        参数：
+            state：LangGraph 当前 DogState（狗狗智能体状态）。
 
-    logger.info(
-        f"开始执行{node_name}"
-    )
+        返回值：
+            dict[str, Any]：包含 memory_saved、memory_extract_result 和
+            memory_save_result 的 state update（状态更新）。
+        """
 
-    question = str(
-        state.get(
-            "question",
-            ""
-        )
-    )
+        node_name = "memory_extract_node"
 
-    user_id = str(
-        state.get(
-            "user_id"
-        )
-        or state.get(
-            "session_id"
-        )
-        or "default_user"
-    )
+        runtime_context = runtime_context_getter()
 
-    memory_saved = False
+        if runtime_context is not None:
+            runtime_context.state().set_node(
+                node_name
+            )
 
-    memory_extract_result: dict[str, Any] = {
-        "should_save": False,
-        "memory_type": "preference",
-        "content": "",
-        "confidence": 0.0,
-        "importance": 0.0,
-        "reason": "未执行 Memory 抽取",
-    }
+            runtime_context.timeline().add_event(
+                event_type="node",
+                name=node_name
+            )
 
-    save_result: dict[str, Any] | None = None
-
-    if not question:
-        logger.warning(
-            "memory_extract_node 未获取到 question，跳过 Memory 抽取"
+        logger.info(
+            f"开始执行{node_name}"
         )
 
-        return {
-            "memory_saved": memory_saved,
-            "memory_extract_result": memory_extract_result,
-            "memory_save_result": save_result,
+        question = str(
+            state.get(
+                "question",
+                ""
+            )
+        )
+
+        user_id = str(
+            state.get("user_id")
+            or state.get("session_id")
+            or "default_user"
+        )
+
+        memory_saved = False
+
+        memory_extract_result: dict[str, Any] = {
+            "should_save": False,
+            "memory_type": "preference",
+            "content": "",
+            "confidence": 0.0,
+            "importance": 0.0,
+            "reason": "未执行 Memory 抽取",
         }
 
-    if user_id == "default_user":
-        logger.warning(
-            "memory_extract_node 未获取到真实 user_id，当前使用 default_user"
-        )
+        save_result: dict[str, Any] | None = None
 
-    try:
-        from src.runtime.container.init import (
-            container
-        )
+        if not question:
+            logger.warning(
+                "memory_extract_node 未获取到 question，跳过 Memory 抽取"
+            )
 
-        llm_provider = container.get(
-            "llm"
-        )
+            return {
+                "memory_saved": memory_saved,
+                "memory_extract_result": memory_extract_result,
+                "memory_save_result": save_result,
+            }
 
-        memory_provider = container.get(
-            "memory"
-        )
+        if user_id == "default_user":
+            logger.warning(
+                "memory_extract_node 未获取到真实 user_id，当前使用 default_user"
+            )
 
-        checkpoint_manager = container.get(
-            "checkpoint"
-        ).manager
+        try:
+            logger.info(
+                f"Memory Extract 输入: user_id={user_id}, question={question}"
+            )
 
+            extracted_memory = memory_extractor(
+                llm_provider=llm_provider,
+                question=question
+            )
 
-        logger.info(
-            f"Memory Extract 输入: user_id={user_id}, question={question}"
-        )
+            if inspect.isawaitable(extracted_memory):
+                extracted_memory = await extracted_memory
 
-        memory_extract_result = await extract_memory(
-            llm_provider=llm_provider,
-            question=question
-        )
+            memory_extract_result = dict(
+                extracted_memory
+                or {}
+            )
 
-        logger.info(
-            f"Memory 抽取结果: {memory_extract_result}"
-        )
+            logger.info(
+                f"Memory 抽取结果: {memory_extract_result}"
+            )
 
-        if memory_extract_result.get(
+            if memory_extract_result.get(
                 "should_save",
                 False
-        ):
+            ):
 
-            save_result = memory_provider.manager.save_memory(
+                save_result = memory_provider.manager.save_memory(
                 user_id=user_id,
                 memory_type=str(
                     memory_extract_result.get(
@@ -219,34 +238,37 @@ async def memory_extract_node(
                 source="conversation",
             )
 
-            memory_saved = is_memory_save_success(
-                save_result
-            )
+                memory_saved = is_memory_save_success(
+                    save_result
+                )
 
-            logger.info(
-                f"Memory Save 结果: user_id={user_id}, result={save_result}"
-            )
+                logger.info(
+                    f"Memory Save 结果: user_id={user_id}, result={save_result}"
+                )
 
-        else:
-            logger.info(
-                f"当前输入不需要保存为 Memory: {memory_extract_result.get('reason')}"
-            )
+            else:
+                logger.info(
+                    f"当前输入不需要保存为 Memory: {memory_extract_result.get('reason')}"
+                )
 
-        try:
-            checkpoint_manager.save_checkpoint()
+            if checkpoint_manager is not None:
+                try:
+                    checkpoint_manager.save_checkpoint()
 
-        except Exception as checkpoint_error:
+                except Exception as checkpoint_error:
+                    logger.warning(
+                        f"memory_extract_node 保存 checkpoint 失败: {checkpoint_error}"
+                    )
+
+        except Exception as e:
             logger.warning(
-                f"memory_extract_node 保存 checkpoint 失败: {checkpoint_error}"
+                f"memory_extract_node 执行失败，已跳过 Memory 保存: {e}"
             )
 
-    except Exception as e:
-        logger.warning(
-            f"memory_extract_node 执行失败，已跳过 Memory 保存: {e}"
-        )
+        return {
+            "memory_saved": memory_saved,
+            "memory_extract_result": memory_extract_result,
+            "memory_save_result": save_result,
+        }
 
-    return {
-        "memory_saved": memory_saved,
-        "memory_extract_result": memory_extract_result,
-        "memory_save_result": save_result,
-    }
+    return memory_extract_node

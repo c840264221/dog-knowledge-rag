@@ -9,7 +9,7 @@ def build_memory_retrieve_node(
     semantic_recall: Any,
     checkpoint_manager: Any = None,
     runtime_context_getter=None,
-) -> Callable[[dict[str, Any]], Awaitable[dict[str, str]]]:
+) -> Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]:
     """
     构建 Memory 召回节点。
 
@@ -39,7 +39,7 @@ def build_memory_retrieve_node(
             如果不传，则默认使用 runtime_ctx.get。
 
     返回值：
-        Callable[[dict[str, Any]], Awaitable[dict[str, str]]]：
+        Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]：
             返回一个 LangGraph 可调用的异步节点函数。
             该函数接收 state，返回需要合并进 state 的 dict。
 
@@ -59,7 +59,7 @@ def build_memory_retrieve_node(
 
     async def memory_retrieve_node(
         state: dict[str, Any]
-    ) -> dict[str, str]:
+    ) -> dict[str, Any]:
         """
         执行 Memory 语义召回。
 
@@ -81,13 +81,23 @@ def build_memory_retrieve_node(
                 Graph 节点之间传递的数据字典。
 
         返回值：
-            dict[str, str]：
+            dict[str, Any]：
                 返回需要合并进 state 的字段。
-                当前只返回 memory_context。
+                包含 memory_context 和 memory_recall_result。
         """
 
         node_name = "memory_retrieve_node"
         memory_context = "暂无用户记忆"
+        memory_recall_result: dict[str, Any] = {
+            "status": "empty",
+            "candidate_count": 0,
+            "threshold_passed_count": 0,
+            "selected_count": 0,
+            "semantic_threshold": 0.0,
+            "max_semantic_score": None,
+            "selected_memory_ids": [],
+            "reason": "未执行记忆召回。",
+        }
 
         try:
             ctx = runtime_context_getter()
@@ -127,26 +137,71 @@ def build_memory_retrieve_node(
                 f"Memory Retrieve 输入: user_id={user_id}, question={question}"
             )
 
-            retrieved_memory = semantic_recall.retrieve(
-                user_id=user_id,
-                question=question,
-                limit=5
+            retrieve_with_details = getattr(
+                semantic_recall,
+                "retrieve_with_details",
+                None,
             )
+
+            if callable(retrieve_with_details):
+                retrieved_memory = retrieve_with_details(
+                    user_id=user_id,
+                    question=question,
+                    limit=5,
+                )
+            else:
+                retrieved_memory = semantic_recall.retrieve(
+                    user_id=user_id,
+                    question=question,
+                    limit=5,
+                )
 
             if inspect.isawaitable(
                 retrieved_memory
             ):
                 retrieved_memory = await retrieved_memory
 
-            memory_context = _format_memory_context(
-                retrieved_memory
-            )
+            if isinstance(retrieved_memory, dict) and (
+                "memory_context" in retrieved_memory
+            ):
+                memory_context = _format_memory_context(
+                    retrieved_memory.get("memory_context")
+                )
+                memory_recall_result = {
+                    key: value
+                    for key, value in retrieved_memory.items()
+                    if key != "memory_context"
+                }
+            else:
+                memory_context = _format_memory_context(
+                    retrieved_memory
+                )
+                has_memory = memory_context != "暂无用户记忆"
+                memory_recall_result.update(
+                    {
+                        "status": "applied" if has_memory else "empty",
+                        "selected_count": 1 if has_memory else 0,
+                        "reason": (
+                            "兼容旧版召回服务，已获取可用记忆文本。"
+                            if has_memory
+                            else "兼容旧版召回服务，未获取到可用记忆。"
+                        ),
+                    }
+                )
 
             logger.info(
-                f"Memory Retrieve 结果: memory_context={memory_context}"
+                "Memory Retrieve 结果: "
+                f"memory_context={memory_context}, "
+                f"memory_recall_result={memory_recall_result}"
             )
 
         except Exception as e:
+            memory_recall_result.update(
+                {
+                    "status": "failed",
+                    "reason": f"记忆召回异常，已降级为空记忆：{e}",
+                }
+            )
             logger.warning(
                 f"Memory 召回失败，已降级为空记忆: {e}"
             )
@@ -161,7 +216,8 @@ def build_memory_retrieve_node(
                 )
 
         return {
-            "memory_context": memory_context
+            "memory_context": memory_context,
+            "memory_recall_result": memory_recall_result,
         }
 
     return memory_retrieve_node

@@ -1,6 +1,11 @@
+import pytest
+
 from src.agents.dog_knowledge_agent import agent as dog_knowledge_agent_module
 from src.agents.dog_knowledge_agent.agent import (
     build_dog_knowledge_agent,
+)
+from src.graph.nodes.generate_node import (
+    resolve_memory_text,
 )
 
 
@@ -45,7 +50,7 @@ class FakeMemoryProvider:
         FakeMemoryProvider 实例。
     """
 
-    pass
+    semantic_recall = object()
 
 
 class FakeRetrieverProvider:
@@ -313,9 +318,10 @@ def test_build_dog_knowledge_agent_should_register_layer_contract_nodes(
         2. retrieve -> query_layer_output -> evaluate
         3. evaluate 的 rerank 分支先进入 retrieval_layer_output
         4. retrieval_layer_output -> rerank
-        5. generate -> generation_layer_output
-        6. generation_layer_output -> fallback_layer_output
-        7. fallback_layer_output 后面的分层收敛链路：
+        5. rerank -> memory_retrieve -> generate
+        6. generate -> generation_layer_output
+        7. generation_layer_output -> fallback_layer_output
+        8. fallback_layer_output 后面的分层收敛链路：
            legacy_state_to_layer_outputs
            aggregate_layer_outputs
            finalize_answer
@@ -352,6 +358,7 @@ def test_build_dog_knowledge_agent_should_register_layer_contract_nodes(
     assert graph.compile_called is True
     assert "query_layer_output" in graph.nodes
     assert "retrieval_layer_output" in graph.nodes
+    assert "memory_retrieve" in graph.nodes
     assert "generation_layer_output" in graph.nodes
     assert "fallback_layer_output" in graph.nodes
     assert "legacy_state_to_layer_outputs" in graph.nodes
@@ -372,11 +379,25 @@ def test_build_dog_knowledge_agent_should_register_layer_contract_nodes(
     assert evaluate_edges[0]["path_map"]["rerank"] == "retrieval_layer_output"
     assert evaluate_edges[0]["path_map"]["retry"] == "retry"
     assert evaluate_edges[0]["path_map"]["ask_user"] == "ask_user"
-    assert evaluate_edges[0]["path_map"]["generate"] == "generate"
+    assert evaluate_edges[0]["path_map"]["generate"] == "memory_retrieve"
     assert {
         "start": "retrieval_layer_output",
         "end": "rerank",
     } in graph.edges
+    assert {
+        "start": "rerank",
+        "end": "memory_retrieve",
+    } in graph.edges
+    assert {
+        "start": "memory_retrieve",
+        "end": "generate",
+    } in graph.edges
+    ask_user_edges = [
+        item
+        for item in graph.conditional_edges
+        if item["source"] == "ask_user"
+    ]
+    assert ask_user_edges[0]["path_map"]["generate"] == "memory_retrieve"
     assert {
         "start": "generate",
         "end": "generation_layer_output",
@@ -397,3 +418,30 @@ def test_build_dog_knowledge_agent_should_register_layer_contract_nodes(
         "start": "aggregate_layer_outputs",
         "end": "finalize_answer",
     } in graph.edges
+
+
+@pytest.mark.asyncio
+async def test_resolve_memory_text_should_prefer_state_memory_context() -> None:
+    """
+    测试答案生成前优先复用 state 中的记忆上下文。
+
+    功能：
+        当 memory_retrieve 节点已经写入 memory_context 时，
+        resolve_memory_text 直接返回该内容，不再通过 MemoryProvider
+        发起第二次记忆召回。
+
+    参数：
+        无。
+
+    返回值：
+        None。
+    """
+
+    result = await resolve_memory_text(
+        user_id="user_001",
+        question="金毛的性格怎么样？",
+        memory_provider=object(),
+        memory_context="用户喜欢金毛寻回犬。",
+    )
+
+    assert result == "用户喜欢金毛寻回犬。"

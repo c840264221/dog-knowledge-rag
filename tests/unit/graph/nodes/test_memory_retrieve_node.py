@@ -336,6 +336,51 @@ class FakeAsyncSemanticRecall:
         return self.result
 
 
+class FakeStructuredSemanticRecall:
+    """
+    测试用结构化 Semantic Recall（语义召回）假对象。
+
+    功能：
+        模拟新版 retrieve_with_details 接口，返回记忆文本和可观测数据。
+
+    参数：
+        无。
+
+    返回值：
+        FakeStructuredSemanticRecall：测试用结构化召回服务。
+    """
+
+    def retrieve_with_details(
+            self,
+            user_id,
+            question,
+            limit,
+    ):
+        """
+        返回测试用记忆召回详情。
+
+        参数：
+            user_id：当前用户 ID。
+            question：当前用户问题。
+            limit：最大召回数量。
+
+        返回值：
+            dict：包含记忆文本和诊断字段的普通字典。
+        """
+
+        return {
+            "status": "applied",
+            "memory_context": "用户喜欢金毛。",
+            "candidate_count": 4,
+            "threshold_passed_count": 2,
+            "selected_count": 1,
+            "semantic_threshold": 0.45,
+            "max_semantic_score": 0.82,
+            "selected_memory_ids": [12],
+            "reason": "存在可用记忆。",
+        }
+
+
 def build_test_node(
     recall_result=None,
     recall_error=None,
@@ -525,9 +570,8 @@ async def test_memory_retrieve_node_should_retrieve_memory_with_user_id():
         state,
     )
 
-    assert result == {
-        "memory_context": "用户喜欢边牧"
-    }
+    assert result["memory_context"] == "用户喜欢边牧"
+    assert result["memory_recall_result"]["status"] == "applied"
 
     assert fake_semantic_recall.calls == [
         {
@@ -580,9 +624,7 @@ async def test_memory_retrieve_node_should_use_session_id_when_user_id_missing()
         state,
     )
 
-    assert result == {
-        "memory_context": "用户喜欢金毛"
-    }
+    assert result["memory_context"] == "用户喜欢金毛"
 
     assert fake_semantic_recall.calls[0]["user_id"] == "session_001"
 
@@ -679,9 +721,8 @@ async def test_memory_retrieve_node_should_return_default_when_recall_none():
         }
     )
 
-    assert result == {
-        "memory_context": "暂无用户记忆"
-    }
+    assert result["memory_context"] == "暂无用户记忆"
+    assert result["memory_recall_result"]["status"] == "empty"
 
 
 @pytest.mark.asyncio
@@ -715,9 +756,7 @@ async def test_memory_retrieve_node_should_convert_non_string_recall_result():
         }
     )
 
-    assert result == {
-        "memory_context": "['用户喜欢边牧', '用户不喜欢哈士奇']"
-    }
+    assert result["memory_context"] == "['用户喜欢边牧', '用户不喜欢哈士奇']"
 
 
 @pytest.mark.asyncio
@@ -752,9 +791,7 @@ async def test_memory_retrieve_node_should_support_async_retrieve():
         }
     )
 
-    assert result == {
-        "memory_context": "异步召回结果"
-    }
+    assert result["memory_context"] == "异步召回结果"
 
     assert fake_semantic_recall.calls == [
         {
@@ -795,9 +832,8 @@ async def test_memory_retrieve_node_should_fallback_when_recall_failed():
         }
     )
 
-    assert result == {
-        "memory_context": "暂无用户记忆"
-    }
+    assert result["memory_context"] == "暂无用户记忆"
+    assert result["memory_recall_result"]["status"] == "failed"
 
     assert len(
         fake_semantic_recall.calls
@@ -837,9 +873,7 @@ async def test_memory_retrieve_node_should_not_break_when_checkpoint_failed():
         }
     )
 
-    assert result == {
-        "memory_context": "用户喜欢边牧"
-    }
+    assert result["memory_context"] == "用户喜欢边牧"
 
     assert fake_checkpoint_manager.save_count == 1
 
@@ -873,9 +907,7 @@ async def test_memory_retrieve_node_should_work_without_checkpoint_manager():
         }
     )
 
-    assert result == {
-        "memory_context": "没有 checkpoint 也能召回"
-    }
+    assert result["memory_context"] == "没有 checkpoint 也能召回"
 
     assert fake_checkpoint_manager is None
 
@@ -909,10 +941,53 @@ async def test_memory_retrieve_node_should_work_without_runtime_context():
         }
     )
 
-    assert result == {
-        "memory_context": "没有 runtime context 也能召回"
-    }
+    assert result["memory_context"] == "没有 runtime context 也能召回"
 
     assert fake_ctx.state_scope.current_node is None
     assert fake_ctx.timeline_scope.events == []
     assert fake_checkpoint_manager.save_count == 1
+
+
+@pytest.mark.asyncio
+async def test_memory_retrieve_node_should_write_structured_recall_result():
+    """
+    测试新版结构化记忆召回结果写入 state update。
+
+    功能：
+        验证节点会把 memory_context 与 memory_recall_result 分开，
+        并保留候选数量、语义门槛、最高分数和记忆 ID。
+
+    参数：
+        无。
+
+    返回值：
+        None。
+    """
+
+    (
+        node,
+        _fake_ctx,
+        _fake_semantic_recall,
+        _fake_checkpoint_manager,
+    ) = build_test_node(
+        semantic_recall=FakeStructuredSemanticRecall(),
+    )
+
+    result = await node(
+        {
+            "user_id": "user_001",
+            "question": "我喜欢什么狗？",
+        }
+    )
+
+    assert result["memory_context"] == "用户喜欢金毛。"
+    assert result["memory_recall_result"] == {
+        "status": "applied",
+        "candidate_count": 4,
+        "threshold_passed_count": 2,
+        "selected_count": 1,
+        "semantic_threshold": 0.45,
+        "max_semantic_score": 0.82,
+        "selected_memory_ids": [12],
+        "reason": "存在可用记忆。",
+    }
