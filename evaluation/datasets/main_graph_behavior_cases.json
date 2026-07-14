@@ -1,0 +1,183 @@
+[
+    {
+        "case_id": "main_graph_dog_knowledge_001",
+        "category": "main_graph_behavior",
+        "question": "金毛寻回犬的寿命一般是多少？",
+        "input_state": {
+            "user_id": "evaluation_user",
+            "intent": "dog_info",
+            "evaluation_parser_filters": {
+                "dog_name": {
+                    "$eq": "Golden Retriever"
+                }
+            },
+            "evaluation_rag_context": {
+                "question": "金毛寻回犬的寿命一般是多少？",
+                "context_text": "Golden Retriever（金毛寻回犬）的平均寿命通常约为 10 到 12 年。健康体重、均衡饮食、合理运动和定期兽医检查有助于维持长期健康。这是犬种寿命基本资料，用于回答金毛寻回犬寿命相关问题。",
+                "chunks": [
+                    {
+                        "chunk": {
+                            "chunk_id": "main-graph-golden-lifespan-001",
+                            "doc_id": "golden-retriever",
+                            "content": "Golden Retriever 的 lifespan 通常为 10 到 12 年。健康管理会影响个体寿命。",
+                            "chunk_index": 0,
+                            "source": "evaluation/golden_retriever.md",
+                            "title": "Golden Retriever",
+                            "metadata": {
+                                "dog_name": "Golden Retriever",
+                                "field": "lifespan"
+                            }
+                        },
+                        "retrieval_score": 0.1,
+                        "final_score": 0.95,
+                        "reason": "主图评估中的高相关寿命证据。"
+                    }
+                ],
+                "source_count": 1,
+                "status": "success"
+            },
+            "evaluation_dog_answer": "金毛寻回犬（Golden Retriever）的寿命通常约为 10 到 12 年。"
+        },
+        "expected": {
+            "route": "dog_knowledge_agent",
+            "query_type": "dog_knowledge",
+            "final_answer_contains": "10 到 12 年",
+            "memory_extract_call_count": 1,
+            "dog_parser_call_count": 1,
+            "dog_retriever_call_count": 1,
+            "dog_reranker_call_count": 1,
+            "dog_answer_call_count": 1,
+            "tool_parser_call_count": 0,
+            "tool_executor_call_count": 0,
+            "required_state_fields": [
+                "route_decision",
+                "dog_knowledge_answer",
+                "dog_knowledge_answer_public",
+                "dog_knowledge_pipeline_result",
+                "final_answer"
+            ]
+        },
+        "tags": ["main_graph", "dog_knowledge_agent", "rag"]
+    },
+    {
+        "case_id": "main_graph_general_qa_001",
+        "category": "main_graph_behavior",
+        "question": "法国的首都是什么？",
+        "input_state": {
+            "user_id": "evaluation_user",
+            "evaluation_general_answer": "法国的首都是巴黎。"
+        },
+        "expected": {
+            "route": "general_agent",
+            "query_type": "general_chat",
+            "final_answer_contains": "巴黎",
+            "memory_extract_call_count": 1,
+            "general_supervisor_call_count": 2,
+            "general_answer_call_count": 1,
+            "dog_retriever_call_count": 0,
+            "tool_parser_call_count": 0,
+            "tool_executor_call_count": 0,
+            "required_state_fields": [
+                "route_decision",
+                "next_agent",
+                "answer"
+            ]
+        },
+        "tags": ["main_graph", "general_agent"]
+    },
+    {
+        "case_id": "main_graph_date_tool_completed_001",
+        "category": "main_graph_behavior",
+        "question": "今天几号？",
+        "input_state": {
+            "user_id": "evaluation_user",
+            "evaluation_tool_parser_result": {
+                "need_tool": true,
+                "tool_calls": [
+                    {
+                        "name": "date",
+                        "args": {}
+                    }
+                ]
+            },
+            "evaluation_tool_answer": "今天是 2026-07-08。"
+        },
+        "expected": {
+            "route": "tool_agent",
+            "query_type": "tool_request",
+            "tool_response_status": "completed",
+            "final_answer_contains": "2026-07-08",
+            "memory_extract_call_count": 1,
+            "dog_retriever_call_count": 0,
+            "tool_parser_call_count": 1,
+            "tool_executor_call_count": 1,
+            "tool_answer_call_count": 1,
+            "required_state_fields": [
+                "route_decision",
+                "tool_agent_response",
+                "tool_results",
+                "final_answer"
+            ]
+        },
+        "tags": ["main_graph", "tool_agent", "date"]
+    },
+    {
+        "case_id": "main_graph_weather_pending_confirmation_001",
+        "category": "main_graph_behavior",
+        "question": "今天成都天气怎么样？",
+        "input_state": {
+            "user_id": "evaluation_user",
+            "evaluation_tool_parser_result": {
+                "need_tool": true,
+                "tool_calls": [
+                    {
+                        "name": "weather",
+                        "args": {
+                            "city": "成都"
+                        }
+                    }
+                ]
+            }
+        },
+        "expected": {
+            "route": "tool_agent",
+            "query_type": "tool_request",
+            "tool_response_status": "pending_confirmation",
+            "memory_extract_call_count": 1,
+            "dog_retriever_call_count": 0,
+            "tool_parser_call_count": 1,
+            "tool_executor_call_count": 0,
+            "required_state_fields": [
+                "route_decision",
+                "tool_agent_response",
+                "tool_agent_permission",
+                "tool_confirmation_prompt"
+            ]
+        },
+        "tags": ["main_graph", "tool_agent", "permission"]
+    },
+    {
+        "case_id": "main_graph_finish_001",
+        "category": "main_graph_behavior",
+        "question": "先这样吧。",
+        "input_state": {
+            "user_id": "evaluation_user"
+        },
+        "expected": {
+            "route": "FINISH",
+            "query_type": "finish",
+            "final_answer_empty": true,
+            "memory_extract_call_count": 1,
+            "general_answer_call_count": 0,
+            "dog_retriever_call_count": 0,
+            "tool_parser_call_count": 0,
+            "tool_executor_call_count": 0,
+            "required_state_fields": [
+                "route_decision",
+                "next_agent",
+                "memory_extract_result"
+            ]
+        },
+        "tags": ["main_graph", "finish"]
+    }
+]

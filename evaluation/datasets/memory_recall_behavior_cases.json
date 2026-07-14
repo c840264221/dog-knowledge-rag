@@ -1,0 +1,166 @@
+[
+    {
+        "case_id": "memory_recall_related_applied_001",
+        "category": "memory_recall_behavior",
+        "question": "我最喜欢的狗是什么？",
+        "input_state": {
+            "user_id": "user_a",
+            "evaluation_semantic_threshold": 0.45,
+            "evaluation_memories": [
+                {
+                    "id": 1,
+                    "user_id": "user_a",
+                    "memory_type": "favorite_dog",
+                    "content": "用户喜欢金毛寻回犬",
+                    "confidence": 0.95,
+                    "strength": 1.0,
+                    "importance": 0.9,
+                    "source": "conversation",
+                    "status": "active",
+                    "distance": 0.1
+                }
+            ]
+        },
+        "expected": {
+            "recall_status": "applied",
+            "memory_context_contains": "金毛寻回犬",
+            "candidate_count": 1,
+            "threshold_passed_count": 1,
+            "selected_count": 1,
+            "selected_memory_ids": [1],
+            "minimum_max_semantic_score": 0.9,
+            "vector_call_count": 1,
+            "store_call_count": 1,
+            "requested_user_id": "user_a",
+            "requested_status": "active"
+        },
+        "tags": ["memory", "related", "applied"]
+    },
+    {
+        "case_id": "memory_recall_unrelated_filtered_001",
+        "category": "memory_recall_behavior",
+        "question": "今天成都的天气怎么样？",
+        "input_state": {
+            "user_id": "user_a",
+            "evaluation_semantic_threshold": 0.45,
+            "evaluation_memories": [
+                {
+                    "id": 1,
+                    "user_id": "user_a",
+                    "memory_type": "favorite_dog",
+                    "content": "用户喜欢金毛寻回犬",
+                    "confidence": 0.95,
+                    "strength": 1.0,
+                    "importance": 0.9,
+                    "source": "conversation",
+                    "status": "active",
+                    "distance": 2.0
+                }
+            ]
+        },
+        "expected": {
+            "recall_status": "empty",
+            "memory_context_not_contains": "金毛寻回犬",
+            "candidate_count": 1,
+            "threshold_passed_count": 0,
+            "selected_count": 0,
+            "selected_memory_ids": [],
+            "vector_call_count": 1,
+            "store_call_count": 0,
+            "requested_user_id": "user_a",
+            "requested_status": "active"
+        },
+        "tags": ["memory", "unrelated", "semantic_threshold"]
+    },
+    {
+        "case_id": "memory_recall_inactive_filtered_001",
+        "category": "memory_recall_behavior",
+        "question": "我最喜欢的狗是什么？",
+        "input_state": {
+            "user_id": "user_a",
+            "evaluation_memories": [
+                {
+                    "id": 2,
+                    "user_id": "user_a",
+                    "memory_type": "favorite_dog",
+                    "content": "用户喜欢边境牧羊犬",
+                    "confidence": 0.9,
+                    "strength": 1.0,
+                    "importance": 0.8,
+                    "source": "conversation",
+                    "status": "inactive",
+                    "distance": 0.05
+                }
+            ]
+        },
+        "expected": {
+            "recall_status": "empty",
+            "memory_context_not_contains": "边境牧羊犬",
+            "candidate_count": 0,
+            "threshold_passed_count": 0,
+            "selected_count": 0,
+            "selected_memory_ids": [],
+            "vector_call_count": 1,
+            "store_call_count": 0,
+            "requested_user_id": "user_a",
+            "requested_status": "active"
+        },
+        "tags": ["memory", "inactive", "status_filter"]
+    },
+    {
+        "case_id": "memory_recall_user_isolation_001",
+        "category": "memory_recall_behavior",
+        "question": "我喜欢什么狗？",
+        "input_state": {
+            "user_id": "user_a",
+            "evaluation_memories": [
+                {
+                    "id": 3,
+                    "user_id": "user_b",
+                    "memory_type": "favorite_dog",
+                    "content": "用户喜欢拉布拉多寻回犬",
+                    "confidence": 0.9,
+                    "strength": 1.0,
+                    "importance": 0.8,
+                    "source": "conversation",
+                    "status": "active",
+                    "distance": 0.05
+                }
+            ]
+        },
+        "expected": {
+            "recall_status": "empty",
+            "memory_context_not_contains": "拉布拉多寻回犬",
+            "candidate_count": 0,
+            "selected_count": 0,
+            "selected_memory_ids": [],
+            "vector_call_count": 1,
+            "store_call_count": 0,
+            "requested_user_id": "user_a",
+            "requested_status": "active"
+        },
+        "tags": ["memory", "user_isolation"]
+    },
+    {
+        "case_id": "memory_recall_failure_degraded_001",
+        "category": "memory_recall_behavior",
+        "question": "我喜欢什么狗？",
+        "input_state": {
+            "user_id": "user_a",
+            "evaluation_vector_error": true,
+            "evaluation_memories": []
+        },
+        "expected": {
+            "recall_status": "failed",
+            "memory_context_not_contains": "用户喜欢的狗狗",
+            "candidate_count": 0,
+            "selected_count": 0,
+            "selected_memory_ids": [],
+            "vector_call_count": 1,
+            "store_call_count": 0,
+            "requested_user_id": "user_a",
+            "requested_status": "active"
+        },
+        "tags": ["memory", "failure", "degradation"]
+    }
+]

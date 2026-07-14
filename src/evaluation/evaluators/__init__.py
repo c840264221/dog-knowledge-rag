@@ -9,9 +9,17 @@ from src.evaluation.evaluators.tool_agent_behavior_evaluator import (
 from src.evaluation.evaluators.dog_knowledge_behavior_evaluator import (
     DogKnowledgeBehaviorEvaluator,
 )
+from src.evaluation.evaluators.memory_recall_behavior_evaluator import (
+    MemoryRecallBehaviorEvaluator,
+)
+from src.evaluation.evaluators.main_graph_behavior_evaluator import (
+    MainGraphBehaviorEvaluator,
+)
 
 __all__ = [
     "DogKnowledgeBehaviorEvaluator",
+    "MainGraphBehaviorEvaluator",
+    "MemoryRecallBehaviorEvaluator",
     "RootRouteEvaluator",
     "ToolAgentBehaviorEvaluator",
 ]
