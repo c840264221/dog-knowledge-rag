@@ -610,7 +610,9 @@ def build_permission_decision(
     构建工具权限决定。
 
     功能：
-        根据 tool_confirmed、tool_calls 和 tool_results 推断权限状态。
+        优先读取新版 tool_agent_permission 标准权限字段；
+        当该字段不存在或不符合契约时，再根据旧版 tool_confirmed、
+        tool_calls 和 tool_results 字段推断权限状态。
 
     参数：
         state:
@@ -626,6 +628,23 @@ def build_permission_decision(
         ToolAgentPermissionDecision:
             工具权限决定对象。
     """
+
+    # 新版 ToolAgent 节点已经产出标准权限决定时，优先保留该契约，
+    # 避免后续响应适配器再根据旧字段错误反推权限状态。
+    raw_permission = state.get(
+        "tool_agent_permission"
+    )
+    if isinstance(
+        raw_permission,
+        Mapping,
+    ):
+        try:
+            return ToolAgentPermissionDecision.model_validate(
+                dict(raw_permission)
+            )
+        except ValidationError:
+            # 兼容旧 checkpoint：旧数据不符合新版契约时继续使用历史字段推断。
+            pass
 
     raw_confirmed = state.get(
         "tool_confirmed",

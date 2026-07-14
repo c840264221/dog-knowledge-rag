@@ -1,0 +1,113 @@
+[
+    {
+        "case_id": "root_route_dog_recommendation_001",
+        "category": "root_route",
+        "question": "新手适合养什么狗？",
+        "expected": {
+            "route": "dog_knowledge_agent",
+            "query_type": "dog_recommendation",
+            "requires_rag": true,
+            "requires_tool": false,
+            "requires_memory": true,
+            "min_confidence": 0.8
+        },
+        "tags": ["root_agent", "dog_knowledge", "recommendation"]
+    },
+    {
+        "case_id": "root_route_dog_knowledge_001",
+        "category": "root_route",
+        "question": "金毛的寿命一般是多少？",
+        "expected": {
+            "route": "dog_knowledge_agent",
+            "query_type": "dog_knowledge",
+            "requires_rag": true,
+            "requires_tool": false,
+            "requires_memory": true,
+            "min_confidence": 0.8
+        },
+        "tags": ["root_agent", "dog_knowledge", "exact_lookup"]
+    },
+    {
+        "case_id": "root_route_weather_tool_001",
+        "category": "root_route",
+        "question": "今天成都天气怎么样？",
+        "expected": {
+            "route": "tool_agent",
+            "query_type": "tool_request",
+            "requires_rag": false,
+            "requires_tool": true,
+            "requires_memory": true,
+            "min_confidence": 0.8
+        },
+        "tags": ["root_agent", "tool_agent", "weather"]
+    },
+    {
+        "case_id": "root_route_date_tool_001",
+        "category": "root_route",
+        "question": "今天几号？",
+        "expected": {
+            "route": "tool_agent",
+            "query_type": "tool_request",
+            "requires_rag": false,
+            "requires_tool": true,
+            "requires_memory": true,
+            "min_confidence": 0.8
+        },
+        "tags": ["root_agent", "tool_agent", "date"]
+    },
+    {
+        "case_id": "root_route_general_chat_001",
+        "category": "root_route",
+        "question": "请介绍一下什么是人工智能。",
+        "expected": {
+            "route": "general_agent",
+            "query_type": "general_chat",
+            "requires_rag": false,
+            "requires_tool": false,
+            "requires_memory": true,
+            "min_confidence": 0.6
+        },
+        "tags": ["root_agent", "general_agent", "fallback"]
+    },
+    {
+        "case_id": "root_route_finish_001",
+        "category": "root_route",
+        "question": "不用了，先这样吧。",
+        "expected": {
+            "route": "FINISH",
+            "query_type": "finish",
+            "requires_rag": false,
+            "requires_tool": false,
+            "requires_memory": false,
+            "min_confidence": 0.9
+        },
+        "tags": ["root_agent", "finish"]
+    },
+    {
+        "case_id": "root_route_tool_clarification_resume_001",
+        "category": "root_route",
+        "question": "memory",
+        "expected": {
+            "route": "tool_agent",
+            "query_type": "tool_request",
+            "requires_rag": false,
+            "requires_tool": true,
+            "requires_memory": false,
+            "min_confidence": 1.0
+        },
+        "input_state": {
+            "tool_agent_clarification_request": {
+                "missing_fields": ["database_name"],
+                "options": {
+                    "database_name": ["memory", "rag"]
+                },
+                "question": "请选择数据库名称。"
+            },
+            "tool_agent_pending_tool_call": {
+                "name": "sqlite_list_tables",
+                "args": {}
+            }
+        },
+        "tags": ["root_agent", "tool_agent", "clarification_resume"]
+    }
+]

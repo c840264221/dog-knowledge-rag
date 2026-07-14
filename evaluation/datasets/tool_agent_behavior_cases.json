@@ -1,0 +1,202 @@
+[
+    {
+        "case_id": "tool_behavior_no_tool_001",
+        "category": "tool_behavior",
+        "question": "你好，很高兴认识你。",
+        "input_state": {
+            "evaluation_parser_result": {
+                "need_tool": false,
+                "tool_calls": []
+            }
+        },
+        "expected": {
+            "response_status": "no_tool",
+            "confirmation_required": false,
+            "clarification_required": false,
+            "executed_tool_names": [],
+            "tool_result_count": 0,
+            "parser_call_count": 1,
+            "executor_call_count": 0
+        },
+        "tags": ["tool_agent", "no_tool"]
+    },
+    {
+        "case_id": "tool_behavior_date_completed_001",
+        "category": "tool_behavior",
+        "question": "今天几号？",
+        "input_state": {
+            "evaluation_parser_result": {
+                "need_tool": true,
+                "tool_calls": [
+                    {
+                        "name": "date",
+                        "args": {}
+                    }
+                ]
+            }
+        },
+        "expected": {
+            "response_status": "completed",
+            "permission_status": "not_required",
+            "confirmation_required": false,
+            "clarification_required": false,
+            "validation_ok": true,
+            "executed_tool_names": ["date"],
+            "tool_result_count": 1,
+            "final_answer_contains": "2026-07-08",
+            "parser_call_count": 1,
+            "executor_call_count": 1
+        },
+        "tags": ["tool_agent", "date", "completed"]
+    },
+    {
+        "case_id": "tool_behavior_weather_pending_001",
+        "category": "tool_behavior",
+        "question": "今天成都天气怎么样？",
+        "input_state": {
+            "evaluation_parser_result": {
+                "need_tool": true,
+                "tool_calls": [
+                    {
+                        "name": "weather",
+                        "args": {
+                            "city": "成都"
+                        }
+                    }
+                ]
+            }
+        },
+        "expected": {
+            "response_status": "pending_confirmation",
+            "permission_status": "pending",
+            "confirmation_required": true,
+            "clarification_required": false,
+            "validation_ok": true,
+            "executed_tool_names": [],
+            "tool_result_count": 0,
+            "parser_call_count": 1,
+            "executor_call_count": 0
+        },
+        "tags": ["tool_agent", "weather", "pending_confirmation"]
+    },
+    {
+        "case_id": "tool_behavior_weather_confirmed_001",
+        "category": "tool_behavior",
+        "question": "今天成都天气怎么样？",
+        "input_state": {
+            "evaluation_parser_result": {
+                "need_tool": true,
+                "tool_calls": [
+                    {
+                        "name": "weather",
+                        "args": {
+                            "city": "成都"
+                        }
+                    }
+                ]
+            },
+            "evaluation_confirmation_response": "y"
+        },
+        "expected": {
+            "response_status": "completed",
+            "permission_status": "confirmed",
+            "confirmation_required": false,
+            "clarification_required": false,
+            "validation_ok": true,
+            "executed_tool_names": ["weather"],
+            "tool_result_count": 1,
+            "final_answer_contains": "成都",
+            "parser_call_count": 1,
+            "executor_call_count": 1
+        },
+        "tags": ["tool_agent", "weather", "confirmed"]
+    },
+    {
+        "case_id": "tool_behavior_weather_rejected_001",
+        "category": "tool_behavior",
+        "question": "今天成都天气怎么样？",
+        "input_state": {
+            "evaluation_parser_result": {
+                "need_tool": true,
+                "tool_calls": [
+                    {
+                        "name": "weather",
+                        "args": {
+                            "city": "成都"
+                        }
+                    }
+                ]
+            },
+            "evaluation_confirmation_response": "n"
+        },
+        "expected": {
+            "response_status": "cancelled",
+            "permission_status": "rejected",
+            "confirmation_required": false,
+            "clarification_required": false,
+            "executed_tool_names": [],
+            "tool_result_count": 1,
+            "final_answer_contains": "取消",
+            "parser_call_count": 1,
+            "executor_call_count": 0
+        },
+        "tags": ["tool_agent", "weather", "rejected"]
+    },
+    {
+        "case_id": "tool_behavior_missing_city_001",
+        "category": "tool_behavior",
+        "question": "帮我查一下天气。",
+        "input_state": {
+            "evaluation_parser_result": {
+                "need_tool": true,
+                "tool_calls": [
+                    {
+                        "name": "weather",
+                        "args": {}
+                    }
+                ]
+            }
+        },
+        "expected": {
+            "response_status": "awaiting_clarification",
+            "confirmation_required": false,
+            "clarification_required": true,
+            "validation_ok": false,
+            "missing_fields": ["city"],
+            "executed_tool_names": [],
+            "tool_result_count": 0,
+            "parser_call_count": 1,
+            "executor_call_count": 0
+        },
+        "tags": ["tool_agent", "weather", "clarification"]
+    },
+    {
+        "case_id": "tool_behavior_unknown_tool_001",
+        "category": "tool_behavior",
+        "question": "调用一个不存在的工具。",
+        "input_state": {
+            "evaluation_parser_result": {
+                "need_tool": true,
+                "tool_calls": [
+                    {
+                        "name": "unknown_tool",
+                        "args": {}
+                    }
+                ]
+            }
+        },
+        "expected": {
+            "response_status": "failed",
+            "confirmation_required": false,
+            "clarification_required": false,
+            "validation_ok": false,
+            "validation_error_codes": ["unknown_tool"],
+            "executed_tool_names": [],
+            "tool_result_count": 1,
+            "final_answer_contains": "工具调用失败",
+            "parser_call_count": 1,
+            "executor_call_count": 0
+        },
+        "tags": ["tool_agent", "validation", "unknown_tool"]
+    }
+]

@@ -143,6 +143,48 @@ def test_build_response_should_convert_tool_results_to_execution_records() -> No
     assert response.final_answer == "今天成都天气晴。"
 
 
+def test_build_response_should_preserve_explicit_permission_decision() -> None:
+    """
+    测试响应适配器保留显式权限决定。
+
+    功能：
+        当 ToolAgent 节点已经写入 tool_agent_permission 时，
+        响应适配器不应因为存在工具结果而把 not_required 改成 confirmed。
+
+    参数：
+        无。
+
+    返回值：
+        None。
+    """
+
+    response = build_tool_agent_response_from_state(
+        state={
+            "tool_agent_permission": {
+                "status": "not_required",
+                "call_ids": [
+                    "planned_1_date",
+                ],
+                "reason": "日期工具不需要用户确认。",
+            },
+            "tool_results": [
+                {
+                    "success": True,
+                    "tool_name": "date",
+                    "content": "2026-07-08",
+                }
+            ],
+            "final_answer": "今天的日期是 2026-07-08。",
+        },
+    )
+
+    assert response.status == "completed"
+    assert response.permission.status == "not_required"
+    assert response.permission.call_ids == [
+        "planned_1_date",
+    ]
+
+
 def test_build_response_should_mark_failed_when_tool_result_failed() -> None:
     """
     测试工具结果失败时返回 failed。

@@ -5,9 +5,15 @@ from src.evaluation.schemas import (
     AgentEvaluationResult,
     EvaluationCheckResult,
 )
+from src.evaluation.dataset_loader import (
+    AgentEvaluationDatasetLoader,
+    load_agent_evaluation_cases,
+)
 
 __all__ = [
+    "AgentEvaluationDatasetLoader",
     "AgentEvaluationCase",
     "AgentEvaluationResult",
     "EvaluationCheckResult",
+    "load_agent_evaluation_cases",
 ]

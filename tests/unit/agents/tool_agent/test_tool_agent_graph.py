@@ -605,6 +605,10 @@ async def test_tool_agent_graph_should_execute_date_when_confirmation_not_requir
     assert result["tool_results"][0]["success"] is True
     assert result["final_answer"] == "今天的日期是 2026-07-08。"
     assert result[TOOL_AGENT_RESPONSE_STATE_KEY]["status"] == "completed"
+    assert (
+        result[TOOL_AGENT_RESPONSE_STATE_KEY]["permission"]["status"]
+        == "not_required"
+    )
 
 
 @pytest.mark.asyncio
