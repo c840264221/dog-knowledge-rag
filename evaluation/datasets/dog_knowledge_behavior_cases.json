@@ -1,0 +1,184 @@
+[
+    {
+        "case_id": "dog_knowledge_exact_lifespan_001",
+        "category": "dog_knowledge_behavior",
+        "question": "金毛寻回犬的寿命一般是多少？",
+        "input_state": {
+            "intent": "dog_info",
+            "evaluation_parser_filters": {
+                "dog_name": {
+                    "$eq": "Golden Retriever"
+                }
+            },
+            "evaluation_rag_context": {
+                "question": "金毛寻回犬的寿命一般是多少？",
+                "context_text": "Golden Retriever（金毛寻回犬）的平均寿命通常约为 10 到 12 年。寿命会受到遗传、饮食、运动、体重管理和定期医疗检查等因素影响。保持健康体重、提供均衡饮食并定期进行兽医检查，有助于降低常见健康风险。这段资料来自犬种基本信息章节，用于回答金毛寻回犬寿命相关问题。",
+                "chunks": [
+                    {
+                        "chunk": {
+                            "chunk_id": "golden-retriever-lifespan-001",
+                            "doc_id": "golden-retriever",
+                            "content": "Golden Retriever 的 lifespan 通常为 10 到 12 年。健康体重、均衡饮食、合理运动和定期兽医检查可能帮助它保持更好的长期健康状态。",
+                            "chunk_index": 0,
+                            "source": "evaluation/golden_retriever.md",
+                            "title": "Golden Retriever",
+                            "metadata": {
+                                "dog_name": "Golden Retriever",
+                                "section": "Basic Information",
+                                "field": "lifespan"
+                            }
+                        },
+                        "retrieval_score": 0.1,
+                        "final_score": 0.9,
+                        "reason": "评估场景中的高相关寿命证据。"
+                    }
+                ],
+                "source_count": 1,
+                "status": "success"
+            },
+            "evaluation_llm_answer": "金毛寻回犬的寿命通常约为 10 到 12 年，良好的饮食、运动和定期体检有助于维持健康。"
+        },
+        "expected": {
+            "response_status": "success",
+            "query_type": "exact_lookup",
+            "is_fallback": false,
+            "final_answer_contains": "10 到 12 年",
+            "min_evidence_count": 1,
+            "required_layer_outputs": [
+                "query",
+                "retrieval",
+                "generation",
+                "pipeline",
+                "answer",
+                "public_answer"
+            ],
+            "parser_call_count": 1,
+            "retriever_call_count": 1,
+            "reranker_call_count": 1,
+            "llm_call_count": 1
+        },
+        "tags": ["dog_knowledge_agent", "exact_lookup", "lifespan"]
+    },
+    {
+        "case_id": "dog_knowledge_recommendation_beginner_001",
+        "category": "dog_knowledge_behavior",
+        "question": "新手适合养什么狗？",
+        "input_state": {
+            "intent": "recommend",
+            "evaluation_parser_filters": {
+                "good_for_beginner": {
+                    "$eq": true
+                }
+            },
+            "evaluation_rag_context": {
+                "question": "新手适合养什么狗？",
+                "context_text": "Golden Retriever（金毛寻回犬）和 Labrador Retriever（拉布拉多寻回犬）通常性格友好、愿意与人互动，而且训练配合度较高，可以作为新手家庭的候选犬种。选择前仍需结合居住空间、每日运动时间、掉毛接受程度和家庭成员情况。这些资料只用于形成候选推荐，实际饲养前还需要进一步了解个体差异。",
+                "chunks": [
+                    {
+                        "chunk": {
+                            "chunk_id": "golden-retriever-beginner-001",
+                            "doc_id": "golden-retriever",
+                            "content": "Golden Retriever 性格友好，训练配合度较高，适合作为有时间陪伴和运动的新手家庭候选犬种。",
+                            "chunk_index": 0,
+                            "source": "evaluation/golden_retriever.md",
+                            "title": "Golden Retriever",
+                            "metadata": {
+                                "dog_name": "Golden Retriever",
+                                "section": "Temperament",
+                                "good_for_beginner": true
+                            }
+                        },
+                        "retrieval_score": 0.1,
+                        "final_score": 0.92,
+                        "reason": "评估场景中的新手友好犬种证据。"
+                    },
+                    {
+                        "chunk": {
+                            "chunk_id": "labrador-retriever-beginner-001",
+                            "doc_id": "labrador-retriever",
+                            "content": "Labrador Retriever 通常亲人且可训练，适合能够提供稳定训练和日常运动的新手家庭。",
+                            "chunk_index": 0,
+                            "source": "evaluation/labrador_retriever.md",
+                            "title": "Labrador Retriever",
+                            "metadata": {
+                                "dog_name": "Labrador Retriever",
+                                "section": "Temperament",
+                                "good_for_beginner": true
+                            }
+                        },
+                        "retrieval_score": 0.12,
+                        "final_score": 0.9,
+                        "reason": "评估场景中的第二条新手友好犬种证据。"
+                    }
+                ],
+                "source_count": 2,
+                "status": "success"
+            },
+            "evaluation_llm_answer": "新手可以优先了解金毛寻回犬和拉布拉多寻回犬，但仍要结合运动时间、空间和掉毛接受程度进行选择。"
+        },
+        "expected": {
+            "response_status": "success",
+            "query_type": "recommendation",
+            "is_fallback": false,
+            "final_answer_contains": "金毛寻回犬",
+            "expected_breed_names": [
+                "Golden Retriever",
+                "Labrador Retriever"
+            ],
+            "min_evidence_count": 2,
+            "required_layer_outputs": [
+                "query",
+                "retrieval",
+                "generation",
+                "pipeline",
+                "answer",
+                "public_answer"
+            ],
+            "parser_call_count": 1,
+            "retriever_call_count": 1,
+            "reranker_call_count": 1,
+            "llm_call_count": 1
+        },
+        "tags": ["dog_knowledge_agent", "recommendation", "beginner"]
+    },
+    {
+        "case_id": "dog_knowledge_fallback_empty_retrieval_001",
+        "category": "dog_knowledge_behavior",
+        "question": "哪种狗最适合在火星长期生活？",
+        "input_state": {
+            "intent": "dog_info",
+            "retry_count": 2,
+            "evaluation_parser_filters": {},
+            "evaluation_rag_context": {
+                "question": "哪种狗最适合在火星长期生活？",
+                "context_text": "",
+                "chunks": [],
+                "source_count": 0,
+                "status": "empty"
+            },
+            "evaluation_llm_answer": "当前犬种知识库没有足够证据判断哪种狗适合在火星长期生活。"
+        },
+        "expected": {
+            "response_status": "fallback",
+            "query_type": "fallback",
+            "is_fallback": true,
+            "fallback_reason_contains": "empty",
+            "final_answer_contains": "没有足够证据",
+            "min_evidence_count": 0,
+            "required_layer_outputs": [
+                "query",
+                "retrieval",
+                "generation",
+                "fallback",
+                "pipeline",
+                "answer",
+                "public_answer"
+            ],
+            "parser_call_count": 1,
+            "retriever_call_count": 1,
+            "reranker_call_count": 0,
+            "llm_call_count": 1
+        },
+        "tags": ["dog_knowledge_agent", "fallback", "empty_retrieval"]
+    }
+]
