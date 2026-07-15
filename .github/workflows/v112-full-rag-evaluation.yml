@@ -1,0 +1,98 @@
+name: V1.12 Full RAG Evaluation
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 每周一香港时间 02:00 执行，cron 使用 UTC 时间。
+    - cron: "0 18 * * 0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: full-rag-evaluation-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  full-rag-evaluation:
+    name: Full RAG Evaluation Quality Gate
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    env:
+      PYTHONUTF8: "1"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      TOKENIZERS_PARALLELISM: "false"
+      EMBEDDING_PROVIDER: huggingface
+      EMBEDDING_MODEL_NAME: BAAI/bge-small-zh
+      EMBEDDING_DEVICE: cpu
+      EMBEDDING_MEMORY_PROVIDER: huggingface
+      EMBEDDING_MEMORY_MODEL_NAME: BAAI/bge-small-zh
+      EMBEDDING_MEMORY_DEVICE: cpu
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-ci.txt
+
+      - name: Cache embedding model
+        uses: actions/cache@v4
+        with:
+          path: models_cache
+          key: bge-small-zh-${{ runner.os }}-v1
+
+      - name: Display environment
+        shell: pwsh
+        run: |
+          python --version
+          python -m pip --version
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-ci.txt
+
+      - name: Verify RAG source documents
+        shell: pwsh
+        run: |
+          $documents = Get-ChildItem -Path data/dog_markdown -File -Recurse -Filter *.md
+          if ($documents.Count -eq 0) {
+            throw "No RAG source documents were found."
+          }
+          Write-Output "RAG source document count: $($documents.Count)"
+
+      - name: Rebuild Chroma index
+        shell: pwsh
+        run: |
+          python -m scripts.rag.rebuild_dog_rag_index `
+            --data-dir data/dog_markdown `
+            --vector-store-provider vectorstore `
+            --vector-store-attr db `
+            --batch-size 64 `
+            --overwrite-existing
+
+      - name: Run full RAG evaluation quality gate
+        shell: pwsh
+        run: |
+          python -m scripts.evaluation.evaluate_v112_all --profile full
+
+      - name: Upload full evaluation reports
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: v112-full-rag-evaluation-report-${{ github.run_number }}
+          path: |
+            evaluation/reports/v112_agent_evaluation_report.json
+            evaluation/reports/v112_agent_evaluation_report.md
+          if-no-files-found: warn
+          retention-days: 30
