@@ -67,6 +67,7 @@ class EvaluationCategoryRun:
 
     # EvaluationTarget里面包含category（类别）比如root_route（主图路由）、测试用例的路径在哪、执行器是哪个
     target: EvaluationTarget
+    # 当前类别产生的所有评估结果的列表
     results: list[AgentEvaluationResult] = field(default_factory=list)
     duration_ms: float = 0.0
     error_message: str | None = None
