@@ -460,61 +460,7 @@ def test_run_pipeline_should_call_index(
 
 
 @pytest.mark.asyncio
-async def test_maybe_await_should_support_normal_value():
-    """
-    测试 _maybe_await 是否支持普通值。
-
-    参数：
-        无。
-
-    返回值：
-        None：
-            pytest 根据 assert 判断测试是否通过。
-    """
-
-    result = await rebuild_script._maybe_await(
-        value="normal",
-    )
-
-    assert result == "normal"
-
-
-@pytest.mark.asyncio
-async def test_maybe_await_should_support_coroutine():
-    """
-    测试 _maybe_await 是否支持 coroutine。
-
-    参数：
-        无。
-
-    返回值：
-        None：
-            pytest 根据 assert 判断测试是否通过。
-    """
-
-    async def async_value():
-        """
-        构建测试 coroutine。
-
-        参数：
-            无。
-
-        返回值：
-            str：
-                测试字符串。
-        """
-
-        return "async-result"
-
-    result = await rebuild_script._maybe_await(
-        value=async_value(),
-    )
-
-    assert result == "async-result"
-
-
-@pytest.mark.asyncio
-async def test_run_rebuild_from_args_should_start_container_and_shutdown(
+async def test_run_rebuild_from_args_should_only_use_vector_store_dependency(
         monkeypatch,
         args,
         fake_container,
@@ -522,7 +468,11 @@ async def test_run_rebuild_from_args_should_start_container_and_shutdown(
         fake_vector_store,
 ):
     """
-    测试 run_rebuild_from_args 是否启动容器、执行 Pipeline、关闭容器。
+    测试 run_rebuild_from_args 只解析向量库依赖并执行 Pipeline。
+
+    功能：
+        验证窄职责索引脚本不会启动或关闭完整 RuntimeContainer，避免初始化
+        LLM、Memory 和 Tool 等与 RAG 入库无关的外部依赖。
 
     参数：
         monkeypatch:
@@ -603,8 +553,8 @@ async def test_run_rebuild_from_args_should_start_container_and_shutdown(
         runtime_container=fake_container,
     )
 
-    assert fake_container.started is True
-    assert fake_container.shutdown_called is True
+    assert fake_container.started is False
+    assert fake_container.shutdown_called is False
     assert fake_container.received_service_name == "vector_store_provider"
 
     assert captured_build_args[

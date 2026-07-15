@@ -6,17 +6,14 @@ Dog RAG Index Rebuild Script（狗狗 RAG 索引重建脚本）：
 
 当前脚本执行流程：
 
-1. 启动 RuntimeContainer（运行时容器）
-2. 从 Container 中获取 VectorStoreProvider（向量库 Provider）
-3. 从 VectorStoreProvider 中获取 Chroma vector store
-4. 创建 MarkdownDocumentLoader
-5. 创建 DogBreedMetadataExtractor
-6. 创建 MarkdownChunker
-7. 创建 RagChromaIndexer
-8. 创建 RagIndexPipeline
-9. 执行 pipeline.index_dir(...)
-10. 打印入库统计结果
-11. 关闭 RuntimeContainer
+1. 从 Container 中获取 VectorStoreProvider（向量库 Provider）
+2. 从 VectorStoreProvider 中惰性获取 Chroma vector store
+3. 创建 MarkdownDocumentLoader
+4. 创建 DogBreedMetadataExtractor
+5. 创建 MarkdownChunker
+6. 创建 RagChromaIndexer
+7. 创建 RagIndexPipeline
+8. 执行索引 Pipeline 并打印入库统计结果
 
 本脚本只负责 CLI 执行入口，不负责具体业务算法。
 """
@@ -25,7 +22,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import inspect
 import json
 from pathlib import Path
 from typing import Any
@@ -176,12 +172,15 @@ async def run_rebuild_from_args(
     根据命令行参数执行 RAG 索引重建。
 
     功能：
-        1. 启动 container
-        2. 获取 vector store
+        1. 从 container 获取 vector store provider
+        2. 惰性初始化当前入库所需的 vector store
         3. 构建 RAG Index Pipeline
         4. 执行目录入库
         5. 打印结果
-        6. 关闭 container
+
+        本脚本不会启动整个 RuntimeContainer。索引重建只依赖默认
+        Embedding 和 VectorStore；启动完整容器会额外初始化 LLM、Memory、
+        Tool 等无关服务，并引入不必要的密钥和外部服务依赖。
 
     参数：
         args: argparse.Namespace
@@ -208,41 +207,31 @@ async def run_rebuild_from_args(
             f"RAG 数据目录不存在：{data_dir}"
         )
 
-    await _maybe_await(
-        active_container.startup(),
+    vector_store_provider = active_container.get(
+        args.vector_store_provider,
     )
 
-    try:
-        vector_store_provider = active_container.get(
-            args.vector_store_provider,
-        )
+    vector_store = _get_vector_store_from_provider(
+        vector_store_provider=vector_store_provider,
+        vector_store_attr=args.vector_store_attr,
+    )
 
-        vector_store = _get_vector_store_from_provider(
-            vector_store_provider=vector_store_provider,
-            vector_store_attr=args.vector_store_attr,
-        )
+    pipeline = build_pipeline(
+        input_path=data_dir,
+        vector_store=vector_store,
+        batch_size=args.batch_size,
+        overwrite_existing=args.overwrite_existing,
+    )
 
-        pipeline = build_pipeline(
-            input_path=data_dir,
-            vector_store=vector_store,
-            batch_size=args.batch_size,
-            overwrite_existing=args.overwrite_existing,
-        )
+    result = run_pipeline(
+        pipeline=pipeline,
+    )
 
-        result = run_pipeline(
-            pipeline=pipeline,
-        )
+    print_result(
+        result=result,
+    )
 
-        print_result(
-            result=result,
-        )
-
-        return result
-
-    finally:
-        await _maybe_await(
-            active_container.shutdown(),
-        )
+    return result
 
 
 def build_pipeline(
@@ -366,39 +355,6 @@ def _get_vector_store_from_provider(
         vector_store_provider,
         vector_store_attr,
     )
-
-
-async def _maybe_await(
-        value: Any,
-) -> Any:
-    """
-    如果 value 是 awaitable，则 await 它。
-
-    功能：
-        兼容同步和异步生命周期方法。
-
-        例如：
-        1. container.startup() 返回 None
-        2. container.startup() 返回 coroutine
-
-        这两种情况都可以被安全处理。
-
-    参数：
-        value: Any
-            可能是普通值，也可能是 awaitable 对象。
-
-    返回值：
-        Any：
-            如果是 awaitable，返回 await 后的结果；
-            如果不是 awaitable，原样返回。
-    """
-
-    if inspect.isawaitable(
-            value,
-    ):
-        return await value
-
-    return value
 
 
 def print_result(
