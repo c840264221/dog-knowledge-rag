@@ -1,0 +1,1974 @@
+{
+  "Affenpinscher": [
+    "猴面梗",
+    "affenpinscher"
+  ],
+  "Afghan Hound": [
+    "阿富汗猎犬",
+    "afghan",
+    "afghan hound",
+    "hound",
+    "ah"
+  ],
+  "Airedale Terrier": [
+    "艾尔谷梗",
+    "airedale terrier",
+    "airedale",
+    "at",
+    "terrier"
+  ],
+  "Akita": [
+    "秋田犬",
+    "akita"
+  ],
+  "Alaskan Klee Kai": [
+    "阿拉斯加克利凯犬",
+    "alaskan",
+    "klee",
+    "akk",
+    "kai",
+    "alaskan klee kai"
+  ],
+  "Alaskan Malamute": [
+    "阿拉斯加雪橇犬",
+    "alaskan",
+    "am",
+    "malamute",
+    "alaskan malamute"
+  ],
+  "American Bulldog": [
+    "美国斗牛犬",
+    "ab",
+    "american",
+    "bulldog",
+    "american bulldog"
+  ],
+  "American English Coonhound": [
+    "美国英国浣熊猎犬",
+    "american",
+    "american english coonhound",
+    "english",
+    "aec",
+    "coonhound"
+  ],
+  "American Eskimo Dog": [
+    "美国爱斯基摩犬",
+    "american eskimo",
+    "american",
+    "eskimo",
+    "aed",
+    "american eskimo dog"
+  ],
+  "American Foxhound": [
+    "美国猎狐犬",
+    "foxhound",
+    "american foxhound",
+    "american",
+    "af"
+  ],
+  "American Hairless Terrier": [
+    "美国无毛梗",
+    "hairless",
+    "american",
+    "american hairless terrier",
+    "aht",
+    "terrier",
+    "american hairless"
+  ],
+  "American Leopard Hound": [
+    "美国豹犬",
+    "american",
+    "alh",
+    "american leopard",
+    "american leopard hound",
+    "hound",
+    "leopard"
+  ],
+  "American Staffordshire Terrier": [
+    "美国斯塔福郡梗",
+    "american",
+    "american staffordshire terrier",
+    "ast",
+    "terrier",
+    "staffordshire",
+    "american staffordshire"
+  ],
+  "American Water Spaniel": [
+    "美国水猎犬",
+    "water",
+    "spaniel",
+    "american",
+    "american water",
+    "american water spaniel",
+    "aws"
+  ],
+  "Anatolian Shepherd Dog": [
+    "安纳托利亚牧羊犬",
+    "anatolian shepherd dog",
+    "anatolian",
+    "asd",
+    "anatolian shepherd",
+    "shepherd"
+  ],
+  "Appenzeller Sennenhund": [
+    "阿彭策尔山犬",
+    "appenzeller",
+    "as",
+    "sennenhund",
+    "appenzeller sennenhund"
+  ],
+  "Australian Cattle Dog": [
+    "澳大利亚牧牛犬",
+    "australian",
+    "acd",
+    "australian cattle dog",
+    "australian cattle",
+    "cattle"
+  ],
+  "Australian Kelpie": [
+    "澳洲凯尔皮犬",
+    "ak",
+    "australian",
+    "australian kelpie",
+    "kelpie"
+  ],
+  "Australian Shepherd": [
+    "澳大利亚牧羊犬",
+    "shepherd",
+    "australian",
+    "australian shepherd",
+    "as"
+  ],
+  "Australian Stumpy Tail Cattle Dog": [
+    "澳洲短尾牧牛犬",
+    "australian",
+    "astcd",
+    "tail",
+    "australian stumpy tail cattle dog",
+    "australian stumpy tail cattle",
+    "stumpy",
+    "cattle"
+  ],
+  "Australian Terrier": [
+    "澳大利亚梗",
+    "australian",
+    "australian terrier",
+    "at",
+    "terrier"
+  ],
+  "Azawakh": [
+    "阿扎瓦克犬",
+    "azawakh"
+  ],
+  "Barbado da Terceira": [
+    "特塞拉牧羊犬",
+    "terceira",
+    "barbado",
+    "bdt",
+    "barbado da terceira",
+    "da"
+  ],
+  "Barbet": [
+    "巴贝犬",
+    "barbet"
+  ],
+  "Basenji": [
+    "巴仙吉犬",
+    "basenji"
+  ],
+  "Basset Fauve de Bretagne": [
+    "布列塔尼短腿猎犬",
+    "bretagne",
+    "fauve",
+    "basset fauve de bretagne",
+    "basset",
+    "de",
+    "bfdb"
+  ],
+  "Basset Hound": [
+    "巴吉度猎犬",
+    "basset hound",
+    "basset",
+    "bh",
+    "hound"
+  ],
+  "Bavarian Mountain Scent Hound": [
+    "巴伐利亚山地猎犬",
+    "bavarian mountain scent",
+    "bmsh",
+    "scent",
+    "bavarian",
+    "bavarian mountain scent hound",
+    "hound",
+    "mountain"
+  ],
+  "Beagle": [
+    "比格犬",
+    "beagle"
+  ],
+  "Bearded Collie": [
+    "长须牧羊犬",
+    "bearded collie",
+    "bearded",
+    "collie",
+    "bc"
+  ],
+  "Beauceron": [
+    "波瑟隆牧羊犬",
+    "beauceron"
+  ],
+  "Bedlington Terrier": [
+    "贝德灵顿梗",
+    "terrier",
+    "bedlington",
+    "bedlington terrier",
+    "bt"
+  ],
+  "Belgian Laekenois": [
+    "比利时拉肯诺犬",
+    "belgian laekenois",
+    "bl",
+    "belgian",
+    "laekenois"
+  ],
+  "Belgian Malinois": [
+    "马里努阿犬",
+    "比利时马里努阿犬",
+    "malinois",
+    "belgian malinois",
+    "bm",
+    "belgian"
+  ],
+  "Belgian Sheepdog": [
+    "比利时牧羊犬",
+    "sheepdog",
+    "belgian",
+    "belgian sheepdog",
+    "bs"
+  ],
+  "Belgian Tervuren": [
+    "特伏丹犬",
+    "belgian tervuren",
+    "belgian",
+    "bt",
+    "tervuren"
+  ],
+  "Bergamasco Sheepdog": [
+    "贝加马斯卡牧羊犬",
+    "bergamasco sheepdog",
+    "sheepdog",
+    "bs",
+    "bergamasco"
+  ],
+  "Berger Picard": [
+    "皮卡第牧羊犬",
+    "bp",
+    "berger",
+    "berger picard",
+    "picard"
+  ],
+  "Bernese Mountain Dog": [
+    "伯恩山犬",
+    "bernese mountain",
+    "bmd",
+    "bernese mountain dog",
+    "bernese",
+    "mountain"
+  ],
+  "Bichon Frise": [
+    "比熊犬",
+    "bichon",
+    "bichon frise",
+    "frise",
+    "bf"
+  ],
+  "Biewer Terrier": [
+    "比维尔梗",
+    "biewer",
+    "terrier",
+    "biewer terrier",
+    "bt"
+  ],
+  "Black and Tan Coonhound": [
+    "黑棕浣熊猎犬",
+    "batc",
+    "black and tan coonhound",
+    "black",
+    "coonhound",
+    "tan"
+  ],
+  "Black Russian Terrier": [
+    "黑俄罗斯梗",
+    "black russian terrier",
+    "black russian",
+    "russian",
+    "terrier",
+    "black",
+    "brt"
+  ],
+  "Bloodhound": [
+    "寻血猎犬",
+    "bloodhound"
+  ],
+  "Bluetick Coonhound": [
+    "蓝斑浣熊猎犬",
+    "bluetick coonhound",
+    "bc",
+    "coonhound",
+    "bluetick"
+  ],
+  "Blue Picardy Spaniel": [
+    "蓝色皮卡第猎犬",
+    "picardy",
+    "spaniel",
+    "bps",
+    "blue picardy spaniel",
+    "blue picardy",
+    "blue"
+  ],
+  "Boerboel": [
+    "布尔布尔犬",
+    "boerboel"
+  ],
+  "Bohemian Shepherd": [
+    "波西米亚牧羊犬",
+    "bohemian shepherd",
+    "bohemian",
+    "bs",
+    "shepherd"
+  ],
+  "Bolognese": [
+    "博洛尼亚犬",
+    "bolognese"
+  ],
+  "Border Collie": [
+    "边境牧羊犬",
+    "border collie",
+    "bc",
+    "border",
+    "collie"
+  ],
+  "Border Terrier": [
+    "边境梗",
+    "border",
+    "border terrier",
+    "terrier",
+    "bt"
+  ],
+  "Borzoi": [
+    "俄罗斯猎狼犬",
+    "borzoi"
+  ],
+  "Boston Terrier": [
+    "波士顿梗",
+    "boston",
+    "boston terrier",
+    "terrier",
+    "bt"
+  ],
+  "Bouvier des Ardennes": [
+    "阿登牧牛犬",
+    "bouvier des ardennes",
+    "des",
+    "bda",
+    "ardennes",
+    "bouvier"
+  ],
+  "Bouvier des Flandres": [
+    "法兰德斯牧牛犬",
+    "bouvier des flandres",
+    "bdf",
+    "des",
+    "bouvier",
+    "flandres"
+  ],
+  "Boxer": [
+    "拳师犬",
+    "boxer"
+  ],
+  "Boykin Spaniel": [
+    "博伊金猎犬",
+    "spaniel",
+    "boykin",
+    "bs",
+    "boykin spaniel"
+  ],
+  "Bracco Italiano": [
+    "意大利指示犬",
+    "bi",
+    "italiano",
+    "bracco italiano",
+    "bracco"
+  ],
+  "Braque du Bourbonnais": [
+    "波旁指示犬",
+    "braque du bourbonnais",
+    "bdb",
+    "du",
+    "braque",
+    "bourbonnais"
+  ],
+  "Braque Francais Pyrenean": [
+    "法国比利牛斯指示犬",
+    "pyrenean",
+    "braque francais pyrenean",
+    "bfp",
+    "braque",
+    "francais"
+  ],
+  "Braque Saint-Germain": [
+    "圣日耳曼指示犬",
+    "saint-germain",
+    "braque",
+    "braque saint-germain",
+    "bs"
+  ],
+  "Brazilian Terrier": [
+    "巴西梗",
+    "brazilian",
+    "terrier",
+    "bt",
+    "brazilian terrier"
+  ],
+  "Briard": [
+    "布里牧羊犬",
+    "briard"
+  ],
+  "Brittany": [
+    "布列塔尼猎犬",
+    "brittany"
+  ],
+  "Broholmer": [
+    "布罗霍尔默犬",
+    "broholmer"
+  ],
+  "Brussels Griffon": [
+    "布鲁塞尔格里芬犬",
+    "brussels griffon",
+    "brussels",
+    "bg",
+    "griffon"
+  ],
+  "Bulldog": [
+    "英国斗牛犬",
+    "bulldog"
+  ],
+  "Bullmastiff": [
+    "斗牛獒",
+    "bullmastiff"
+  ],
+  "Bull Terrier": [
+    "牛头梗",
+    "bull",
+    "bull terrier",
+    "terrier",
+    "bt"
+  ],
+  "Cairn Terrier": [
+    "凯恩梗",
+    "ct",
+    "cairn terrier",
+    "terrier",
+    "cairn"
+  ],
+  "Calupoh": [
+    "墨西哥狼犬",
+    "calupoh"
+  ],
+  "Canaan Dog": [
+    "迦南犬",
+    "cd",
+    "canaan dog",
+    "canaan"
+  ],
+  "Canadian Eskimo Dog": [
+    "加拿大爱斯基摩犬",
+    "ced",
+    "eskimo",
+    "canadian eskimo dog",
+    "canadian",
+    "canadian eskimo"
+  ],
+  "Cane Corso": [
+    "卡斯罗犬",
+    "cane corso",
+    "corso",
+    "cane",
+    "cc"
+  ],
+  "Cardigan Welsh Corgi": [
+    "卡迪根威尔士柯基犬",
+    "cardigan welsh corgi",
+    "cwc",
+    "cardigan",
+    "corgi",
+    "welsh"
+  ],
+  "Carolina Dog": [
+    "卡罗来纳犬",
+    "carolina",
+    "cd",
+    "carolina dog"
+  ],
+  "Catahoula Leopard Dog": [
+    "卡塔豪拉豹犬",
+    "catahoula",
+    "cld",
+    "catahoula leopard",
+    "catahoula leopard dog",
+    "leopard"
+  ],
+  "Caucasian Shepherd Dog": [
+    "高加索牧羊犬",
+    "csd",
+    "caucasian",
+    "caucasian shepherd dog",
+    "shepherd",
+    "caucasian shepherd"
+  ],
+  "Cavalier King Charles Spaniel": [
+    "骑士查理王小猎犬",
+    "spaniel",
+    "charles",
+    "cavalier king charles",
+    "king",
+    "cavalier",
+    "cavalier king charles spaniel",
+    "ckcs"
+  ],
+  "Central Asian Shepherd Dog": [
+    "中亚牧羊犬",
+    "asian",
+    "casd",
+    "central",
+    "central asian shepherd dog",
+    "shepherd",
+    "central asian shepherd"
+  ],
+  "Cesky Terrier": [
+    "捷克梗",
+    "cesky",
+    "terrier",
+    "cesky terrier",
+    "ct"
+  ],
+  "Chesapeake Bay Retriever": [
+    "切萨皮克湾寻回犬",
+    "cbr",
+    "chesapeake",
+    "bay",
+    "chesapeake bay",
+    "retriever",
+    "chesapeake bay retriever"
+  ],
+  "Chihuahua": [
+    "吉娃娃",
+    "chihuahua"
+  ],
+  "Chinese Crested": [
+    "中国冠毛犬",
+    "cc",
+    "crested",
+    "chinese",
+    "chinese crested"
+  ],
+  "Chinese Shar-Pei": [
+    "沙皮犬",
+    "cs",
+    "chinese",
+    "chinese shar-pei",
+    "shar-pei"
+  ],
+  "Chinook": [
+    "奇努克犬",
+    "chinook"
+  ],
+  "Chow Chow": [
+    "松狮犬",
+    "cc",
+    "chow chow",
+    "chow"
+  ],
+  "Cirneco dell'Etna": [
+    "西西里猎兔犬",
+    "cirneco dell'etna",
+    "cd",
+    "cirneco",
+    "dell'etna"
+  ],
+  "Clumber Spaniel": [
+    "克伦伯猎犬",
+    "clumber spaniel",
+    "spaniel",
+    "clumber",
+    "cs"
+  ],
+  "Cocker Spaniel": [
+    "可卡犬",
+    "spaniel",
+    "cs",
+    "cocker spaniel",
+    "cocker"
+  ],
+  "Collie": [
+    "柯利牧羊犬",
+    "collie"
+  ],
+  "Coton de Tulear": [
+    "图莱亚尔绒毛犬",
+    "tulear",
+    "cdt",
+    "de",
+    "coton",
+    "coton de tulear"
+  ],
+  "Croatian Sheepdog": [
+    "克罗地亚牧羊犬",
+    "croatian",
+    "sheepdog",
+    "croatian sheepdog",
+    "cs"
+  ],
+  "Curly-Coated Retriever": [
+    "卷毛寻回犬",
+    "curly-coated",
+    "cr",
+    "curly-coated retriever",
+    "retriever"
+  ],
+  "Czechoslovakian Vlciak": [
+    "捷克斯洛伐克狼犬",
+    "czechoslovakian",
+    "vlciak",
+    "czechoslovakian vlciak",
+    "cv"
+  ],
+  "Dachshund": [
+    "腊肠犬",
+    "dachshund"
+  ],
+  "Dalmatian": [
+    "斑点狗",
+    "dalmatian"
+  ],
+  "Dandie Dinmont Terrier": [
+    "丹迪丁蒙梗",
+    "dandie dinmont terrier",
+    "ddt",
+    "dandie",
+    "terrier",
+    "dandie dinmont",
+    "dinmont"
+  ],
+  "Danish-Swedish Farmdog": [
+    "丹麦瑞典农场犬",
+    "df",
+    "farmdog",
+    "danish-swedish farmdog",
+    "danish-swedish"
+  ],
+  "Deutscher Wachtelhund": [
+    "德国鹬猎犬",
+    "wachtelhund",
+    "deutscher wachtelhund",
+    "dw",
+    "deutscher"
+  ],
+  "Doberman Pinscher": [
+    "杜宾犬",
+    "pinscher",
+    "doberman pinscher",
+    "dp",
+    "doberman"
+  ],
+  "Dogo Argentino": [
+    "阿根廷杜高犬",
+    "dogo",
+    "argentino",
+    "dogo argentino",
+    "da"
+  ],
+  "Dogue de Bordeaux": [
+    "波尔多犬",
+    "dogue de bordeaux",
+    "bordeaux",
+    "ddb",
+    "de",
+    "dogue"
+  ],
+  "Drentsche Patrijshond": [
+    "德伦特猎犬",
+    "dp",
+    "drentsche",
+    "patrijshond",
+    "drentsche patrijshond"
+  ],
+  "Drever": [
+    "德雷弗犬",
+    "drever"
+  ],
+  "Dutch Shepherd": [
+    "荷兰牧羊犬",
+    "shepherd",
+    "dutch",
+    "dutch shepherd",
+    "ds"
+  ],
+  "English Cocker Spaniel": [
+    "英国可卡犬",
+    "spaniel",
+    "english cocker",
+    "english cocker spaniel",
+    "english",
+    "ecs",
+    "cocker"
+  ],
+  "English Foxhound": [
+    "英国猎狐犬",
+    "foxhound",
+    "ef",
+    "english foxhound",
+    "english"
+  ],
+  "English Setter": [
+    "英国雪达犬",
+    "english setter",
+    "es",
+    "setter",
+    "english"
+  ],
+  "English Springer Spaniel": [
+    "英国史宾格犬",
+    "spaniel",
+    "english springer spaniel",
+    "ess",
+    "springer",
+    "english",
+    "english springer"
+  ],
+  "English Toy Spaniel": [
+    "英国玩具猎犬",
+    "spaniel",
+    "english toy spaniel",
+    "english",
+    "toy",
+    "ets",
+    "english toy"
+  ],
+  "Entlebucher Mountain Dog": [
+    "恩特布赫山犬",
+    "entlebucher",
+    "entlebucher mountain dog",
+    "entlebucher mountain",
+    "emd",
+    "mountain"
+  ],
+  "Estrela Mountain Dog": [
+    "埃斯特雷拉山犬",
+    "estrela",
+    "estrela mountain dog",
+    "emd",
+    "estrela mountain",
+    "mountain"
+  ],
+  "Eurasier": [
+    "欧亚犬",
+    "eurasier"
+  ],
+  "Field Spaniel": [
+    "田野猎犬",
+    "spaniel",
+    "field",
+    "fs",
+    "field spaniel"
+  ],
+  "Finnish Lapphund": [
+    "芬兰拉普猎犬",
+    "fl",
+    "lapphund",
+    "finnish lapphund",
+    "finnish"
+  ],
+  "Finnish Spitz": [
+    "芬兰狐狸犬",
+    "spitz",
+    "finnish spitz",
+    "finnish",
+    "fs"
+  ],
+  "Flat-Coated Retriever": [
+    "平毛寻回犬",
+    "flat-coated",
+    "fr",
+    "retriever",
+    "flat-coated retriever"
+  ],
+  "French Bulldog": [
+    "法国斗牛犬",
+    "french",
+    "fb",
+    "french bulldog",
+    "bulldog"
+  ],
+  "French Spaniel": [
+    "法国猎犬",
+    "french spaniel",
+    "french",
+    "spaniel",
+    "fs"
+  ],
+  "German Longhaired Pointer": [
+    "德国长毛指示犬",
+    "longhaired",
+    "german",
+    "german longhaired pointer",
+    "glp",
+    "pointer"
+  ],
+  "German Pinscher": [
+    "德国平犬",
+    "german pinscher",
+    "gp",
+    "german",
+    "pinscher"
+  ],
+  "German Shepherd Dog": [
+    "德国牧羊犬",
+    "gsd",
+    "german shepherd dog",
+    "german",
+    "shepherd",
+    "german shepherd"
+  ],
+  "German Shorthaired Pointer": [
+    "德国短毛指示犬",
+    "german shorthaired pointer",
+    "gsp",
+    "german",
+    "shorthaired",
+    "pointer"
+  ],
+  "German Spitz": [
+    "德国狐狸犬",
+    "gs",
+    "german spitz",
+    "spitz",
+    "german"
+  ],
+  "German Wirehaired Pointer": [
+    "德国刚毛指示犬",
+    "german wirehaired pointer",
+    "gwp",
+    "german",
+    "wirehaired",
+    "pointer"
+  ],
+  "Giant Schnauzer": [
+    "巨型雪纳瑞",
+    "giant",
+    "giant schnauzer",
+    "schnauzer",
+    "gs"
+  ],
+  "Glen of Imaal Terrier": [
+    "伊马尔谷梗",
+    "imaal",
+    "goit",
+    "of",
+    "glen of imaal",
+    "glen",
+    "terrier",
+    "glen of imaal terrier"
+  ],
+  "Golden Retriever": [
+    "金毛寻回犬",
+    "金毛",
+    "gr",
+    "retriever",
+    "golden",
+    "golden retriever"
+  ],
+  "Gordon Setter": [
+    "戈登雪达犬",
+    "gordon setter",
+    "gs",
+    "setter",
+    "gordon"
+  ],
+  "Grand Basset Griffon Vendéen": [
+    "旺代大巴吉度猎犬",
+    "griffon",
+    "vendéen",
+    "basset",
+    "grand basset griffon vendéen",
+    "gbgv",
+    "grand"
+  ],
+  "Greater Swiss Mountain Dog": [
+    "大瑞士山地犬",
+    "gsmd",
+    "mountain",
+    "greater swiss mountain",
+    "swiss",
+    "greater swiss mountain dog",
+    "greater"
+  ],
+  "Great Dane": [
+    "大丹犬",
+    "great dane",
+    "gd",
+    "great",
+    "dane"
+  ],
+  "Great Pyrenees": [
+    "大白熊犬",
+    "great pyrenees",
+    "pyrenees",
+    "gp",
+    "great"
+  ],
+  "Greyhound": [
+    "灵缇犬",
+    "greyhound"
+  ],
+  "Havanese": [
+    "哈瓦那犬",
+    "havanese"
+  ],
+  "Hokkaido": [
+    "北海道犬",
+    "hokkaido"
+  ],
+  "Ibizan Hound": [
+    "伊比赞猎犬",
+    "ibizan hound",
+    "hound",
+    "ih",
+    "ibizan"
+  ],
+  "Irish Setter": [
+    "爱尔兰雪达犬",
+    "is",
+    "irish",
+    "setter",
+    "irish setter"
+  ],
+  "Irish Wolfhound": [
+    "爱尔兰猎狼犬",
+    "irish wolfhound",
+    "irish",
+    "iw",
+    "wolfhound"
+  ],
+  "Italian Greyhound": [
+    "意大利灵缇",
+    "ig",
+    "italian",
+    "greyhound",
+    "italian greyhound"
+  ],
+  "Japanese Spitz": [
+    "日本尖嘴犬",
+    "japanese spitz",
+    "spitz",
+    "js",
+    "japanese"
+  ],
+  "Keeshond": [
+    "荷兰毛狮犬",
+    "keeshond"
+  ],
+  "Komondor": [
+    "可蒙犬",
+    "komondor"
+  ],
+  "Labrador Retriever": [
+    "拉布拉多寻回犬",
+    "labrador retriever",
+    "lr",
+    "labrador",
+    "retriever"
+  ],
+  "Leonberger": [
+    "莱昂贝格犬",
+    "leonberger"
+  ],
+  "Lhasa Apso": [
+    "拉萨犬",
+    "apso",
+    "lhasa apso",
+    "lhasa",
+    "la"
+  ],
+  "Maltese": [
+    "马尔济斯犬",
+    "maltese"
+  ],
+  "Mastiff": [
+    "獒犬",
+    "mastiff"
+  ],
+  "Miniature Schnauzer": [
+    "迷你雪纳瑞",
+    "ms",
+    "miniature",
+    "schnauzer",
+    "miniature schnauzer"
+  ],
+  "Newfoundland": [
+    "纽芬兰犬",
+    "newfoundland"
+  ],
+  "Norwegian Elkhound": [
+    "挪威猎鹿犬",
+    "norwegian",
+    "elkhound",
+    "norwegian elkhound",
+    "ne"
+  ],
+  "Old English Sheepdog": [
+    "古代英国牧羊犬",
+    "old",
+    "oes",
+    "old english sheepdog",
+    "english",
+    "sheepdog"
+  ],
+  "Papillon": [
+    "蝴蝶犬",
+    "papillon"
+  ],
+  "Pekingese": [
+    "北京犬",
+    "pekingese"
+  ],
+  "Pembroke Welsh Corgi": [
+    "彭布罗克威尔士柯基犬",
+    "pwc",
+    "pembroke welsh corgi",
+    "corgi",
+    "welsh",
+    "pembroke"
+  ],
+  "Pomeranian": [
+    "博美犬",
+    "pomeranian"
+  ],
+  "Poodle (Standard)": [
+    "标准贵宾犬",
+    "p(",
+    "(standard)",
+    "poodle (standard)",
+    "poodle"
+  ],
+  "Poodle (Miniature)": [
+    "迷你贵宾犬",
+    "poodle (miniature)",
+    "p(",
+    "(miniature)",
+    "poodle"
+  ],
+  "Poodle (Toy)": [
+    "玩具贵宾犬",
+    "p(",
+    "poodle",
+    "poodle (toy)",
+    "(toy)"
+  ],
+  "Pug": [
+    "哈巴狗",
+    "pug"
+  ],
+  "Rottweiler": [
+    "罗威纳犬",
+    "rottweiler"
+  ],
+  "Saint Bernard": [
+    "圣伯纳犬",
+    "bernard",
+    "saint bernard",
+    "saint",
+    "sb"
+  ],
+  "Samoyed": [
+    "萨摩耶犬",
+    "samoyed"
+  ],
+  "Shiba Inu": [
+    "柴犬",
+    "si",
+    "shiba",
+    "shiba inu",
+    "inu"
+  ],
+  "Shih Tzu": [
+    "西施犬",
+    "tzu",
+    "st",
+    "shih tzu",
+    "shih"
+  ],
+  "Siberian Husky": [
+    "西伯利亚哈士奇",
+    "哈士奇",
+    "sh",
+    "siberian husky",
+    "siberian",
+    "husky"
+  ],
+  "Tibetan Mastiff": [
+    "藏獒",
+    "tibetan mastiff",
+    "tm",
+    "tibetan",
+    "mastiff"
+  ],
+  "Weimaraner": [
+    "魏玛犬",
+    "weimaraner"
+  ],
+  "Whippet": [
+    "惠比特犬",
+    "whippet"
+  ],
+  "Yorkshire Terrier": [
+    "约克夏梗",
+    "yorkshire",
+    "terrier",
+    "yorkshire terrier",
+    "yt"
+  ],
+  "Hamiltonstovare": [
+    "hamiltonstovare",
+    "哈密尔顿猎犬"
+  ],
+  "Hanoverian Scenthound": [
+    "scenthound",
+    "hs",
+    "hanoverian scenthound",
+    "hanoverian",
+    "汉诺威嗅猎犬"
+  ],
+  "Harrier": [
+    "harrier",
+    "猎兔犬"
+  ],
+  "Hovawart": [
+    "hovawart",
+    "霍瓦特犬"
+  ],
+  "Icelandic Sheepdog": [
+    "icelandic sheepdog",
+    "icelandic",
+    "sheepdog",
+    "is",
+    "冰岛牧羊犬"
+  ],
+  "Irish Red and White Setter": [
+    "white",
+    "and",
+    "setter",
+    "iraws",
+    "red",
+    "irish red and white setter",
+    "irish",
+    "爱尔兰红白雪达犬"
+  ],
+  "Irish Terrier": [
+    "it",
+    "irish",
+    "irish terrier",
+    "terrier",
+    "爱尔兰梗"
+  ],
+  "Irish Water Spaniel": [
+    "water",
+    "spaniel",
+    "irish water",
+    "irish water spaniel",
+    "irish",
+    "iws",
+    "爱尔兰水猎犬"
+  ],
+  "Jagdterrier": [
+    "jagdterrier",
+    "德国猎梗"
+  ],
+  "Japanese Akitainu": [
+    "ja",
+    "akitainu",
+    "japanese akitainu",
+    "japanese",
+    "日本秋田犬"
+  ],
+  "Japanese Chin": [
+    "jc",
+    "chin",
+    "japanese",
+    "japanese chin",
+    "日本狆"
+  ],
+  "Japanese Terrier": [
+    "japanese terrier",
+    "jt",
+    "terrier",
+    "japanese",
+    "日本梗"
+  ],
+  "Kai Ken": [
+    "kai",
+    "ken",
+    "kk",
+    "kai ken",
+    "甲斐犬"
+  ],
+  "Karelian Bear Dog": [
+    "dog",
+    "karelian bear",
+    "kbd",
+    "bear",
+    "karelian bear dog",
+    "karelian",
+    "卡累利阿熊犬"
+  ],
+  "Kerry Blue Terrier": [
+    "kbt",
+    "blue",
+    "kerry blue",
+    "kerry blue terrier",
+    "kerry",
+    "terrier",
+    "凯利蓝梗"
+  ],
+  "Kishu Ken": [
+    "ken",
+    "kishu ken",
+    "kishu",
+    "kk",
+    "纪州犬"
+  ],
+  "Korean Jindo Dog": [
+    "jindo",
+    "korean jindo",
+    "dog",
+    "kjd",
+    "korean",
+    "korean jindo dog",
+    "韩国珍岛犬"
+  ],
+  "Kromfohrlander": [
+    "kromfohrlander",
+    "克龙弗兰德犬"
+  ],
+  "Kuvasz": [
+    "kuvasz",
+    "库瓦兹犬"
+  ],
+  "Lagotto Romagnolo": [
+    "lr",
+    "romagnolo",
+    "lagotto",
+    "lagotto romagnolo",
+    "罗马涅水犬"
+  ],
+  "Lakeland Terrier": [
+    "lakeland terrier",
+    "terrier",
+    "lt",
+    "lakeland",
+    "湖畔梗"
+  ],
+  "Lancashire Heeler": [
+    "heeler",
+    "lh",
+    "lancashire",
+    "lancashire heeler",
+    "兰开夏牧牛犬"
+  ],
+  "Lapponian Herder": [
+    "herder",
+    "lapponian",
+    "lh",
+    "lapponian herder",
+    "拉普牧犬"
+  ],
+  "Large Munsterlander": [
+    "large",
+    "large munsterlander",
+    "lm",
+    "munsterlander",
+    "大型明斯特兰德犬"
+  ],
+  "Löwchen": [
+    "löwchen",
+    "小狮子犬"
+  ],
+  "Manchester Terrier (Standard)": [
+    "manchester (standard)",
+    "(standard)",
+    "manchester",
+    "mt(",
+    "manchester terrier (standard)",
+    "terrier",
+    "曼彻斯特梗（标准型）"
+  ],
+  "Manchester Terrier (Toy)": [
+    "manchester (toy)",
+    "manchester",
+    "mt(",
+    "terrier",
+    "manchester terrier (toy)",
+    "(toy)",
+    "曼彻斯特梗（玩具型）"
+  ],
+  "Miniature American Shepherd": [
+    "miniature",
+    "american",
+    "miniature american shepherd",
+    "mas",
+    "shepherd",
+    "迷你美国牧羊犬"
+  ],
+  "Miniature Bull Terrier": [
+    "miniature",
+    "bull",
+    "miniature bull",
+    "mbt",
+    "terrier",
+    "miniature bull terrier",
+    "迷你牛头梗"
+  ],
+  "Miniature Pinscher": [
+    "miniature pinscher",
+    "pinscher",
+    "miniature",
+    "mp",
+    "迷你杜宾犬"
+  ],
+  "Mountain Cur": [
+    "mc",
+    "mountain",
+    "mountain cur",
+    "cur",
+    "山地犬"
+  ],
+  "Mudi": [
+    "mudi",
+    "穆迪犬"
+  ],
+  "Neapolitan Mastiff": [
+    "nm",
+    "mastiff",
+    "neapolitan",
+    "neapolitan mastiff",
+    "那不勒斯獒犬"
+  ],
+  "Nederlandse Kooikerhondje": [
+    "nk",
+    "nederlandse kooikerhondje",
+    "kooikerhondje",
+    "nederlandse",
+    "荷兰诱鸭犬"
+  ],
+  "Norfolk Terrier": [
+    "norfolk terrier",
+    "terrier",
+    "norfolk",
+    "nt",
+    "诺福克梗"
+  ],
+  "Norrbottenspets": [
+    "norrbottenspets",
+    "北博滕尖嘴犬"
+  ],
+  "Norwegian Buhund": [
+    "buhund",
+    "norwegian buhund",
+    "nb",
+    "norwegian",
+    "挪威布哈德犬"
+  ],
+  "Norwegian Lundehund": [
+    "lundehund",
+    "nl",
+    "norwegian lundehund",
+    "norwegian",
+    "挪威猎鹦鹉犬"
+  ],
+  "Norwich Terrier": [
+    "norwich terrier",
+    "norwich",
+    "terrier",
+    "nt",
+    "诺威奇梗"
+  ],
+  "Nova Scotia Duck Tolling Retriever": [
+    "duck",
+    "nova scotia duck tolling",
+    "nsdtr",
+    "scotia",
+    "retriever",
+    "tolling",
+    "nova scotia duck tolling retriever",
+    "nova",
+    "新斯科舍诱鸭寻回犬"
+  ],
+  "Otterhound": [
+    "otterhound",
+    "水獭猎犬"
+  ],
+  "Parson Russell Terrier": [
+    "parson russell terrier",
+    "russell",
+    "terrier",
+    "parson",
+    "prt",
+    "parson russell",
+    "帕森罗素梗"
+  ],
+  "Peruvian Inca Orchid": [
+    "peruvian inca orchid",
+    "inca",
+    "pio",
+    "orchid",
+    "peruvian",
+    "秘鲁印加兰花犬"
+  ],
+  "Petit Basset Griffon Vendéen": [
+    "petit basset griffon vendéen",
+    "petit",
+    "griffon",
+    "pbgv",
+    "basset",
+    "vendéen",
+    "小旺代短腿猎犬"
+  ],
+  "Pharaoh Hound": [
+    "ph",
+    "pharaoh",
+    "pharaoh hound",
+    "hound",
+    "法老王猎犬"
+  ],
+  "Plott Hound": [
+    "plott",
+    "ph",
+    "plott hound",
+    "hound",
+    "普罗特猎犬"
+  ],
+  "Pointer": [
+    "pointer",
+    "指示犬"
+  ],
+  "Polish Lowland Sheepdog": [
+    "lowland",
+    "polish lowland sheepdog",
+    "pls",
+    "polish",
+    "sheepdog",
+    "波兰低地牧羊犬"
+  ],
+  "Pont-Audemer Spaniel": [
+    "pont-audemer",
+    "spaniel",
+    "pont-audemer spaniel",
+    "ps",
+    "蓬托德梅猎犬"
+  ],
+  "Porcelaine": [
+    "porcelaine",
+    "瓷器猎犬"
+  ],
+  "Portuguese Podengo": [
+    "portuguese podengo",
+    "pp",
+    "portuguese",
+    "podengo",
+    "葡萄牙波登可犬"
+  ],
+  "Portuguese Podengo Pequeno": [
+    "podengo",
+    "portuguese podengo pequeno",
+    "pequeno",
+    "portuguese",
+    "ppp",
+    "葡萄牙小型波登可犬"
+  ],
+  "Portuguese Pointer": [
+    "portuguese pointer",
+    "pp",
+    "portuguese",
+    "pointer",
+    "葡萄牙指示犬"
+  ],
+  "Portuguese Sheepdog": [
+    "portuguese sheepdog",
+    "portuguese",
+    "sheepdog",
+    "ps",
+    "葡萄牙牧羊犬"
+  ],
+  "Portuguese Water Dog": [
+    "water",
+    "dog",
+    "pwd",
+    "portuguese water",
+    "portuguese water dog",
+    "portuguese",
+    "葡萄牙水犬"
+  ],
+  "Presa Canario": [
+    "presa canario",
+    "pc",
+    "canario",
+    "presa",
+    "加那利犬"
+  ],
+  "Pudelpointer": [
+    "pudelpointer",
+    "贵宾指示犬"
+  ],
+  "Puli": [
+    "puli",
+    "普利犬"
+  ],
+  "Pumi": [
+    "pumi",
+    "普米犬"
+  ],
+  "Pyrenean Mastiff": [
+    "pm",
+    "pyrenean",
+    "mastiff",
+    "pyrenean mastiff",
+    "比利牛斯獒犬"
+  ],
+  "Pyrenean Shepherd": [
+    "pyrenean shepherd",
+    "ps",
+    "pyrenean",
+    "shepherd",
+    "比利牛斯牧羊犬"
+  ],
+  "Rafeiro do Alentejo": [
+    "rafeiro",
+    "do",
+    "rda",
+    "rafeiro do alentejo",
+    "alentejo",
+    "阿连特茹牧犬"
+  ],
+  "Rat Terrier": [
+    "rat",
+    "rat terrier",
+    "terrier",
+    "rt",
+    "捕鼠梗"
+  ],
+  "Redbone Coonhound": [
+    "coonhound",
+    "redbone",
+    "rc",
+    "redbone coonhound",
+    "红骨浣熊猎犬"
+  ],
+  "Rhodesian Ridgeback": [
+    "ridgeback",
+    "rr",
+    "rhodesian",
+    "rhodesian ridgeback",
+    "罗得西亚脊背犬"
+  ],
+  "Romanian Carpathian Shepherd": [
+    "romanian",
+    "carpathian",
+    "romanian carpathian shepherd",
+    "shepherd",
+    "rcs",
+    "罗马尼亚喀尔巴阡牧羊犬"
+  ],
+  "Romanian Mioritic Shepherd Dog": [
+    "dog",
+    "romanian mioritic shepherd dog",
+    "mioritic",
+    "romanian",
+    "romanian mioritic shepherd",
+    "rmsd",
+    "shepherd",
+    "罗马尼亚米奥里提克牧羊犬"
+  ],
+  "Russell Terrier": [
+    "russell terrier",
+    "russell",
+    "terrier",
+    "rt",
+    "罗素梗"
+  ],
+  "Russian Toy": [
+    "toy",
+    "rt",
+    "russian toy",
+    "russian",
+    "俄罗斯玩具犬"
+  ],
+  "Russian Tsvetnaya Bolonka": [
+    "bolonka",
+    "russian tsvetnaya bolonka",
+    "rtb",
+    "russian",
+    "tsvetnaya",
+    "俄罗斯彩色博龙卡犬"
+  ],
+  "Saluki": [
+    "saluki",
+    "萨路基犬"
+  ],
+  "Schapendoes": [
+    "schapendoes",
+    "荷兰牧羊犬（卷毛）"
+  ],
+  "Schipperke": [
+    "schipperke",
+    "史奇派克犬"
+  ],
+  "Scottish Deerhound": [
+    "sd",
+    "deerhound",
+    "scottish deerhound",
+    "scottish",
+    "苏格兰猎鹿犬"
+  ],
+  "Scottish Terrier": [
+    "st",
+    "scottish",
+    "scottish terrier",
+    "terrier",
+    "苏格兰梗"
+  ],
+  "Sealyham Terrier": [
+    "sealyham",
+    "terrier",
+    "st",
+    "sealyham terrier",
+    "锡利哈姆梗"
+  ],
+  "Segugio Italiano": [
+    "italiano",
+    "segugio",
+    "si",
+    "segugio italiano",
+    "意大利猎犬"
+  ],
+  "Shetland Sheepdog": [
+    "shetland sheepdog",
+    "ss",
+    "shetland",
+    "sheepdog",
+    "喜乐蒂牧羊犬"
+  ],
+  "Shikoku Ken": [
+    "shikoku",
+    "ken",
+    "shikoku ken",
+    "sk",
+    "四国犬"
+  ],
+  "Silky Terrier": [
+    "silky",
+    "terrier",
+    "st",
+    "silky terrier",
+    "丝毛梗"
+  ],
+  "Skye Terrier": [
+    "skye terrier",
+    "st",
+    "terrier",
+    "skye",
+    "斯凯梗"
+  ],
+  "Sloughi": [
+    "sloughi",
+    "斯卢吉犬"
+  ],
+  "Slovakian Wirehaired Pointer": [
+    "slovakian",
+    "swp",
+    "slovakian wirehaired pointer",
+    "wirehaired",
+    "pointer",
+    "斯洛伐克刚毛指示犬"
+  ],
+  "Slovensky Cuvac": [
+    "slovensky",
+    "sc",
+    "cuvac",
+    "slovensky cuvac",
+    "斯洛伐克库瓦奇犬"
+  ],
+  "Slovensky Kopov": [
+    "slovensky kopov",
+    "slovensky",
+    "kopov",
+    "sk",
+    "斯洛伐克猎犬"
+  ],
+  "Small Munsterlander": [
+    "munsterlander",
+    "sm",
+    "small",
+    "small munsterlander",
+    "小型明斯特兰德犬"
+  ],
+  "Smooth Fox Terrier": [
+    "fox",
+    "smooth fox",
+    "sft",
+    "terrier",
+    "smooth",
+    "smooth fox terrier",
+    "光滑狐梗"
+  ],
+  "Soft Coated Wheaten Terrier": [
+    "wheaten",
+    "scwt",
+    "soft",
+    "soft coated wheaten",
+    "soft coated wheaten terrier",
+    "terrier",
+    "coated",
+    "软毛麦色梗"
+  ],
+  "Spanish Mastiff": [
+    "spanish",
+    "sm",
+    "mastiff",
+    "spanish mastiff",
+    "西班牙獒犬"
+  ],
+  "Spanish Water Dog": [
+    "water",
+    "dog",
+    "spanish water dog",
+    "swd",
+    "spanish water",
+    "spanish",
+    "西班牙水犬"
+  ],
+  "Spinone Italiano": [
+    "si",
+    "spinone",
+    "italiano",
+    "spinone italiano",
+    "意大利旋毛猎犬"
+  ],
+  "Stabyhoun": [
+    "stabyhoun",
+    "斯塔比犬"
+  ],
+  "Staffordshire Bull Terrier": [
+    "bull",
+    "staffordshire bull",
+    "staffordshire",
+    "staffordshire bull terrier",
+    "sbt",
+    "terrier",
+    "斯塔福郡斗牛梗"
+  ],
+  "Standard Schnauzer": [
+    "ss",
+    "standard schnauzer",
+    "standard",
+    "schnauzer",
+    "标准雪纳瑞"
+  ],
+  "Sussex Spaniel": [
+    "spaniel",
+    "sussex spaniel",
+    "ss",
+    "sussex",
+    "苏塞克斯猎犬"
+  ],
+  "Swedish Lapphund": [
+    "lapphund",
+    "swedish",
+    "sl",
+    "swedish lapphund",
+    "瑞典拉普犬"
+  ],
+  "Swedish Vallhund": [
+    "swedish vallhund",
+    "sv",
+    "vallhund",
+    "swedish",
+    "瑞典瓦尔洪德犬"
+  ],
+  "Taiwan Dog": [
+    "taiwan dog",
+    "dog",
+    "td",
+    "taiwan",
+    "台湾犬"
+  ],
+  "Teddy Roosevelt Terrier": [
+    "trt",
+    "teddy roosevelt terrier",
+    "teddy roosevelt",
+    "teddy",
+    "roosevelt",
+    "terrier",
+    "泰迪罗斯福梗"
+  ],
+  "Thai Bangkaew": [
+    "thai",
+    "bangkaew",
+    "thai bangkaew",
+    "tb",
+    "泰国邦凯犬"
+  ],
+  "Thai Ridgeback": [
+    "thai ridgeback",
+    "ridgeback",
+    "thai",
+    "tr",
+    "泰国脊背犬"
+  ],
+  "Tibetan Spaniel": [
+    "tibetan",
+    "spaniel",
+    "tibetan spaniel",
+    "ts",
+    "西藏猎犬"
+  ],
+  "Tibetan Terrier": [
+    "tibetan",
+    "terrier",
+    "tibetan terrier",
+    "tt",
+    "西藏梗"
+  ],
+  "Tornjak": [
+    "tornjak",
+    "托尔尼亚克犬"
+  ],
+  "Tosa": [
+    "tosa",
+    "土佐犬"
+  ],
+  "Toy Fox Terrier": [
+    "tft",
+    "toy fox terrier",
+    "fox",
+    "toy fox",
+    "toy",
+    "terrier",
+    "玩具狐梗"
+  ],
+  "Transylvanian Hound": [
+    "transylvanian",
+    "th",
+    "transylvanian hound",
+    "hound",
+    "特兰西瓦尼亚猎犬"
+  ],
+  "Treeing Tennessee Brindle": [
+    "tennessee",
+    "brindle",
+    "ttb",
+    "treeing tennessee brindle",
+    "treeing",
+    "田纳西树猎犬"
+  ],
+  "Treeing Walker Coonhound": [
+    "coonhound",
+    "twc",
+    "walker",
+    "treeing",
+    "treeing walker coonhound",
+    "沃克浣熊猎犬"
+  ],
+  "Vizsla": [
+    "vizsla",
+    "维兹拉犬"
+  ],
+  "Volpino Italiano": [
+    "vi",
+    "volpino",
+    "italiano",
+    "volpino italiano",
+    "意大利狐狸犬"
+  ],
+  "Welsh Springer Spaniel": [
+    "spaniel",
+    "springer",
+    "welsh springer spaniel",
+    "welsh",
+    "wss",
+    "welsh springer",
+    "威尔士史宾格犬"
+  ],
+  "Welsh Terrier": [
+    "welsh",
+    "welsh terrier",
+    "wt",
+    "terrier",
+    "威尔士梗"
+  ],
+  "West Highland White Terrier": [
+    "west",
+    "whwt",
+    "highland",
+    "west highland white",
+    "white",
+    "west highland white terrier",
+    "terrier",
+    "西高地白梗"
+  ],
+  "Wetterhoun": [
+    "wetterhoun",
+    "荷兰水猎犬"
+  ],
+  "Wirehaired Pointing Griffon": [
+    "wpg",
+    "pointing",
+    "wirehaired pointing griffon",
+    "griffon",
+    "wirehaired",
+    "刚毛指示格里芬犬"
+  ],
+  "Wirehaired Vizsla": [
+    "wirehaired",
+    "wirehaired vizsla",
+    "vizsla",
+    "wv",
+    "刚毛维兹拉犬"
+  ],
+  "Wire Fox Terrier": [
+    "wft",
+    "wire fox",
+    "fox",
+    "wire fox terrier",
+    "terrier",
+    "wire",
+    "刚毛狐梗"
+  ],
+  "Working Kelpie": [
+    "working kelpie",
+    "kelpie",
+    "wk",
+    "working",
+    "工作型凯尔皮犬"
+  ],
+  "Xoloitzcuintli": [
+    "xoloitzcuintli",
+    "墨西哥无毛犬"
+  ],
+  "Yakutian Laika": [
+    "yakutian laika",
+    "yakutian",
+    "yl",
+    "laika",
+    "雅库特莱卡犬"
+  ]
+}

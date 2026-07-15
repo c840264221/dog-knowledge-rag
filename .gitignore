@@ -11,7 +11,8 @@ venv/
 chroma_db/
 chroma_memory_db/
 models_cache/
-data/
+data/*
+!data/alias_dog_name.json
 logs/
 test_scripts
 *.log
