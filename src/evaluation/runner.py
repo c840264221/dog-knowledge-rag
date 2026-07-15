@@ -65,6 +65,7 @@ class EvaluationCategoryRun:
             报告构建器可以继续汇总的类别运行记录。
     """
 
+    # EvaluationTarget里面包含category（类别）比如root_route（主图路由）、测试用例的路径在哪、执行器是哪个
     target: EvaluationTarget
     results: list[AgentEvaluationResult] = field(default_factory=list)
     duration_ms: float = 0.0
