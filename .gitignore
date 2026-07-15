@@ -29,3 +29,7 @@ evaluation/reports/
 
 *.sqlite3
 *.bin
+
+# 真实 RAG CI 重建索引所需的可版本化知识库源文档
+!data/dog_markdown/
+!data/dog_markdown/**/*.md
