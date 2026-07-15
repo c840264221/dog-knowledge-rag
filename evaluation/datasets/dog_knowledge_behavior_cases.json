@@ -4,7 +4,7 @@
         "category": "dog_knowledge_behavior",
         "question": "金毛寻回犬的寿命一般是多少？",
         "input_state": {
-            "intent": "dog_info",
+            "intent": "dog_info测试",
             "evaluation_parser_filters": {
                 "dog_name": {
                     "$eq": "Golden Retriever"
