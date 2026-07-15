@@ -86,13 +86,62 @@ jobs:
         run: |
           python -m scripts.evaluation.evaluate_v112_all --profile full
 
+      - name: Prepare full evaluation artifacts
+        if: always()
+        shell: pwsh
+        run: |
+          $artifactDir = "evaluation/artifacts/full-rag"
+          $jsonReport = "evaluation/reports/v112_agent_evaluation_report.json"
+          $markdownReport = "evaluation/reports/v112_agent_evaluation_report.md"
+          New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
+
+          $diagnostics = @(
+            "workflow=V1.12 Full RAG Evaluation"
+            "run_id=$env:GITHUB_RUN_ID"
+            "run_number=$env:GITHUB_RUN_NUMBER"
+            "commit_sha=$env:GITHUB_SHA"
+            "json_report_found=$(Test-Path -LiteralPath $jsonReport)"
+            "markdown_report_found=$(Test-Path -LiteralPath $markdownReport)"
+          )
+          $diagnostics | Set-Content `
+            -LiteralPath "$artifactDir/artifact-diagnostics.txt" `
+            -Encoding UTF8
+
+          if (Test-Path -LiteralPath $jsonReport) {
+            Copy-Item -LiteralPath $jsonReport -Destination $artifactDir -Force
+          } else {
+            Write-Warning "JSON evaluation report was not generated: $jsonReport"
+          }
+
+          if (Test-Path -LiteralPath $markdownReport) {
+            Copy-Item -LiteralPath $markdownReport -Destination $artifactDir -Force
+          } else {
+            Write-Warning "Markdown evaluation report was not generated: $markdownReport"
+          }
+
+          Get-ChildItem -LiteralPath $artifactDir | Select-Object Name, Length
+
+      - name: Publish full evaluation summary
+        if: always()
+        shell: pwsh
+        run: |
+          $reportPath = "evaluation/reports/v112_agent_evaluation_report.md"
+          if (Test-Path -LiteralPath $reportPath) {
+            Get-Content -LiteralPath $reportPath -Raw -Encoding UTF8 |
+              Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding UTF8
+          } else {
+            @(
+              "# V1.12 Full RAG Evaluation"
+              ""
+              "> Full evaluation report was not generated. Check the artifact diagnostics and failed step logs."
+            ) | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding UTF8
+          }
+
       - name: Upload full evaluation reports
         if: always()
         uses: actions/upload-artifact@v6
         with:
           name: v112-full-rag-evaluation-report-${{ github.run_number }}
-          path: |
-            evaluation/reports/v112_agent_evaluation_report.json
-            evaluation/reports/v112_agent_evaluation_report.md
-          if-no-files-found: warn
+          path: evaluation/artifacts/full-rag
+          if-no-files-found: error
           retention-days: 30

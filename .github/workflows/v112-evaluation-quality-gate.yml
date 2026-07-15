@@ -59,6 +59,22 @@ jobs:
         run: |
           python -m scripts.evaluation.evaluate_v112_all --profile core
 
+      - name: Publish core evaluation summary
+        if: always()
+        shell: pwsh
+        run: |
+          $reportPath = "evaluation/reports/v112_core_evaluation_report.md"
+          if (Test-Path -LiteralPath $reportPath) {
+            Get-Content -LiteralPath $reportPath -Raw -Encoding UTF8 |
+              Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding UTF8
+          } else {
+            @(
+              "# V1.12 Core Evaluation"
+              ""
+              "> Core evaluation report was not generated. Check the failed step logs."
+            ) | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding UTF8
+          }
+
       - name: Upload evaluation reports
         if: always()
         uses: actions/upload-artifact@v6
