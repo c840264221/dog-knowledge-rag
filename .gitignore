@@ -17,6 +17,9 @@ test_scripts
 *.log
 tmp/
 
+# Evaluation 运行时生成报告
+evaluation/reports/
+
 # IDE
 .idea/
 .vscode/

@@ -3,7 +3,11 @@
 from src.evaluation.schemas import (
     AgentEvaluationCase,
     AgentEvaluationResult,
+    EvaluationCategorySummary,
     EvaluationCheckResult,
+    EvaluationMetricGateResult,
+    EvaluationQualityGate,
+    EvaluationSuiteReport,
 )
 from src.evaluation.dataset_loader import (
     AgentEvaluationDatasetLoader,
@@ -14,6 +18,10 @@ __all__ = [
     "AgentEvaluationDatasetLoader",
     "AgentEvaluationCase",
     "AgentEvaluationResult",
+    "EvaluationCategorySummary",
     "EvaluationCheckResult",
+    "EvaluationMetricGateResult",
+    "EvaluationQualityGate",
+    "EvaluationSuiteReport",
     "load_agent_evaluation_cases",
 ]

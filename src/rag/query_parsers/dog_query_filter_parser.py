@@ -171,6 +171,7 @@ class DogQueryFilterParser:
             "大型",
             "大狗",
             "体型大",
+            "体型比较大",
             "large dog",
             "large breed",
             "large",
@@ -239,6 +240,7 @@ class DogQueryFilterParser:
 
     EASY_TRAINING_KEYWORDS: list[str] = [
         "容易训练",
+        "高训练度",
         "易于训练",
         "是否易于训练",
         "好训练",

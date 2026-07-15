@@ -15,11 +15,15 @@ from src.evaluation.evaluators.memory_recall_behavior_evaluator import (
 from src.evaluation.evaluators.main_graph_behavior_evaluator import (
     MainGraphBehaviorEvaluator,
 )
+from src.evaluation.evaluators.rag_retrieval_behavior_evaluator import (
+    RagRetrievalBehaviorEvaluator,
+)
 
 __all__ = [
     "DogKnowledgeBehaviorEvaluator",
     "MainGraphBehaviorEvaluator",
     "MemoryRecallBehaviorEvaluator",
+    "RagRetrievalBehaviorEvaluator",
     "RootRouteEvaluator",
     "ToolAgentBehaviorEvaluator",
 ]

@@ -188,6 +188,74 @@ def test_parse_filters_should_parse_chinese_breed_alias(
     )
 
 
+def test_parse_filters_should_parse_high_trainability_phrase(
+        parser,
+):
+    """
+    测试“高训练度”会被解析为高可训练性过滤条件。
+
+    参数：
+        parser:
+            pytest fixture 注入的 DogQueryFilterParser。
+
+    返回值：
+        None：
+            pytest 根据 assert 判断测试是否通过。
+    """
+
+    result = parser.parse_filters(
+        question="German Shepherd Dog 适不适合作为高训练度的工作犬？",
+    )
+
+    assert result is not None
+    assert_condition_exists(
+        where_filter=result,
+        expected_condition={
+            "trainability_level": {
+                "$gte": 4,
+            }
+        },
+    )
+
+
+def test_parse_filters_should_parse_comparatively_large_phrase(
+        parser,
+):
+    """
+    测试“体型比较大”会被解析为大型犬过滤条件。
+
+    参数：
+        parser:
+            pytest fixture 注入的 DogQueryFilterParser。
+
+    返回值：
+        None：
+            pytest 根据 assert 判断测试是否通过。
+    """
+
+    result = parser.parse_filters(
+        question="我想养一只体型比较大的狗，并且希望它容易训练",
+    )
+
+    assert result is not None
+    assert_condition_exists(
+        where_filter=result,
+        expected_condition={
+            "size": {
+                "$eq": "large",
+            }
+        },
+    )
+    assert_condition_exists(
+        where_filter=result,
+        expected_condition={
+            "trainability_level": {
+                "$gte": 4,
+            }
+        },
+    )
+
+
 def test_parse_filters_should_parse_english_breed_name(
         parser,
 ):

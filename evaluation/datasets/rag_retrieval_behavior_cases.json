@@ -1,0 +1,218 @@
+[
+    {
+        "case_id": "rag_retrieval_small_trainable_001",
+        "category": "rag_retrieval_behavior",
+        "question": "适合新手养的、比较容易训练的小型犬有哪些？",
+        "input_state": {
+            "top_k": 5
+        },
+        "expected": {
+            "expected_dog_names": [
+                "Shih Tzu",
+                "Chinese Crested",
+                "Italian Greyhound",
+                "Japanese Spitz"
+            ],
+            "expected_filters": {
+                "size": "small",
+                "trainability": "high"
+            },
+            "empty_retrieval": false
+        },
+        "tags": ["rag", "small_dog", "beginner", "metadata_filter"],
+        "note": "检查小型犬和高训练度组合条件的真实解析与召回。"
+    },
+    {
+        "case_id": "rag_retrieval_low_barking_energy_001",
+        "category": "rag_retrieval_behavior",
+        "question": "我想找一只不太爱叫、精力不要太高的狗",
+        "input_state": {
+            "top_k": 5
+        },
+        "expected": {
+            "expected_dog_names": [
+                "Anatolian Shepherd Dog",
+                "Caucasian Shepherd Dog",
+                "Affenpinscher"
+            ],
+            "expected_filters": {
+                "barking": "low",
+                "energy": "low"
+            },
+            "empty_retrieval": false
+        },
+        "tags": ["rag", "barking", "energy", "metadata_filter"],
+        "note": "检查低吠叫和低精力条件的真实解析与召回。"
+    },
+    {
+        "case_id": "rag_retrieval_apartment_small_001",
+        "category": "rag_retrieval_behavior",
+        "question": "有没有比较适合公寓饲养的小型犬？",
+        "input_state": {
+            "top_k": 5
+        },
+        "expected": {
+            "expected_dog_names": [
+                "French Bulldog",
+                "Maltese",
+                "Shih Tzu",
+                "Pug"
+            ],
+            "expected_filters": {
+                "size": "small"
+            },
+            "empty_retrieval": false
+        },
+        "tags": ["rag", "apartment", "small_dog"],
+        "note": "检查公寓场景下小型犬资料的真实召回。"
+    },
+    {
+        "case_id": "rag_retrieval_golden_retriever_001",
+        "category": "rag_retrieval_behavior",
+        "question": "我想了解 Golden Retriever 的性格和训练难度",
+        "input_state": {
+            "top_k": 5
+        },
+        "expected": {
+            "expected_dog_names": ["Golden Retriever"],
+            "expected_filters": {
+                "dog_name": "Golden Retriever"
+            },
+            "top1_hit": true,
+            "empty_retrieval": false,
+            "quality_is_usable": true
+        },
+        "tags": ["rag", "dog_name", "single_breed", "trainability"],
+        "note": "检查明确犬种名查询的精确过滤与第一名召回。"
+    },
+    {
+        "case_id": "rag_retrieval_german_shepherd_001",
+        "category": "rag_retrieval_behavior",
+        "question": "German Shepherd Dog 适不适合作为高训练度的工作犬？",
+        "input_state": {
+            "top_k": 5
+        },
+        "expected": {
+            "expected_dog_names": ["German Shepherd Dog"],
+            "expected_filters": {
+                "dog_name": "German Shepherd Dog",
+                "trainability": "high"
+            },
+            "top1_hit": true,
+            "empty_retrieval": false,
+            "quality_is_usable": true
+        },
+        "tags": ["rag", "dog_name", "working_dog", "trainability"],
+        "note": "检查犬种名和训练度组合条件的真实解析与召回。"
+    },
+    {
+        "case_id": "rag_retrieval_high_energy_001",
+        "category": "rag_retrieval_behavior",
+        "question": "有哪些精力比较高、适合运动量大的狗？",
+        "input_state": {
+            "top_k": 5
+        },
+        "expected": {
+            "expected_dog_names": [
+                "Brazilian Terrier",
+                "Flat-Coated Retriever",
+                "Pembroke Welsh Corgi",
+                "Brittany",
+                "German Wirehaired Pointer"
+            ],
+            "expected_filters": {
+                "energy": "high"
+            },
+            "empty_retrieval": false
+        },
+        "tags": ["rag", "energy", "active_dog"],
+        "note": "检查高精力犬种资料的真实召回质量。"
+    },
+    {
+        "case_id": "rag_retrieval_low_shedding_001",
+        "category": "rag_retrieval_behavior",
+        "question": "我想找掉毛少一点的狗，有什么推荐？",
+        "input_state": {
+            "top_k": 5
+        },
+        "expected": {
+            "expected_dog_names": [
+                "Poodle",
+                "Romanian Mioritic Shepherd Dog",
+                "Dachshund",
+                "Cane Corso"
+            ],
+            "expected_filters": {
+                "shedding": "low"
+            },
+            "empty_retrieval": false
+        },
+        "tags": ["rag", "shedding", "low_shedding"],
+        "note": "检查低掉毛元数据条件的真实解析与召回。"
+    },
+    {
+        "case_id": "rag_retrieval_beagle_001",
+        "category": "rag_retrieval_behavior",
+        "question": "Beagle 是不是很爱叫？",
+        "input_state": {
+            "top_k": 5
+        },
+        "expected": {
+            "expected_dog_names": ["Beagle"],
+            "expected_filters": {
+                "dog_name": "Beagle"
+            },
+            "top1_hit": true,
+            "empty_retrieval": false,
+            "quality_is_usable": true
+        },
+        "tags": ["rag", "dog_name", "barking"],
+        "note": "检查明确犬种名问题的精确解析与第一名召回。"
+    },
+    {
+        "case_id": "rag_retrieval_large_trainable_001",
+        "category": "rag_retrieval_behavior",
+        "question": "我想养一只体型比较大的狗，并且希望它容易训练",
+        "input_state": {
+            "top_k": 5
+        },
+        "expected": {
+            "expected_dog_names": [
+                "Golden Retriever",
+                "Labrador Retriever",
+                "German Shepherd Dog",
+                "Flat-Coated Retriever",
+                "Treeing Walker Coonhound",
+                "Dogo Argentino",
+                "German Wirehaired Pointer",
+                "Australian Shepherd"
+            ],
+            "expected_filters": {
+                "size": "large",
+                "trainability": "high"
+            },
+            "empty_retrieval": false
+        },
+        "tags": ["rag", "large_dog", "trainability", "metadata_filter"],
+        "note": "检查大型犬和高训练度组合条件的真实解析与召回。"
+    },
+    {
+        "case_id": "rag_retrieval_chihuahua_001",
+        "category": "rag_retrieval_behavior",
+        "question": "Chihuahua 的寿命和体型信息是什么？",
+        "input_state": {
+            "top_k": 5
+        },
+        "expected": {
+            "expected_dog_names": ["Chihuahua"],
+            "expected_filters": {
+                "dog_name": "Chihuahua"
+            },
+            "top1_hit": true,
+            "empty_retrieval": false,
+            "quality_is_usable": true
+        },
+        "tags": ["rag", "dog_name", "lifespan", "size"],
+        "note": "检查基础信息问题的精确解析与第一名召回。"
+    }
+]
