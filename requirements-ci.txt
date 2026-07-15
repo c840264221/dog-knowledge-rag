@@ -1,0 +1,5 @@
+-r requirements.txt
+
+# CI 测试与异步测试依赖。
+pytest>=8.0,<10.0
+pytest-asyncio>=0.23,<2.0

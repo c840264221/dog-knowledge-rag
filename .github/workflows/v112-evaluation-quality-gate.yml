@@ -1,0 +1,71 @@
+name: V1.12 Evaluation Quality Gate
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: evaluation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  evaluation-quality-gate:
+    name: Core Evaluation Quality Gate
+    runs-on: windows-latest
+    timeout-minutes: 40
+
+    env:
+      PYTHONUTF8: "1"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-ci.txt
+
+      - name: Display environment
+        shell: pwsh
+        run: |
+          python --version
+          python -m pip --version
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-ci.txt
+
+      - name: Run evaluation unit tests
+        shell: pwsh
+        run: |
+          pytest tests/unit/evaluation -v
+
+      - name: Run core evaluation quality gate
+        shell: pwsh
+        run: |
+          python -m scripts.evaluation.evaluate_v112_all --profile core
+
+      - name: Upload evaluation reports
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: v112-core-evaluation-report
+          path: |
+            evaluation/reports/v112_core_evaluation_report.json
+            evaluation/reports/v112_core_evaluation_report.md
+          if-no-files-found: warn
+          retention-days: 14
