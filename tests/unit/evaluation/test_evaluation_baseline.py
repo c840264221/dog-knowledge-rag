@@ -4,6 +4,8 @@ from pathlib import Path
 from src.evaluation.baseline import (
     compare_evaluation_report_to_baseline,
     load_evaluation_baseline,
+    render_evaluation_regression_markdown,
+    write_evaluation_regression_report,
 )
 from src.evaluation.schemas import (
     EvaluationBaselineMetric,
@@ -254,3 +256,46 @@ def test_missing_baseline_metric_should_fail_closed() -> None:
     )
     assert missing_check.current_value is None
     assert "缺失" in missing_check.message
+
+
+def test_regression_report_should_render_and_write_two_formats(
+    tmp_path: Path,
+) -> None:
+    """
+    检查一次比较结果能否同时保存成 JSON 和 Markdown。
+
+    功能：
+        准备一份没有退步的比较结果并写入临时目录，然后检查 JSON 中是否
+        有 passed 和 checks，Markdown 中是否有成绩表格和中文结论。
+
+    参数含义：
+        tmp_path:
+            pytest 临时创建的目录，测试结束后会自动清理。
+
+    返回值含义：
+        None。
+    """
+
+    regression_report = compare_evaluation_report_to_baseline(
+        report=build_current_report(),
+        baseline=build_baseline(),
+    )
+    json_path = tmp_path / "regression.json"
+    markdown_path = tmp_path / "regression.md"
+
+    write_evaluation_regression_report(
+        report=regression_report,
+        json_path=json_path,
+        markdown_path=markdown_path,
+    )
+
+    json_text = json_path.read_text(encoding="utf-8")
+    markdown = markdown_path.read_text(encoding="utf-8")
+    assert '"passed": true' in json_text
+    assert '"checks"' in json_text
+    assert "## Regression Checks" in markdown
+    assert "top1_accuracy" in markdown
+    assert "没有发现相对历史基线的质量回退" in markdown
+    assert render_evaluation_regression_markdown(
+        regression_report
+    ) == markdown
