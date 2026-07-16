@@ -678,3 +678,245 @@ class EvaluationSuiteReport(BaseModel):
         default_factory=dict,
         description="报告扩展元数据。",
     )
+
+
+class EvaluationBaselineMetric(BaseModel):
+    """
+    记录某一个指标以前考了多少分，以及这个指标应该越高越好还是越低越好
+    某个具体指标在 V1.12 时是多少，以及以后允许它下降多少。
+
+    功能：
+        保存指标所属类别、基线值、质量方向和允许退步幅度，供回归比较器
+        判断当前成绩是否比已发布版本明显下降。
+
+    参数含义：
+        category：这个指标属于哪个评估类别。
+        metric_name：具体比较哪个指标。
+        baseline_value：历史基线成绩。
+        direction：这个指标应该越高越好，还是越低越好。
+        maximum_regression：最多允许比基线差多少。
+    返回值含义：
+        EvaluationBaselineMetric:
+            一项可持久化并参与回归判断的指标基线。
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        validate_assignment=True,
+    )
+
+    category: str = Field(..., description="指标所属评估类别。")
+    metric_name: str = Field(..., description="专业总体指标名称。")
+    baseline_value: float = Field(..., description="已验证的指标基线值。")
+    direction: Literal[
+        "higher_is_better",
+        "lower_is_better",
+    ] = Field(..., description="指标质量方向。")
+    maximum_regression: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="最多允许的绝对退步幅度。",
+    )
+
+
+class EvaluationBaselineSnapshot(BaseModel):
+    """
+    保存 V1.12 整套评估的历史成绩，作为以后比较的标准答案。
+    某个已经验证通过的版本的完整历史成绩。
+
+    功能：
+        固化已发布版本的整体通过率、各类别通过率和专业总体指标，作为后续
+        代码变更执行 Regression Detection（回归检测）时的比较标准。
+
+    参数含义：
+        baseline_name：这份基线的唯一名称。
+        source_suite_name：它来自哪套评估。
+        source_version：它来自哪个版本。
+        overall_pass_rate：当时整套评估的通过率。
+        category_pass_rates：当时每个类别的通过率。
+        metrics：当时需要重点比较的 RAG 等专业指标。
+        metadata：Tag、用例数量、提交编号等补充信息。
+
+    返回值含义：
+        EvaluationBaselineSnapshot:
+            可写入 JSON 并由比较器重复加载的版本成绩基线。
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        validate_assignment=True,
+    )
+
+    baseline_name: str = Field(..., description="评估基线名称。")
+    source_suite_name: str = Field(..., description="来源评估套件名称。")
+    source_version: str = Field(..., description="来源评估版本。")
+    overall_pass_rate: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="来源版本整体通过率。",
+    )
+    category_pass_rates: dict[str, float] = Field(
+        default_factory=dict,
+        description="各评估类别的基线通过率。",
+    )
+    metrics: list[EvaluationBaselineMetric] = Field(
+        default_factory=list,
+        description="需要比较的专业总体指标基线。",
+    )
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="基线来源扩展信息。",
+    )
+
+    @field_validator("category_pass_rates")
+    @classmethod
+    def validate_category_pass_rates(
+        cls,
+        value: dict[str, float],
+    ) -> dict[str, float]:
+        """
+        校验所有类别通过率均位于合法百分比范围。
+
+        参数含义：
+            value:
+                类别名称到通过率的映射。
+
+        返回值含义：
+            dict[str, float]:
+                校验通过后的原始映射。
+        """
+
+        invalid_categories = [
+            category
+            for category, pass_rate in value.items()
+            if not 0.0 <= pass_rate <= 1.0
+        ]
+        if invalid_categories:
+            raise ValueError(
+                "类别通过率必须位于 0.0 到 1.0: "
+                f"{sorted(invalid_categories)}"
+            )
+        return value
+
+
+class EvaluationRegressionCheck(BaseModel):
+    """
+    拿当前的一个成绩和历史成绩比较，记录这一项有没有退步。
+    当前版本的某一个成绩，与 V1.12 对比后的结果。
+
+    功能：
+        记录比较范围、基线值、当前值、变化量、允许退步幅度和判断结论。
+
+    参数含义：
+        scope：比较的是整体、某个类别，还是某个专业指标。
+        category：属于哪个类别；整体通过率不需要类别。
+        metric_name：比较的成绩名称。
+        baseline_value：V1.12 的历史值。
+        current_value：当前版本的实际值。
+        delta：当前值减去基线值。
+        direction：越高越好还是越低越好。
+        maximum_regression：最多允许退步多少。
+        passed：这一项是否没有发生不可接受的退步。
+        message：人工可读的比较说明。
+
+    返回值含义：
+        EvaluationRegressionCheck:
+            一项结构化的版本成绩回归检查结果。
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        validate_assignment=True,
+    )
+
+    scope: Literal["overall", "category", "metric"] = Field(
+        ...,
+        description="回归检查范围。",
+    )
+    category: str | None = Field(default=None, description="关联评估类别。")
+    metric_name: str = Field(..., description="参与比较的指标名称。")
+    baseline_value: float = Field(..., description="基线指标值。")
+    current_value: float | None = Field(
+        default=None,
+        description="当前报告指标值。",
+    )
+    delta: float | None = Field(
+        default=None,
+        description="当前值减去基线值。",
+    )
+    direction: Literal[
+        "higher_is_better",
+        "lower_is_better",
+    ] = Field(..., description="指标质量方向。")
+    maximum_regression: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="最多允许的绝对退步幅度。",
+    )
+    passed: bool = Field(..., description="当前回归检查是否通过。")
+    message: str = Field(default="", description="回归检查中文说明。")
+
+
+class EvaluationRegressionReport(BaseModel):
+    """
+    收集所有比较结果，给出这次版本整体有没有质量回退。
+    当前版本与 V1.12 完整比较后的回归检测报告。
+
+    功能：
+        汇总整体、类别和专业指标检查，并提供是否发生质量回归的总判断。
+
+    参数含义：
+        baseline_name：使用了哪份历史基线。
+        current_suite_name：当前运行的是哪套评估。
+        current_version：当前报告版本。
+        checks：所有 EvaluationRegressionCheck。
+        passed：是否所有回归检查都通过。
+
+    返回值含义：
+        EvaluationRegressionReport:
+            可供后续 CLI 和 CI 使用的结构化回归检测报告。
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        validate_assignment=True,
+    )
+
+    baseline_name: str = Field(..., description="本次使用的基线名称。")
+    current_suite_name: str = Field(..., description="当前评估套件名称。")
+    current_version: str = Field(..., description="当前评估报告版本。")
+    checks: list[EvaluationRegressionCheck] = Field(
+        default_factory=list,
+        description="全部回归检查结果。",
+    )
+
+    @computed_field
+    @property
+    def passed(self) -> bool:
+        """
+        计算整份回归报告是否通过。
+
+        参数含义：
+            无。
+
+        返回值含义：
+            bool:
+                至少产生一项检查且全部检查通过时返回 True。
+        """
+
+        return bool(self.checks) and all(check.passed for check in self.checks)
+
+    def failed_checks(self) -> list[EvaluationRegressionCheck]:
+        """
+        返回所有未通过的回归检查。
+
+        参数含义：
+            无。
+
+        返回值含义：
+            list[EvaluationRegressionCheck]:
+                当前报告中发生质量退步或指标缺失的检查项。
+        """
+
+        return [check for check in self.checks if not check.passed]

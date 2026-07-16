@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   full-rag-evaluation:
-    name: Full RAG Evaluation Quality Gate
+    name: Full RAG Evaluation and Regression Gate
     runs-on: windows-latest
     timeout-minutes: 90
 
@@ -86,6 +86,11 @@ jobs:
         run: |
           python -m scripts.evaluation.evaluate_v112_all --profile full
 
+      - name: Compare evaluation with V1.12 baseline
+        shell: pwsh
+        run: |
+          python -m scripts.evaluation.compare_v113_evaluation_baseline
+
       - name: Prepare full evaluation artifacts
         if: always()
         shell: pwsh
@@ -93,6 +98,8 @@ jobs:
           $artifactDir = "evaluation/artifacts/full-rag"
           $jsonReport = "evaluation/reports/v112_agent_evaluation_report.json"
           $markdownReport = "evaluation/reports/v112_agent_evaluation_report.md"
+          $regressionJsonReport = "evaluation/reports/v113_evaluation_regression_report.json"
+          $regressionMarkdownReport = "evaluation/reports/v113_evaluation_regression_report.md"
           New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
 
           $diagnostics = @(
@@ -102,6 +109,8 @@ jobs:
             "commit_sha=$env:GITHUB_SHA"
             "json_report_found=$(Test-Path -LiteralPath $jsonReport)"
             "markdown_report_found=$(Test-Path -LiteralPath $markdownReport)"
+            "regression_json_report_found=$(Test-Path -LiteralPath $regressionJsonReport)"
+            "regression_markdown_report_found=$(Test-Path -LiteralPath $regressionMarkdownReport)"
           )
           $diagnostics | Set-Content `
             -LiteralPath "$artifactDir/artifact-diagnostics.txt" `
@@ -117,6 +126,18 @@ jobs:
             Copy-Item -LiteralPath $markdownReport -Destination $artifactDir -Force
           } else {
             Write-Warning "Markdown evaluation report was not generated: $markdownReport"
+          }
+
+          if (Test-Path -LiteralPath $regressionJsonReport) {
+            Copy-Item -LiteralPath $regressionJsonReport -Destination $artifactDir -Force
+          } else {
+            Write-Warning "JSON regression report was not generated: $regressionJsonReport"
+          }
+
+          if (Test-Path -LiteralPath $regressionMarkdownReport) {
+            Copy-Item -LiteralPath $regressionMarkdownReport -Destination $artifactDir -Force
+          } else {
+            Write-Warning "Markdown regression report was not generated: $regressionMarkdownReport"
           }
 
           Get-ChildItem -LiteralPath $artifactDir | Select-Object Name, Length
@@ -137,11 +158,24 @@ jobs:
             ) | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding UTF8
           }
 
+          $regressionReportPath = "evaluation/reports/v113_evaluation_regression_report.md"
+          if (Test-Path -LiteralPath $regressionReportPath) {
+            Get-Content -LiteralPath $regressionReportPath -Raw -Encoding UTF8 |
+              Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding UTF8
+          } else {
+            @(
+              ""
+              "# V1.13 Evaluation Regression Report"
+              ""
+              "> Regression report was not generated. Check the baseline comparison step and artifact diagnostics."
+            ) | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding UTF8
+          }
+
       - name: Upload full evaluation reports
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: v112-full-rag-evaluation-report-${{ github.run_number }}
+          name: v113-full-rag-regression-report-${{ github.run_number }}
           path: evaluation/artifacts/full-rag
           if-no-files-found: error
           retention-days: 30
