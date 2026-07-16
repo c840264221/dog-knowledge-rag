@@ -1,0 +1,49 @@
+{
+  "baseline_name": "v112_full_evaluation",
+  "source_suite_name": "dog_agent_v112_evaluation",
+  "source_version": "V1.12.9",
+  "overall_pass_rate": 1.0,
+  "category_pass_rates": {
+    "root_route": 1.0,
+    "tool_behavior": 1.0,
+    "dog_knowledge_behavior": 1.0,
+    "memory_recall_behavior": 1.0,
+    "main_graph_behavior": 1.0,
+    "rag_retrieval_behavior": 1.0
+  },
+  "metrics": [
+    {
+      "category": "rag_retrieval_behavior",
+      "metric_name": "hit_at_k",
+      "baseline_value": 1.0,
+      "direction": "higher_is_better",
+      "maximum_regression": 0.0
+    },
+    {
+      "category": "rag_retrieval_behavior",
+      "metric_name": "top1_accuracy",
+      "baseline_value": 0.9,
+      "direction": "higher_is_better",
+      "maximum_regression": 0.0
+    },
+    {
+      "category": "rag_retrieval_behavior",
+      "metric_name": "filter_match_rate",
+      "baseline_value": 1.0,
+      "direction": "higher_is_better",
+      "maximum_regression": 0.0
+    },
+    {
+      "category": "rag_retrieval_behavior",
+      "metric_name": "empty_retrieval_rate",
+      "baseline_value": 0.0,
+      "direction": "lower_is_better",
+      "maximum_regression": 0.0
+    }
+  ],
+  "metadata": {
+    "source_tag": "v1.12.0",
+    "total_cases": 37,
+    "quality_gate_passed": true
+  }
+}
