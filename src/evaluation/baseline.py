@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from src.evaluation.schemas import (
     EvaluationBaselineMetric,
@@ -12,6 +13,23 @@ from src.evaluation.schemas import (
     EvaluationRegressionReport,
     EvaluationSuiteReport,
 )
+
+
+MetricDirection = Literal[
+    "higher_is_better",
+    "lower_is_better",
+]
+
+DEFAULT_BASELINE_METRIC_DIRECTIONS: dict[
+    tuple[str, str],
+    MetricDirection,
+] = {
+    # 同名指标可能出现在不同类别中，所以必须用“类别 + 指标名”共同定位。
+    ("rag_retrieval_behavior", "hit_at_k"): "higher_is_better",
+    ("rag_retrieval_behavior", "top1_accuracy"): "higher_is_better",
+    ("rag_retrieval_behavior", "filter_match_rate"): "higher_is_better",
+    ("rag_retrieval_behavior", "empty_retrieval_rate"): "lower_is_better",
+}
 
 
 def load_evaluation_baseline(
@@ -213,6 +231,247 @@ def compare_evaluation_report_to_baseline(
         current_version=report.version,
         checks=checks,
     )
+
+
+def build_evaluation_baseline_snapshot(
+    report: EvaluationSuiteReport,
+    current_baseline: EvaluationBaselineSnapshot,
+    baseline_name: str,
+    *,
+    maximum_regression: float = 0.0,
+    metric_directions: Mapping[
+        tuple[str, str],
+        MetricDirection,
+    ] = DEFAULT_BASELINE_METRIC_DIRECTIONS,
+    metadata: dict[str, Any] | None = None,
+) -> EvaluationBaselineSnapshot | None:
+    """
+    只有当前成绩比正式基线更好时，才生成候选基线。
+
+    功能：
+        先确认当前报告包含正式基线要求的所有类别和指标，再检查旧成绩没有
+        任何下降。例如正式 Top1 是 90%，当前提高到 95% 时生成候选；如果
+        仍是 90%，返回 None，表示没有必要更新；如果降到 85%，直接报错。
+
+    参数含义：
+        report:
+            准备和正式基线比较的当前完整成绩单。
+        current_baseline:
+            团队目前正在使用的正式历史基线，用来判断当前成绩是否真正提高。
+        baseline_name:
+            新基线的名称，例如 v113_full_evaluation_candidate。
+        maximum_regression:
+            后续版本最多允许比这份基线差多少。0.0 表示不允许下降。
+        metric_directions:
+            说明每个专业指标是越高越好还是越低越好，不能在这里自动猜测。
+        metadata:
+            需要额外记录的信息，例如 Git commit 或数据版本。
+
+    返回值含义：
+        EvaluationBaselineSnapshot:
+            当前成绩至少有一项提高时，返回新的候选基线对象。
+        None:
+            当前所有成绩和正式基线完全相同时返回，表示不需要生成新文件。
+    """
+
+    if not baseline_name.strip():
+        raise ValueError("候选基线名称不能为空")
+    if maximum_regression < 0.0:
+        raise ValueError("maximum_regression 不能小于 0")
+    if not report.quality_gate.passed:
+        raise ValueError("当前评估没有通过质量门禁，不能生成候选基线")
+    if report.runner_errors:
+        raise ValueError("当前评估包含 Runner 错误，不能生成候选基线")
+    if not report.category_summaries:
+        raise ValueError("当前评估没有类别成绩，不能生成候选基线")
+
+    report_categories = {
+        summary.category
+        for summary in report.category_summaries
+    }
+    required_categories = set(current_baseline.category_pass_rates)
+    missing_categories = sorted(required_categories - report_categories)
+    if missing_categories:
+        raise ValueError(
+            "当前报告缺少正式基线要求的评估类别："
+            + "、".join(missing_categories)
+        )
+
+    category_pass_rates: dict[str, float] = {}
+    metrics: list[EvaluationBaselineMetric] = []
+    for summary in report.category_summaries:
+        if summary.total_cases == 0:
+            raise ValueError(
+                f"{summary.category} 没有运行任何用例，不能写入候选基线"
+            )
+        category_pass_rates[summary.category] = summary.pass_rate
+        for metric_name, raw_value in summary.metrics.items():
+            direction = metric_directions.get(
+                (summary.category, metric_name)
+            )
+            if direction is None:
+                raise ValueError(
+                    f"不知道指标 {summary.category}.{metric_name} "
+                    "是越高越好还是越低越好"
+                )
+            if (
+                not isinstance(raw_value, (int, float))
+                or isinstance(raw_value, bool)
+            ):
+                raise ValueError(
+                    f"指标 {summary.category}.{metric_name} 不是数字"
+                )
+            metrics.append(
+                EvaluationBaselineMetric(
+                    category=summary.category,
+                    metric_name=metric_name,
+                    baseline_value=float(raw_value),
+                    direction=direction,
+                    maximum_regression=maximum_regression,
+                )
+            )
+
+    strict_baseline = current_baseline.model_copy(deep=True)
+    strict_baseline.metrics = [
+        metric.model_copy(update={"maximum_regression": 0.0})
+        for metric in current_baseline.metrics
+    ]
+    regression_report = compare_evaluation_report_to_baseline(
+        report=report,
+        baseline=strict_baseline,
+    )
+    if not regression_report.passed:
+        failure_messages = "；".join(
+            check.message
+            for check in regression_report.failed_checks()
+        )
+        raise ValueError(
+            "当前报告缺少正式基线要求的类别或指标，或者成绩发生下降："
+            f"{failure_messages}"
+        )
+
+    if not _report_has_strict_improvement(
+        report=report,
+        baseline=current_baseline,
+    ):
+        return None
+
+    baseline_metadata = dict(metadata or {})
+    baseline_metadata.update(
+        {
+            "source_generated_at": report.generated_at.isoformat(),
+            "source_total_cases": report.total_cases,
+            "source_quality_gate_policy": report.quality_gate.policy_name,
+            "source_quality_gate_passed": report.quality_gate.passed,
+        }
+    )
+    return EvaluationBaselineSnapshot(
+        baseline_name=baseline_name.strip(),
+        source_suite_name=report.suite_name,
+        source_version=report.version,
+        overall_pass_rate=report.pass_rate,
+        category_pass_rates=category_pass_rates,
+        metrics=metrics,
+        metadata=baseline_metadata,
+    )
+
+
+def _report_has_strict_improvement(
+    *,
+    report: EvaluationSuiteReport,
+    baseline: EvaluationBaselineSnapshot,
+) -> bool:
+    """
+    检查当前报告是否至少有一项成绩真正优于正式基线。
+
+    功能：
+        整体通过率和类别通过率变高算提高；越高越好的指标数值变大算提高；
+        越低越好的指标数值变小也算提高。所有数值完全相同时返回 False。
+
+    参数含义：
+        report:
+            当前版本的完整评估成绩单。
+        baseline:
+            团队当前使用的正式历史基线。
+
+    返回值含义：
+        bool:
+            至少一项成绩真正变好时返回 True；全部相同时返回 False。
+    """
+
+    if report.pass_rate > baseline.overall_pass_rate:
+        return True
+
+    summaries_by_category = {
+        summary.category: summary
+        for summary in report.category_summaries
+    }
+    for category, baseline_pass_rate in baseline.category_pass_rates.items():
+        summary = summaries_by_category.get(category)
+        if summary is not None and summary.pass_rate > baseline_pass_rate:
+            return True
+
+    for baseline_metric in baseline.metrics:
+        summary = summaries_by_category.get(baseline_metric.category)
+        if summary is None:
+            continue
+        raw_current = summary.metrics.get(baseline_metric.metric_name)
+        if (
+            not isinstance(raw_current, (int, float))
+            or isinstance(raw_current, bool)
+        ):
+            continue
+        current_value = float(raw_current)
+        if (
+            baseline_metric.direction == "higher_is_better"
+            and current_value > baseline_metric.baseline_value
+        ):
+            return True
+        if (
+            baseline_metric.direction == "lower_is_better"
+            and current_value < baseline_metric.baseline_value
+        ):
+            return True
+    return False
+
+
+def write_evaluation_baseline_snapshot(
+    baseline: EvaluationBaselineSnapshot,
+    output_path: str | Path,
+    *,
+    overwrite: bool = False,
+) -> Path:
+    """
+    把候选基线保存成 JSON 文件。
+
+    功能：
+        把内存中的候选基线写到指定位置。默认情况下，如果目标文件已经
+        存在就停止，避免不小心覆盖团队正在使用的正式历史成绩。
+
+    参数含义：
+        baseline:
+            已经从合格评估报告中生成的候选基线。
+        output_path:
+            候选基线 JSON 文件需要保存到哪里。
+        overwrite:
+            是否允许覆盖已有文件。默认 False，只有明确传入 True 才覆盖。
+
+    返回值含义：
+        Path:
+            实际写入的候选基线文件路径。
+    """
+
+    resolved_path = Path(output_path)
+    if resolved_path.exists() and not overwrite:
+        raise FileExistsError(
+            f"候选基线文件已经存在，未执行覆盖: {resolved_path}"
+        )
+    resolved_path.parent.mkdir(parents=True, exist_ok=True)
+    resolved_path.write_text(
+        baseline.model_dump_json(indent=2),
+        encoding="utf-8",
+    )
+    return resolved_path
 
 
 def _compare_category_metric(
