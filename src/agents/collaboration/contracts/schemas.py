@@ -39,6 +39,7 @@ AgentTaskPlanStatus = Literal[
 ]
 
 AgentTaskResultStatus = Literal[
+    "awaiting_input",
     "completed",
     "failed",
     "skipped",
@@ -304,7 +305,7 @@ class AgentTaskResult(BaseModel):
         assigned_agent:
             实际执行该步骤的 Agent 名称。
         status:
-            当前步骤最终是完成、失败还是跳过。
+            当前步骤是等待用户输入、完成、失败还是跳过。
         summary:
             方便最终聚合器阅读的结果摘要。
         output:
@@ -313,6 +314,10 @@ class AgentTaskResult(BaseModel):
             支撑当前结果的证据编号。
         error_message:
             执行失败时的具体错误原因。
+        requires_user_input:
+            当前步骤是否需要暂停并等待用户补充信息或确认。
+        clarification_prompt:
+            当前步骤等待用户时需要展示的问题或确认提示。
         latency_ms:
             当前步骤执行耗时，单位毫秒。
         metadata:
@@ -352,6 +357,14 @@ class AgentTaskResult(BaseModel):
         default=None,
         description="步骤失败原因。",
     )
+    requires_user_input: bool = Field(
+        default=False,
+        description="当前步骤是否正在等待用户输入。",
+    )
+    clarification_prompt: str = Field(
+        default="",
+        description="当前步骤等待用户时展示的问题或确认提示。",
+    )
     latency_ms: float | None = Field(
         default=None,
         ge=0.0,
@@ -363,13 +376,13 @@ class AgentTaskResult(BaseModel):
     )
 
     @model_validator(mode="after")
-    def validate_failure_message(self) -> Self:
+    def validate_result_details(self) -> Self:
         """
-        检查失败结果是否说明了失败原因。
+        检查失败结果和等待输入结果是否包含必要说明。
 
         功能：
-            要求 failed 状态必须携带 error_message，避免最终聚合器只知道
-            失败却不知道原因。
+            failed 必须携带 error_message；awaiting_input 必须明确标记需要
+            用户输入并提供提示，避免调度器暂停后不知道该向用户问什么。
 
         参数含义：
             self:
@@ -377,11 +390,24 @@ class AgentTaskResult(BaseModel):
 
         返回值含义：
             AgentTaskResult:
-                错误信息符合状态要求时返回当前结果。
+                失败和等待输入信息符合状态要求时返回当前结果。
         """
 
         if self.status == "failed" and not self.error_message:
             raise ValueError("失败的任务结果必须提供 error_message")
+        if self.status == "awaiting_input":
+            if not self.requires_user_input:
+                raise ValueError(
+                    "awaiting_input 结果必须设置 requires_user_input=True"
+                )
+            if not self.clarification_prompt:
+                raise ValueError(
+                    "awaiting_input 结果必须提供 clarification_prompt"
+                )
+        elif self.requires_user_input:
+            raise ValueError(
+                "只有 awaiting_input 结果才能设置 requires_user_input=True"
+            )
         return self
 
 
@@ -493,15 +519,15 @@ class MultiAgentTaskResult(BaseModel):
                     "已完成的协作仍缺少步骤结果: "
                     f"{missing_result_ids}"
                 )
-            failed_result_ids = sorted(
+            incomplete_result_ids = sorted(
                 result.step_id
                 for result in self.task_results
-                if result.status == "failed"
+                if result.status != "completed"
             )
-            if failed_result_ids:
+            if incomplete_result_ids:
                 raise ValueError(
-                    "已完成的协作不能包含失败步骤: "
-                    f"{failed_result_ids}"
+                    "已完成的协作不能包含未完成步骤: "
+                    f"{incomplete_result_ids}"
                 )
             if not self.final_answer:
                 raise ValueError("已完成的协作必须提供 final_answer")

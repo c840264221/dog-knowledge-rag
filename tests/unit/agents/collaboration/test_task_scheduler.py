@@ -12,11 +12,14 @@ import asyncio
 from collections.abc import Mapping
 from types import SimpleNamespace
 
+import pytest
+
 import src.agents.collaboration.scheduler.scheduler as scheduler_module
 from src.agents.collaboration import (
     AgentTaskPlan,
     AgentTaskResult,
     AgentTaskStep,
+    MultiAgentTaskResult,
     MultiAgentTaskScheduler,
 )
 
@@ -376,3 +379,184 @@ def test_scheduler_log_should_use_indented_json(monkeypatch) -> None:
     assert len(messages) == 1
     assert '\n    "event": "test_event"' in messages[0]
     assert '\n    "plan_id": "plan_001"' in messages[0]
+
+
+def test_scheduler_should_pause_when_worker_awaits_input() -> None:
+    """
+    检查 Worker 等待用户确认时是否暂停计划且不执行后续步骤。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    downstream_calls: list[tuple[str, list[str]]] = []
+
+    async def waiting_worker(
+        step: AgentTaskStep,
+        dependency_results: Mapping[str, AgentTaskResult],
+    ) -> AgentTaskResult:
+        """返回一条等待用户确认的标准步骤结果。"""
+
+        _ = dependency_results
+        return AgentTaskResult(
+            step_id=step.step_id,
+            assigned_agent=step.assigned_agent,
+            status="awaiting_input",
+            requires_user_input=True,
+            clarification_prompt="是否允许读取宠物档案？",
+        )
+
+    scheduler = MultiAgentTaskScheduler(
+        workers={
+            "profile_agent": waiting_worker,
+            "health_agent": build_success_worker(downstream_calls),
+        }
+    )
+    plan = AgentTaskPlan(
+        plan_id="worker_waiting_plan",
+        objective="查询狗狗健康知识",
+        steps=[
+            AgentTaskStep(
+                step_id="load_profile",
+                title="读取资料",
+                assigned_agent="profile_agent",
+            ),
+            AgentTaskStep(
+                step_id="query_health",
+                title="查询健康知识",
+                assigned_agent="health_agent",
+                depends_on=["load_profile"],
+            ),
+        ],
+    )
+
+    result = asyncio.run(scheduler.execute(plan))
+
+    assert result.status == "awaiting_input"
+    assert result.plan.status == "awaiting_input"
+    assert result.plan.requires_user_input is True
+    assert result.plan.steps[0].status == "awaiting_input"
+    assert result.plan.steps[1].status == "pending"
+    assert result.metadata["awaiting_step_ids"] == ["load_profile"]
+    assert downstream_calls == []
+
+
+def test_scheduler_should_resume_without_repeating_completed_steps() -> None:
+    """
+    检查用户回答后是否只重跑等待步骤并继续执行后续步骤。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    profile_calls: list[dict[str, object]] = []
+    downstream_calls: list[tuple[str, list[str]]] = []
+
+    async def resumable_profile_worker(
+        step: AgentTaskStep,
+        dependency_results: Mapping[str, AgentTaskResult],
+    ) -> AgentTaskResult:
+        """第一次等待确认，第二次读取恢复输入后完成步骤。"""
+
+        _ = dependency_results
+        profile_calls.append(dict(step.input_data))
+        if not step.input_data.get("multi_agent_is_resuming"):
+            return AgentTaskResult(
+                step_id=step.step_id,
+                assigned_agent=step.assigned_agent,
+                status="awaiting_input",
+                output={"pending_action": "读取宠物档案"},
+                requires_user_input=True,
+                clarification_prompt="是否允许读取宠物档案？",
+            )
+        return AgentTaskResult(
+            step_id=step.step_id,
+            assigned_agent=step.assigned_agent,
+            status="completed",
+            summary="用户已授权，资料读取完成。",
+        )
+
+    scheduler = MultiAgentTaskScheduler(
+        workers={
+            "profile_agent": resumable_profile_worker,
+            "health_agent": build_success_worker(downstream_calls),
+        }
+    )
+    plan = AgentTaskPlan(
+        plan_id="worker_resume_plan",
+        objective="读取资料后查询健康知识",
+        steps=[
+            AgentTaskStep(
+                step_id="load_profile",
+                title="读取资料",
+                assigned_agent="profile_agent",
+            ),
+            AgentTaskStep(
+                step_id="query_health",
+                title="查询健康知识",
+                assigned_agent="health_agent",
+                depends_on=["load_profile"],
+            ),
+        ],
+    )
+
+    paused_result = asyncio.run(scheduler.execute(plan))
+    resumed_result = asyncio.run(
+        scheduler.resume(
+            paused_result,
+            user_inputs={"load_profile": "允许读取"},
+        )
+    )
+
+    assert resumed_result.status == "running"
+    assert resumed_result.plan.status == "completed"
+    assert len(profile_calls) == 2
+    assert profile_calls[1]["multi_agent_resume_input"] == "允许读取"
+    assert profile_calls[1]["multi_agent_previous_worker_output"] == {
+        "pending_action": "读取宠物档案"
+    }
+    assert downstream_calls == [("query_health", ["load_profile"])]
+    assert resumed_result.metadata["resume_count"] == 1
+
+
+def test_scheduler_resume_should_require_all_waiting_inputs() -> None:
+    """
+    检查恢复时遗漏等待步骤回答是否被明确拒绝。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    waiting_result = AgentTaskResult(
+        step_id="load_profile",
+        assigned_agent="profile_agent",
+        status="awaiting_input",
+        requires_user_input=True,
+        clarification_prompt="是否允许读取宠物档案？",
+    )
+    plan_data = build_scheduler_plan().model_dump(mode="python")
+    plan_data["status"] = "awaiting_input"
+    plan_data["requires_user_input"] = True
+    plan_data["clarification_prompt"] = "是否允许读取宠物档案？"
+    plan_data["steps"][0]["status"] = "awaiting_input"
+    paused_result = MultiAgentTaskResult(
+        collaboration_id="resume_missing_input_task",
+        plan=AgentTaskPlan.model_validate(plan_data),
+        status="awaiting_input",
+        task_results=[waiting_result],
+    )
+    scheduler = MultiAgentTaskScheduler(
+        workers={"profile_agent": build_success_worker([])}
+    )
+
+    with pytest.raises(ValueError, match="仍缺少等待步骤"):
+        asyncio.run(scheduler.resume(paused_result, user_inputs={}))

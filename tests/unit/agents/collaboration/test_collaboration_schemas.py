@@ -246,6 +246,45 @@ def test_failed_task_result_should_require_error_message() -> None:
         )
 
 
+def test_awaiting_task_result_should_require_user_prompt() -> None:
+    """
+    检查等待用户输入的 Worker 结果是否必须提供状态标记和明确提示。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    with pytest.raises(ValidationError, match="requires_user_input=True"):
+        AgentTaskResult(
+            step_id="confirm_tool",
+            assigned_agent="tool_agent",
+            status="awaiting_input",
+            clarification_prompt="是否允许执行数据库查询？",
+        )
+
+    with pytest.raises(ValidationError, match="clarification_prompt"):
+        AgentTaskResult(
+            step_id="confirm_tool",
+            assigned_agent="tool_agent",
+            status="awaiting_input",
+            requires_user_input=True,
+        )
+
+    result = AgentTaskResult(
+        step_id="confirm_tool",
+        assigned_agent="tool_agent",
+        status="awaiting_input",
+        requires_user_input=True,
+        clarification_prompt="是否允许执行数据库查询？",
+    )
+
+    assert result.requires_user_input is True
+    assert "数据库查询" in result.clarification_prompt
+
+
 def test_completed_collaboration_should_dump_to_plain_dict() -> None:
     """
     检查完整协作结果是否可以转换成 checkpoint 友好的普通字典。
