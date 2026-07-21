@@ -2,6 +2,12 @@ from typing import Any
 
 import pytest
 
+from src.agents.collaboration import (
+    AgentTaskPlan,
+    AgentTaskResult,
+    AgentTaskStep,
+    MultiAgentTaskResult,
+)
 from src.graph import graph_run
 from src.runtime.resume.contracts import (
     GraphFinalResult,
@@ -345,6 +351,79 @@ async def test_restore_pending_tool_clarification_state_should_use_whitelist() -
     assert restored["tool_agent_pending_original_question"] == "查询数据库中的表"
     assert restored["final_answer"] == ""
     assert restored["tool_results"] == []
+
+
+@pytest.mark.asyncio
+async def test_restore_pending_multi_agent_state_should_use_whitelist() -> None:
+    """
+    测试主图入口只恢复暂停中的多 Agent 任务字段。
+
+    参数含义：无。
+    返回值含义：None。
+    """
+
+    plan = AgentTaskPlan(
+        plan_id="checkpoint_multi_agent_plan",
+        objective="等待用户确认",
+        steps=[
+            AgentTaskStep(
+                step_id="confirm_profile",
+                title="确认读取资料",
+                assigned_agent="profile_agent",
+                status="awaiting_input",
+            )
+        ],
+        status="awaiting_input",
+        requires_user_input=True,
+        clarification_prompt="是否允许读取资料？",
+    )
+    paused_result = MultiAgentTaskResult(
+        collaboration_id="checkpoint_multi_agent_task",
+        plan=plan,
+        status="awaiting_input",
+        task_results=[
+            AgentTaskResult(
+                step_id="confirm_profile",
+                assigned_agent="profile_agent",
+                status="awaiting_input",
+                requires_user_input=True,
+                clarification_prompt="是否允许读取资料？",
+            )
+        ],
+    )
+    app = FakeGraphApp(
+        current_state=FakeCurrentState(
+            values={
+                "multi_agent_task_result": paused_result.model_dump(
+                    mode="python"
+                ),
+                "multi_agent_pending_prompt": "是否允许读取资料？",
+                "final_answer": "不应恢复的旧答案",
+                "route_decision": {"route": "general_agent"},
+            }
+        )
+    )
+
+    restored = await graph_run.restore_pending_multi_agent_state(
+        app=app,
+        config={
+            "configurable": {
+                "thread_id": "conversation-multi-agent",
+            }
+        },
+        state={
+            "question": "允许读取",
+            "final_answer": "",
+            "route_decision": {},
+        },
+    )
+
+    assert restored["multi_agent_task_result"]["status"] == (
+        "awaiting_input"
+    )
+    assert restored["multi_agent_pending_prompt"] == "是否允许读取资料？"
+    assert restored["final_answer"] == ""
+    assert restored["route_decision"] == {}
 
 
 @pytest.mark.asyncio

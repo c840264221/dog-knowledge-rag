@@ -228,6 +228,11 @@ async def test_graph_runtime_should_inject_memory_extract_node_dependencies(
         "build_integrated_dog_knowledge_entry_node",
         lambda delegate_node: delegate_node,
     )
+    monkeypatch.setattr(
+        GraphRuntimeService,
+        "_build_multi_agent_node",
+        lambda self, **kwargs: "multi_agent",
+    )
 
     llm_provider = object()
     memory_provider = object()
@@ -246,3 +251,4 @@ async def test_graph_runtime_should_inject_memory_extract_node_dependencies(
         "checkpoint_manager": checkpoint_provider.manager,
     }
     assert graph.nodes["memory_extract"] is injected_node
+    assert graph.nodes["multi_agent"] == "multi_agent"

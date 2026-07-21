@@ -239,6 +239,16 @@ def _validate_aggregation_input(
         for result in task_result.task_results
         if result.status in {"failed", "skipped"}
     ]
+    awaiting_step_ids = [
+        result.step_id
+        for result in task_result.task_results
+        if result.status == "awaiting_input"
+    ]
+    if awaiting_step_ids:
+        raise ValueError(
+            "仍有步骤等待用户输入，不能进行结果聚合: "
+            f"{awaiting_step_ids}"
+        )
     if task_result.status == "running" and incomplete_step_ids:
         raise ValueError(
             "status=running 的聚合输入不能包含失败或跳过步骤: "

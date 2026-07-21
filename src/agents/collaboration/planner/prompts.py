@@ -76,7 +76,11 @@ def build_planner_prompt(
    并在 clarification_prompt 中写出一个明确问题。
 8. plan_id 必须原样返回为 {plan_id!r}。
 9. objective 必须原样返回，不得改写。
-10. 只输出一个 JSON 对象，不要输出 Markdown、解释或代码块。
+10. 不要创建“汇总全部步骤”“整合最终方案”之类的最终汇总步骤。各 Worker
+    只负责独立业务任务，全部步骤结果会由 ResultAggregator 统一生成最终回答。
+11. input_data 只保存当前步骤的业务输入，不要写入 intent、route_decision、
+    answer_strategy、current_agent、next_agent、strategy 等 Agent 内部控制字段。
+12. 只输出一个 JSON 对象，不要输出 Markdown、解释或代码块。
 
 可用 Agent：
 {agents_text}

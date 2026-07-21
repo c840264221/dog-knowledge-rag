@@ -159,6 +159,8 @@ def test_planner_should_generate_and_order_valid_plan() -> None:
     assert len(provider.prompts) == 1
     assert '"memory_agent"' in provider.prompts[0]
     assert '"user_id": "user_a"' in provider.prompts[0]
+    assert "不要创建“汇总全部步骤”" in provider.prompts[0]
+    assert "ResultAggregator 统一生成最终回答" in provider.prompts[0]
 
 
 def test_planner_should_repair_invalid_first_output() -> None:

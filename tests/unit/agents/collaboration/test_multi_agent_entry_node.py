@@ -1,0 +1,243 @@
+"""多 Agent 主图入口节点测试。"""
+
+from __future__ import annotations
+
+import asyncio
+from typing import Any
+
+from src.agents.collaboration import (
+    AgentTaskPlan,
+    AgentTaskResult,
+    AgentTaskStep,
+    MultiAgentTaskResult,
+    build_multi_agent_entry_node,
+)
+
+
+class FakeMultiAgentOrchestrator:
+    """记录主图入口选择 run 还是 resume 的测试编排器。"""
+
+    def __init__(self, result: MultiAgentTaskResult) -> None:
+        self.result = result
+        self.run_calls: list[dict[str, Any]] = []
+        self.resume_calls: list[dict[str, Any]] = []
+
+    async def run(
+        self,
+        objective: str,
+        **kwargs: Any,
+    ) -> MultiAgentTaskResult:
+        """记录新任务或重新规划调用并返回固定结果。"""
+
+        self.run_calls.append({"objective": objective, **kwargs})
+        return self.result
+
+    async def resume(
+        self,
+        task_result: MultiAgentTaskResult,
+        *,
+        user_inputs: dict[str, Any],
+    ) -> MultiAgentTaskResult:
+        """记录恢复调用并返回固定结果。"""
+
+        self.resume_calls.append(
+            {
+                "task_result": task_result,
+                "user_inputs": user_inputs,
+            }
+        )
+        return self.result
+
+
+def build_entry_task_result(
+    *,
+    status: str,
+) -> MultiAgentTaskResult:
+    """
+    构建主图入口测试需要的完成或暂停任务结果。
+
+    参数含义：
+        status:
+            completed 或 awaiting_input。
+
+    返回值含义：
+        MultiAgentTaskResult:
+            与指定状态一致的测试任务结果。
+    """
+
+    is_waiting = status == "awaiting_input"
+    step = AgentTaskStep(
+        step_id="profile",
+        title="读取资料",
+        assigned_agent="dog_knowledge_agent",
+        status=("awaiting_input" if is_waiting else "completed"),
+    )
+    plan = AgentTaskPlan(
+        plan_id="entry_plan",
+        objective="生成综合方案",
+        steps=[step],
+        status=("awaiting_input" if is_waiting else "completed"),
+        requires_user_input=is_waiting,
+        clarification_prompt=("是否继续？" if is_waiting else ""),
+    )
+    result = AgentTaskResult(
+        step_id=step.step_id,
+        assigned_agent=step.assigned_agent,
+        status=("awaiting_input" if is_waiting else "completed"),
+        requires_user_input=is_waiting,
+        clarification_prompt=("是否继续？" if is_waiting else ""),
+    )
+    return MultiAgentTaskResult(
+        collaboration_id="entry_task",
+        plan=plan,
+        status=("awaiting_input" if is_waiting else "completed"),
+        task_results=[result],
+        final_answer=("综合方案已生成。" if not is_waiting else ""),
+    )
+
+
+def test_entry_node_should_run_new_task() -> None:
+    """
+    检查普通复杂目标是否调用 orchestrator.run。
+
+    参数含义：无。
+    返回值含义：None。
+    """
+
+    orchestrator = FakeMultiAgentOrchestrator(
+        build_entry_task_result(status="completed")
+    )
+    node = build_multi_agent_entry_node(orchestrator=orchestrator)
+
+    update = asyncio.run(
+        node(
+            {
+                "question": "生成健康和训练综合方案",
+                "multi_agent_resume_action": "none",
+            }
+        )
+    )
+
+    assert orchestrator.run_calls[0]["objective"] == (
+        "生成健康和训练综合方案"
+    )
+    assert orchestrator.resume_calls == []
+    assert update["final_answer"] == "综合方案已生成。"
+
+
+def test_entry_node_should_resume_paused_task() -> None:
+    """
+    检查恢复状态是否调用 orchestrator.resume 并传入结构化回答。
+
+    参数含义：无。
+    返回值含义：None。
+    """
+
+    paused_result = build_entry_task_result(status="awaiting_input")
+    orchestrator = FakeMultiAgentOrchestrator(
+        build_entry_task_result(status="completed")
+    )
+    node = build_multi_agent_entry_node(orchestrator=orchestrator)
+
+    update = asyncio.run(
+        node(
+            {
+                "question": "允许继续",
+                "multi_agent_resume_action": "resume",
+                "multi_agent_task_result": paused_result.model_dump(
+                    mode="python"
+                ),
+                "multi_agent_resume_inputs": {
+                    "profile": "允许继续"
+                },
+            }
+        )
+    )
+
+    assert orchestrator.run_calls == []
+    assert orchestrator.resume_calls[0]["user_inputs"] == {
+        "profile": "允许继续"
+    }
+    assert update["waiting_user_input"] is False
+
+
+def test_entry_node_should_replan_with_planner_clarification() -> None:
+    """
+    检查 Planner 澄清回答是否携带原目标和上下文重新调用 run。
+
+    功能：
+        验证 replan 不会把“3 岁，20 公斤”误当成一个新目标，而是继续使用
+        暂停计划的 objective，并将新回答和上一次问题写入 context。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    paused_result = build_entry_task_result(status="awaiting_input")
+    orchestrator = FakeMultiAgentOrchestrator(
+        build_entry_task_result(status="completed")
+    )
+    node = build_multi_agent_entry_node(orchestrator=orchestrator)
+
+    update = asyncio.run(
+        node(
+            {
+                "question": "3 岁，20 公斤",
+                "memory_context": "用户养的是一只金毛。",
+                "user_id": "user_001",
+                "session_id": "session_001",
+                "trace_id": "trace_001",
+                "multi_agent_resume_action": "replan",
+                "multi_agent_task_result": paused_result.model_dump(
+                    mode="python"
+                ),
+                "multi_agent_resume_inputs": {
+                    "planner_clarification": "3 岁，20 公斤"
+                },
+            }
+        )
+    )
+
+    assert orchestrator.resume_calls == []
+    run_call = orchestrator.run_calls[0]
+    assert run_call["objective"] == paused_result.plan.objective
+    assert run_call["context"] == {
+        "user_clarification": "3 岁，20 公斤",
+        "previous_clarification_prompt": "是否继续？",
+        "memory_context": "用户养的是一只金毛。",
+        "user_id": "user_001",
+        "session_id": "session_001",
+        "trace_id": "trace_001",
+    }
+    assert update["final_answer"] == "综合方案已生成。"
+
+
+def test_entry_node_should_save_awaiting_result_for_checkpoint() -> None:
+    """
+    检查暂停结果是否转换成可写入 Checkpoint 的主图字段。
+
+    参数含义：无。
+    返回值含义：None。
+    """
+
+    orchestrator = FakeMultiAgentOrchestrator(
+        build_entry_task_result(status="awaiting_input")
+    )
+    node = build_multi_agent_entry_node(orchestrator=orchestrator)
+
+    update = asyncio.run(
+        node(
+            {
+                "question": "生成综合方案",
+                "multi_agent_resume_action": "none",
+            }
+        )
+    )
+
+    assert update["multi_agent_task_result"]["status"] == "awaiting_input"
+    assert update["multi_agent_pending_prompt"] == "是否继续？"
+    assert update["waiting_user_input"] is True
+    assert update["final_answer"] == "是否继续？"

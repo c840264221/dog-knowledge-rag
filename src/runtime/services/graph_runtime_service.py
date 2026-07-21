@@ -51,6 +51,12 @@ from src.graph.routes.main_route_alias import (
 from src.agents.dog_knowledge_agent.adapters.entry_integration import (
     build_integrated_dog_knowledge_entry_node,
 )
+from src.agents.collaboration.aggregator import ResultAggregator
+from src.agents.collaboration.graph import build_multi_agent_entry_node
+from src.agents.collaboration.orchestrator import MultiAgentOrchestrator
+from src.agents.collaboration.planner import PlannerAgent
+from src.agents.collaboration.scheduler import MultiAgentTaskScheduler
+from src.agents.collaboration.workers import GraphAgentWorkerAdapter
 
 
 class GraphRuntimeService:
@@ -332,6 +338,12 @@ class GraphRuntimeService:
         # 构建新版 ToolAgent 子图，用来承接 RootAgent 路由出的工具请求。
         tool_agent = self._build_tool_agent_node()
 
+        # 多 Agent Worker 暂时只使用无 interrupt 的知识与通用问答子图。
+        multi_agent_node = self._build_multi_agent_node(
+            dog_knowledge_agent=dog_knowledge_agent,
+            general_agent=general_agent,
+        )
+
         memory_extract_node = build_memory_extract_node(
             llm_provider=self.llm_provider,
             memory_provider=self.memory_provider,
@@ -374,6 +386,11 @@ class GraphRuntimeService:
             tool_agent,
         )
 
+        graph.add_node(
+            "multi_agent",
+            multi_agent_node,
+        )
+
         graph.set_entry_point(
             "memory_extract"
         )
@@ -406,12 +423,76 @@ class GraphRuntimeService:
             END,
         )
 
+        graph.add_edge(
+            "multi_agent",
+            END,
+        )
+
         logger.info(
             "✅ 主图构建完成"
         )
 
         return graph.compile(
             checkpointer=self._checkpointer
+        )
+
+    def _build_multi_agent_node(
+            self,
+            *,
+            dog_knowledge_agent,
+            general_agent,
+    ):
+        """
+        构建注入现有子 Agent 的多 Agent 主图节点。
+
+        功能：
+            创建 Planner、Scheduler 和 Aggregator，并用 Worker Adapter 包装
+            DogKnowledgeAgent 与 GeneralAgent，最后生成主图入口节点。
+
+        参数：
+            dog_knowledge_agent:
+                已编译的狗狗知识子图。
+            general_agent:
+                已编译的通用问答子图。
+
+        返回值：
+            Callable:
+                可以注册到主图 multi_agent 节点的异步调用函数。
+        """
+
+        planner = PlannerAgent(
+            llm_provider=self.llm_provider,
+            available_agents={
+                "dog_knowledge_agent": (
+                    "查询狗狗知识、健康、训练、护理和犬种推荐信息。"
+                ),
+                "general_agent": (
+                    "整理通用资料、分析前置结果并生成综合方案。"
+                ),
+            },
+        )
+        scheduler = MultiAgentTaskScheduler(
+            workers={
+                "dog_knowledge_agent": GraphAgentWorkerAdapter(
+                    agent_name="dog_knowledge_agent",
+                    runner=dog_knowledge_agent.ainvoke,
+                ),
+                "general_agent": GraphAgentWorkerAdapter(
+                    agent_name="general_agent",
+                    runner=general_agent.ainvoke,
+                ),
+            },
+        )
+        result_aggregator = ResultAggregator(
+            llm_provider=self.llm_provider,
+        )
+        orchestrator = MultiAgentOrchestrator(
+            planner=planner,
+            scheduler=scheduler,
+            result_aggregator=result_aggregator,
+        )
+        return build_multi_agent_entry_node(
+            orchestrator=orchestrator,
         )
 
     def _build_tool_agent_node(self):

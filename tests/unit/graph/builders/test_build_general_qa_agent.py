@@ -15,6 +15,7 @@ Graph Builder（图构建器）：
 """
 
 import pytest
+from langgraph.graph import END
 
 from src.agents.general_qa_agent.agent import (
     build_general_qa_agent,
@@ -591,11 +592,15 @@ def test_build_general_qa_agent_should_register_supervisor_conditional_edges(
     }
 
 
-def test_build_general_qa_agent_should_add_worker_edges_back_to_supervisor(
+def test_build_general_qa_agent_should_end_after_answer_generation(
     monkeypatch,
 ):
     """
-    测试普通 worker 是否添加了回到 supervisor 的普通边。
+    测试 answer_gen 是否直接结束，其他普通 worker 是否回到 supervisor。
+
+    功能：
+        answer_gen 已经生成最终回答，不应再次进入 LLM Supervisor，否则可能
+        被重复路由回 answer_gen；tool_parse 等非终态 worker 仍需返回调度器。
 
     参数：
         monkeypatch：
@@ -625,6 +630,11 @@ def test_build_general_qa_agent_should_add_worker_edges_back_to_supervisor(
     assert {
         "start": "answer_gen",
         "end": "supervisor",
+    } not in graph.edges
+
+    assert {
+        "start": "answer_gen",
+        "end": END,
     } in graph.edges
 
     assert {

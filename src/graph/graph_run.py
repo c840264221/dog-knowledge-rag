@@ -13,6 +13,7 @@ from src.runtime.resume.legacy_protocol import (
     parse_legacy_resume_message,
 )
 from src.runtime.services.checkpoint_config import build_graph_checkpoint_config
+from src.agents.collaboration.contracts import MultiAgentTaskResult
 
 from typing import Any
 
@@ -163,6 +164,13 @@ def create_initial_state(
         "has_asked_user": False,
         "pending_prompt": "",
         "waiting_user_input": False,
+
+        # ========= 多 Agent 跨轮恢复字段 =========
+        "multi_agent_task_result": {},
+        "multi_agent_resume_action": "none",
+        "multi_agent_resume_inputs": {},
+        "multi_agent_resume_ready": False,
+        "multi_agent_pending_prompt": "",
 
         # ========= 工具调用字段 =========
         "tool_calls": [],
@@ -426,6 +434,11 @@ async def run_main_graph_with_result(
         config=config,
         state=state,
     )
+    state = await restore_pending_multi_agent_state(
+        app=app,
+        config=config,
+        state=state,
+    )
 
     resume_request = parse_legacy_resume_message(
         message=normalized_question,
@@ -532,6 +545,69 @@ async def restore_pending_tool_clarification_state(
 
     logger.info(
         "已从当前 thread_id 的 Checkpoint 恢复待处理工具参数澄清状态。"
+    )
+    return restored_state
+
+
+async def restore_pending_multi_agent_state(
+        app: Any,
+        config: Mapping[str, Any],
+        state: Mapping[str, Any],
+) -> dict[str, Any]:
+    """
+    从当前线程检查点恢复暂停中的多 Agent 任务。
+
+    功能：
+        读取相同 thread_id 的最新 Checkpoint，只恢复状态为 awaiting_input
+        的多 Agent 任务结果和待展示提示，不把旧答案或旧路由带入新一轮。
+
+    参数：
+        app:
+            已编译的 LangGraph 主图对象，需要提供 aget_state 方法。
+        config:
+            当前 LangGraph 执行配置，包含 thread_id。
+        state:
+            本轮新创建的干净初始状态。
+
+    返回值：
+        dict[str, Any]:
+            合并暂停任务白名单字段后的新状态；没有合法暂停任务时返回原状态副本。
+    """
+
+    restored_state = dict(state)
+    try:
+        current_state = await app.aget_state(config)
+        checkpoint_values = get_final_state_values(
+            current_state=current_state,
+        )
+    except Exception as exc:
+        logger.debug(
+            f"读取多 Agent Checkpoint 失败，按新问题继续: {exc}"
+        )
+        return restored_state
+
+    raw_task_result = checkpoint_values.get(
+        "multi_agent_task_result"
+    )
+    if not isinstance(raw_task_result, Mapping):
+        return restored_state
+    try:
+        task_result = MultiAgentTaskResult.model_validate(raw_task_result)
+    except (TypeError, ValueError):
+        return restored_state
+    if task_result.status != "awaiting_input":
+        return restored_state
+
+    restored_state["multi_agent_task_result"] = task_result.model_dump(
+        mode="python"
+    )
+    restored_state["multi_agent_pending_prompt"] = str(
+        checkpoint_values.get("multi_agent_pending_prompt")
+        or task_result.plan.clarification_prompt
+        or ""
+    )
+    logger.info(
+        "已从当前 thread_id 的 Checkpoint 恢复暂停中的多 Agent 任务。"
     )
     return restored_state
 

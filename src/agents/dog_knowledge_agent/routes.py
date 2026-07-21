@@ -1,3 +1,4 @@
+import json
 from typing import Literal
 
 from src.graph.nodes.generate_strategy_resolver_node import (
@@ -66,16 +67,25 @@ def route_dog_knowledge_model(
         state=state,
     )
 
-    logger.info(
-        f"[route_dog_knowledge_model] task_type={answer_strategy.task_type}\n "
-        f"answer_style={answer_strategy.answer_style}\n "
-        f"reason={answer_strategy.reason}",
-    )
-
+    selected_route: DogKnowledgeModelRoute = "extract_model"
     if answer_strategy.task_type == "recommendation":
-        return "recommendation_model"
+        selected_route = "recommendation_model"
 
-    return "extract_model"
+    # 这里只是子图入口的临时预判；最终回答策略会在信息抽取后重新确定。
+    logger.info(
+        "[route_dog_knowledge_model] entry route decision:\n"
+        + json.dumps(
+            {
+                "event": "dog_knowledge_entry_route_decided",
+                "selected_route": selected_route,
+                "provisional_task_type": answer_strategy.task_type,
+                "provisional_answer_style": answer_strategy.answer_style,
+            },
+            indent=4,
+            ensure_ascii=False,
+        )
+    )
+    return selected_route
 
 
 def route_after_dog_knowledge_evaluate(

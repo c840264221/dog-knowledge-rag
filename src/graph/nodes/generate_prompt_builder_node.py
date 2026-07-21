@@ -8,6 +8,12 @@ from src.graph.schemas.answer_strategy import (
 )
 
 
+MEMORY_USAGE_RULES = """记忆使用边界：
+- “用户喜欢或偏好的犬种”只代表偏好，不代表用户当前饲养该犬种。
+- 只有用户问题、对话历史或明确的宠物资料提供了当前狗狗信息时，才能据此制定个体化建议。
+- 缺少当前狗狗的犬种、年龄、体重或健康状况等必要资料时，应明确询问，不能用偏好记忆自动补全。"""
+
+
 def build_generation_prompt(
         state: Mapping[str, Any],
         answer_strategy: AnswerStrategy,
@@ -191,6 +197,8 @@ context_source: {context_source}
 
 # 用户长期记忆
 
+{MEMORY_USAGE_RULES}
+
 {memory_text or "无"}
 
 # 历史对话
@@ -289,6 +297,8 @@ context_source: {context_source}
 
 # 用户长期记忆
 
+{MEMORY_USAGE_RULES}
+
 {memory_text or "无"}
 
 # 历史对话
@@ -383,6 +393,8 @@ context_source: {context_source}
 
 # 用户长期记忆
 
+{MEMORY_USAGE_RULES}
+
 {memory_text or "无"}
 
 # 历史对话
@@ -476,6 +488,8 @@ context_source: {context_source}
 
 # 用户长期记忆
 
+{MEMORY_USAGE_RULES}
+
 {memory_text or "无"}
 
 # 历史对话
@@ -559,6 +573,8 @@ context_source: {context_source}
 - ...
 
 # 用户长期记忆
+
+{MEMORY_USAGE_RULES}
 
 {memory_text or "无"}
 

@@ -6,6 +6,8 @@ from src.graph.routes.main_route_alias import (
     FINISH_ROUTE,
     GENERAL_AGENT_NODE,
     GENERAL_AGENT_ROUTE,
+    MULTI_AGENT_NODE,
+    MULTI_AGENT_ROUTE,
     RECOMMENDATION_AGENT_ROUTE,
     TOOL_AGENT_NODE,
     TOOL_AGENT_ROUTE,
@@ -128,6 +130,21 @@ def test_tool_agent_route_maps_to_tool_agent_node():
         end_node="__END__",
     )
 
+
+def test_multi_agent_route_maps_to_multi_agent_node():
+    """
+    测试 multi_agent 路由会映射到多 Agent 主图节点。
+
+    参数：无。
+    返回值：无。
+    """
+
+    route_map = build_main_route_alias_map(
+        end_node="__END__",
+    )
+
+    assert route_map[MULTI_AGENT_ROUTE] == MULTI_AGENT_NODE
+
     assert (
         route_map[TOOL_AGENT_ROUTE]
         == TOOL_AGENT_NODE
@@ -160,5 +177,6 @@ def test_main_route_alias_map_contains_only_expected_routes():
         EXACT_SEARCH_AGENT_ROUTE,
         GENERAL_AGENT_ROUTE,
         TOOL_AGENT_ROUTE,
+        MULTI_AGENT_ROUTE,
         FINISH_ROUTE,
     }

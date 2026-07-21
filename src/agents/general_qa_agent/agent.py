@@ -181,12 +181,20 @@ def build_general_qa_agent(
     for worker in VALID_WORKERS:
         if worker not in [
             "ask_confirm",
-            "execute_tool"
+            "execute_tool",
+            "answer_gen",
         ]:
             graph.add_edge(
                 worker,
                 "supervisor"
             )
+
+    # answer_gen 已经生成最终回答，直接结束子图，避免再次经过 LLM Supervisor
+    # 后又被重复路由回 answer_gen。
+    graph.add_edge(
+        "answer_gen",
+        END,
+    )
 
     graph.add_conditional_edges(
         "ask_confirm",

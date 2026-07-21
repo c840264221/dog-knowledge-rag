@@ -15,6 +15,7 @@ RootRoute = Literal[
     "dog_knowledge_agent",
     "general_agent",
     "tool_agent",
+    "multi_agent",
     "FINISH",
 ]
 
@@ -23,6 +24,7 @@ RootQueryType = Literal[
     "dog_knowledge",
     "dog_recommendation",
     "tool_request",
+    "multi_agent_task",
     "general_chat",
     "finish",
 ]

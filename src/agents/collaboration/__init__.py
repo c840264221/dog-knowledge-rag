@@ -2,8 +2,8 @@
 多 Agent 协作模块。
 
 功能：
-    提供复杂任务拆解、步骤执行和结果汇总共同使用的标准数据结构，
-    并导出负责生成任务计划的 PlannerAgent。
+    统一导出复杂任务的数据结构、计划生成、依赖调度、结果聚合和总编排
+    入口，调用方不需要了解各子目录的内部文件位置。
 """
 
 from src.agents.collaboration.contracts import (
@@ -21,13 +21,32 @@ from src.agents.collaboration.aggregator import (
     ResultAggregationError,
     ResultAggregator,
 )
+from src.agents.collaboration.adapters import (
+    MultiAgentResumeAction,
+    resolve_multi_agent_resume_input,
+)
 from src.agents.collaboration.planner import (
     PlannerAgent,
     PlannerGenerationError,
 )
+from src.agents.collaboration.orchestrator import (
+    MultiAgentOrchestrationError,
+    MultiAgentOrchestrator,
+)
+from src.agents.collaboration.graph import (
+    MultiAgentEntryNode,
+    build_multi_agent_entry_node,
+    build_multi_agent_state_update,
+)
 from src.agents.collaboration.scheduler import (
     MultiAgentTaskScheduler,
     WorkerHandler,
+)
+from src.agents.collaboration.workers import (
+    AgentStateBuilder,
+    AgentStateRunner,
+    GraphAgentWorkerAdapter,
+    build_default_agent_state,
 )
 
 __all__ = [
@@ -42,8 +61,19 @@ __all__ = [
     "ResultAggregationDraft",
     "ResultAggregationError",
     "ResultAggregator",
+    "MultiAgentResumeAction",
+    "resolve_multi_agent_resume_input",
     "PlannerAgent",
     "PlannerGenerationError",
     "MultiAgentTaskScheduler",
+    "MultiAgentOrchestrationError",
+    "MultiAgentOrchestrator",
+    "MultiAgentEntryNode",
+    "build_multi_agent_entry_node",
+    "build_multi_agent_state_update",
     "WorkerHandler",
+    "AgentStateBuilder",
+    "AgentStateRunner",
+    "GraphAgentWorkerAdapter",
+    "build_default_agent_state",
 ]

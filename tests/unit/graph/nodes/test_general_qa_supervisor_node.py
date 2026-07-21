@@ -575,6 +575,44 @@ async def test_supervisor_should_force_tool_parse_when_root_route_is_tool_agent(
     assert fake_checkpoint_manager.save_count == 1
 
 
+@pytest.mark.asyncio
+async def test_supervisor_should_finish_without_llm_when_answer_exists():
+    """
+    测试已有最终回答时 Supervisor 是否确定性结束。
+
+    功能：
+        覆盖旧 Checkpoint 或兼容入口仍把 answer_gen 结果送回 Supervisor 的
+        情况，确保不会再次调用 LLM 并重复进入 answer_gen。
+
+    参数：
+        无。
+
+    返回值：
+        None。
+    """
+
+    (
+        node,
+        _fake_ctx,
+        fake_llm_provider,
+        fake_checkpoint_manager,
+    ) = build_test_node(
+        decision="answer_gen",
+    )
+
+    result = await node(
+        {
+            "question": "整理综合方案",
+            "answer": "综合方案已经生成。",
+        }
+    )
+
+    assert result["next_worker"] == "finish"
+    assert result["messages"][0].content == "Supervisor决策: finish"
+    assert fake_llm_provider.calls == []
+    assert fake_checkpoint_manager.save_count == 1
+
+
 def test_decide_forced_tool_parse_worker_should_not_force_after_tool_parse_ran():
     """
     测试 tool_parse 已经执行过后，不再强制回到 tool_parse。

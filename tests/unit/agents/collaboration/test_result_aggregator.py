@@ -387,3 +387,35 @@ def test_result_aggregator_should_reject_missing_step_result() -> None:
         asyncio.run(aggregator.aggregate(incomplete_result))
 
     assert provider.prompts == []
+
+
+def test_result_aggregator_should_reject_awaiting_step() -> None:
+    """
+    检查仍有 Worker 等待用户输入时是否在调用 LLM 前停止聚合。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    provider = FakeAggregationLLMProvider([build_aggregation_json()])
+    aggregator = ResultAggregator(llm_provider=provider)
+    result_data = build_scheduled_task_result(partial=True).model_dump(
+        mode="python"
+    )
+    result_data["task_results"][1].update(
+        {
+            "status": "awaiting_input",
+            "error_message": None,
+            "requires_user_input": True,
+            "clarification_prompt": "请补充训练目标。",
+        }
+    )
+    awaiting_result = MultiAgentTaskResult.model_validate(result_data)
+
+    with pytest.raises(ValueError, match="不能进行结果聚合"):
+        asyncio.run(aggregator.aggregate(awaiting_result))
+
+    assert provider.prompts == []
