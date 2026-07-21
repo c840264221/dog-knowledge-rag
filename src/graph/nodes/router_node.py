@@ -10,6 +10,9 @@ from src.agents.root_agent.supervisor import (
 from src.agents.tool_agent.adapters.clarification_resume_adapter import (
     resolve_tool_clarification_input,
 )
+from src.agents.collaboration.adapters import (
+    resolve_multi_agent_resume_input,
+)
 from src.graph.states.dog_state import (
     DogState,
 )
@@ -59,11 +62,23 @@ async def semantic_router_node(
         **dict(state),
         **dict(clarification_update),
     }
+    multi_agent_resolution = resolve_multi_agent_resume_input(
+        resolved_state
+    )
+    multi_agent_update = multi_agent_resolution.get(
+        "state_update",
+        {},
+    )
+    resolved_state = {
+        **resolved_state,
+        **dict(multi_agent_update),
+    }
     root_update = await root_supervisor_node(
         resolved_state,
     )
 
     return {
         **dict(clarification_update),
+        **dict(multi_agent_update),
         **root_update,
     }

@@ -116,6 +116,24 @@ def build_general_qa_supervisor_node(
             state
         )
 
+        # 最终回答已经存在时使用确定性规则结束，不再让 LLM 决定是否重复生成。
+        if summary.get("has_answer"):
+            logger.info(
+                "Supervisor确定性决策: finish"
+            )
+
+            if checkpoint_manager is not None:
+                checkpoint_manager.save_checkpoint()
+
+            return {
+                "next_worker": "finish",
+                "messages": [
+                    AIMessage(
+                        content="Supervisor决策: finish"
+                    )
+                ]
+            }
+
         forced_worker = decide_forced_tool_parse_worker(
             summary=summary,
         )

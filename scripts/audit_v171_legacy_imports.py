@@ -16,6 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SCAN_TARGETS = [
     Path("src/agents/root_agent"),
     Path("src/agents/dog_knowledge_agent"),
+    Path("src/agents/collaboration"),
     Path("src/graph/nodes/router_node.py"),
     Path("src/graph/routes/route_after_semantic.py"),
     Path("src/runtime/services/graph_runtime_service.py"),
@@ -120,8 +121,9 @@ def run_audit() -> list[AuditFinding]:
     执行 V1.7.1 legacy import audit（遗留导入审计）。
 
     功能：
-        扫描 RootAgent、DogKnowledgeAgent、语义路由 adapter、路由分发函数和运行时服务，
-        确认新的主链路没有重新引入旧版 query_parse 依赖。
+        扫描 RootAgent、DogKnowledgeAgent、多 Agent 协作模块、语义路由
+        adapter、路由分发函数和运行时服务，确认新的主链路没有重新引入
+        旧版 query_parse 依赖。
 
     参数含义：
         无参数。

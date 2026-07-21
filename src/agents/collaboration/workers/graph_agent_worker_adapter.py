@@ -43,6 +43,18 @@ DEFAULT_WORKER_OUTPUT_FIELDS = (
 )
 
 
+# 这些字段属于被调用 Agent 自己的图控制状态，不能由 Planner 预先决定。
+WORKER_INTERNAL_CONTROL_FIELDS = (
+    "answer_strategy",
+    "current_agent",
+    "intent",
+    "next_agent",
+    "next_worker",
+    "route_decision",
+    "strategy",
+)
+
+
 class GraphAgentWorkerAdapter:
     """
     把一个接收 state 的现有 Agent 包装成 Scheduler Worker。
@@ -133,7 +145,7 @@ class GraphAgentWorkerAdapter:
             self.state_builder(step, dependency_results)
         )
 
-        # 当前步骤执行后的原始结果 也就是state
+        # 当前步骤执行后的原始结果 也就是state  runner是子agent运行器 比如：dog_knowledge_agent.ainvoke
         raw_state = self.runner(input_state)
 
         # 判断当前步骤执行后返回的结果是一个结果 还是await的协程对象
@@ -208,6 +220,8 @@ def build_default_agent_state(
     """
 
     state = dict(step.input_data)
+    for field_name in WORKER_INTERNAL_CONTROL_FIELDS:
+        state.pop(field_name, None)
     question = str(
         state.get("question")
         or step.description

@@ -76,6 +76,21 @@ def base_state() -> dict:
             "tool_request",
         ),
         (
+            "为狗狗制定健康和训练综合方案",
+            "multi_agent",
+            "multi_agent_task",
+        ),
+        (
+            "我养了一只3岁、20公斤的金毛，请制定包含健康风险、饮食、运动和训练的完整管理方案",
+            "multi_agent",
+            "multi_agent_task",
+        ),
+        (
+            "请结合我的狗狗资料制定健康、饮食、运动和训练方案，缺少必要信息时请先确认",
+            "multi_agent",
+            "multi_agent_task",
+        ),
+        (
             "你好，你是谁？",
             "general_agent",
             "general_chat",

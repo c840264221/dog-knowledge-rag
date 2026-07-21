@@ -21,6 +21,8 @@ GENERAL_AGENT_ROUTE = "general_agent"
 
 TOOL_AGENT_ROUTE = "tool_agent"
 
+MULTI_AGENT_ROUTE = "multi_agent"
+
 FINISH_ROUTE = "FINISH"
 
 DOG_KNOWLEDGE_AGENT_NODE = "dog_knowledge_agent"
@@ -28,6 +30,8 @@ DOG_KNOWLEDGE_AGENT_NODE = "dog_knowledge_agent"
 GENERAL_AGENT_NODE = "general"
 
 TOOL_AGENT_NODE = "tool_agent"
+
+MULTI_AGENT_NODE = "multi_agent"
 
 
 def build_main_route_alias_map(
@@ -46,6 +50,7 @@ def build_main_route_alias_map(
            - dog_knowledge_agent
            - general_agent
            - tool_agent
+           - multi_agent
            - FINISH
 
         2. 旧版 route key：

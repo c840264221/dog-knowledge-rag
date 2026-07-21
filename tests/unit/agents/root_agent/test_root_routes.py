@@ -35,6 +35,10 @@ from src.agents.root_agent.routes import (
             "tool_agent",
         ),
         (
+            "multi_agent",
+            "multi_agent",
+        ),
+        (
             "FINISH",
             "FINISH",
         ),
@@ -103,6 +107,10 @@ def test_normalize_root_route(
         (
             "tool_agent",
             "tool_agent",
+        ),
+        (
+            "multi_agent",
+            "multi_agent",
         ),
         (
             "FINISH",

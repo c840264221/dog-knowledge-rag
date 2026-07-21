@@ -135,6 +135,59 @@ TOOL_KEYWORDS = [
 ]
 
 
+MULTI_AGENT_KEYWORDS = [
+    "多 Agent",
+    "多Agent",
+    "多智能体",
+    "多个智能体",
+    "协作完成",
+    "综合方案",
+    "完整方案",
+    "健康和训练",
+    "饮食和训练",
+    "multi-agent",
+]
+
+
+MULTI_AGENT_PLAN_KEYWORDS = [
+    "制定",
+    "方案",
+    "计划",
+    "安排",
+    "规划",
+    "综合",
+    "完整",
+]
+
+
+MULTI_AGENT_TASK_DIMENSIONS = {
+    "health": [
+        "健康",
+        "疾病",
+        "风险",
+        "体检",
+        "医疗",
+    ],
+    "diet": [
+        "饮食",
+        "喂养",
+        "营养",
+        "食谱",
+    ],
+    "exercise": [
+        "运动",
+        "锻炼",
+        "活动量",
+    ],
+    "training": [
+        "训练",
+        "服从",
+        "行为",
+        "心智刺激",
+    ],
+}
+
+
 FINISH_KEYWORDS = [
     "不用了",
     "先这样",
@@ -201,6 +254,36 @@ def find_matched_keywords(
     return matched_keywords
 
 
+def find_multi_agent_task_dimensions(
+        question: str,
+) -> dict[str, list[str]]:
+    """
+    查找复杂任务命中的业务维度。
+
+    功能：
+        分别检查健康、饮食、运动和训练等独立任务维度，避免只依赖
+        “完整方案”这类固定短语而漏掉表达方式不同的复杂问题。
+
+    参数：
+        question:
+            用户原始问题。
+
+    返回值：
+        dict[str, list[str]]:
+            维度名称到命中关键词的映射；未命中的维度不会出现在结果中。
+    """
+
+    matched_dimensions: dict[str, list[str]] = {}
+    for dimension_name, keywords in MULTI_AGENT_TASK_DIMENSIONS.items():
+        matches = find_matched_keywords(
+            question=question,
+            keywords=keywords,
+        )
+        if matches:
+            matched_dimensions[dimension_name] = matches
+    return matched_dimensions
+
+
 def decide_root_route(
         question: str,
         state: DogState | None = None,
@@ -214,7 +297,8 @@ def decide_root_route(
         2. 狗狗推荐问题 -> dog_knowledge_agent
         3. 狗狗知识问题 -> dog_knowledge_agent
         4. 工具类问题 -> tool_agent
-        5. 其他问题 -> general_agent
+        5. 复杂协作问题 -> multi_agent
+        6. 其他问题 -> general_agent
 
         注意：
             本函数不调用旧版 query_parse，也不调用 LLM。
@@ -269,6 +353,29 @@ def decide_root_route(
             },
         )
 
+    multi_agent_resume_action = (
+        str(state.get("multi_agent_resume_action") or "")
+        if state
+        else ""
+    )
+    if multi_agent_resume_action in {
+        "resume",
+        "replan",
+        "needs_clarification",
+    }:
+        return RootRouteDecision(
+            route="multi_agent",
+            query_type="multi_agent_task",
+            confidence=1.0,
+            reason="当前输入属于暂停中的多Agent任务，继续协作链路。",
+            requires_rag=False,
+            requires_tool=False,
+            requires_memory=True,
+            hints={
+                "multi_agent_resume_action": multi_agent_resume_action,
+            },
+        )
+
     finish_matches = find_matched_keywords(
         question=question,
         keywords=FINISH_KEYWORDS,
@@ -286,6 +393,37 @@ def decide_root_route(
             hints={
                 "matched_keywords": finish_matches,
                 "root_layer_policy": "Root 只做结束意图识别，不处理业务细节。",
+            },
+        )
+
+    multi_agent_matches = find_matched_keywords(
+        question=question,
+        keywords=MULTI_AGENT_KEYWORDS,
+    )
+    multi_agent_plan_matches = find_matched_keywords(
+        question=question,
+        keywords=MULTI_AGENT_PLAN_KEYWORDS,
+    )
+    multi_agent_task_dimensions = find_multi_agent_task_dimensions(
+        question=question,
+    )
+    is_multi_dimension_plan = (
+        len(multi_agent_task_dimensions) >= 3
+        and bool(multi_agent_plan_matches)
+    )
+    if multi_agent_matches or is_multi_dimension_plan:
+        return RootRouteDecision(
+            route="multi_agent",
+            query_type="multi_agent_task",
+            confidence=0.88,
+            reason="用户目标包含多步骤或多领域协作要求，需要先规划再执行。",
+            requires_rag=False,
+            requires_tool=False,
+            requires_memory=True,
+            hints={
+                "matched_keywords": multi_agent_matches,
+                "matched_plan_keywords": multi_agent_plan_matches,
+                "matched_task_dimensions": multi_agent_task_dimensions,
             },
         )
 

@@ -21,6 +21,10 @@ from src.agents.collaboration.aggregator import (
     ResultAggregationError,
     ResultAggregator,
 )
+from src.agents.collaboration.adapters import (
+    MultiAgentResumeAction,
+    resolve_multi_agent_resume_input,
+)
 from src.agents.collaboration.planner import (
     PlannerAgent,
     PlannerGenerationError,
@@ -28,6 +32,11 @@ from src.agents.collaboration.planner import (
 from src.agents.collaboration.orchestrator import (
     MultiAgentOrchestrationError,
     MultiAgentOrchestrator,
+)
+from src.agents.collaboration.graph import (
+    MultiAgentEntryNode,
+    build_multi_agent_entry_node,
+    build_multi_agent_state_update,
 )
 from src.agents.collaboration.scheduler import (
     MultiAgentTaskScheduler,
@@ -52,11 +61,16 @@ __all__ = [
     "ResultAggregationDraft",
     "ResultAggregationError",
     "ResultAggregator",
+    "MultiAgentResumeAction",
+    "resolve_multi_agent_resume_input",
     "PlannerAgent",
     "PlannerGenerationError",
     "MultiAgentTaskScheduler",
     "MultiAgentOrchestrationError",
     "MultiAgentOrchestrator",
+    "MultiAgentEntryNode",
+    "build_multi_agent_entry_node",
+    "build_multi_agent_state_update",
     "WorkerHandler",
     "AgentStateBuilder",
     "AgentStateRunner",

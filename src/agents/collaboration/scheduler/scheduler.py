@@ -116,6 +116,14 @@ class MultiAgentTaskScheduler:
                 "plan_id": plan.plan_id,
                 "plan_status": plan.status,
                 "step_count": len(plan.steps),
+                "steps": [
+                    {
+                        "step_id": step.step_id,
+                        "title": step.title,
+                        "assigned_agent": step.assigned_agent,
+                    }
+                    for step in plan.steps
+                ],
             },
         )
 
@@ -338,6 +346,14 @@ class MultiAgentTaskScheduler:
                     "plan_id": plan.plan_id,
                     "batch_number": len(ready_batches),
                     "step_ids": current_batch_ids,
+                    "steps": [
+                        {
+                            "step_id": step.step_id,
+                            "title": step.title,
+                            "assigned_agent": step.assigned_agent,
+                        }
+                        for step in current_batch
+                    ],
                 },
             )
             batch_results = await asyncio.gather(
@@ -356,6 +372,24 @@ class MultiAgentTaskScheduler:
             for result in batch_results:
                 results_by_step_id[result.step_id] = result
                 pending_step_ids.remove(result.step_id)
+                completed_step = steps_by_id[result.step_id]
+                _log_scheduler_event(
+                    level=(
+                        "warning"
+                        if result.status != "completed"
+                        else "info"
+                    ),
+                    event="multi_agent_step_finished",
+                    payload={
+                        "multi_agent_task_id": multi_agent_task_id,
+                        "plan_id": plan.plan_id,
+                        "step_id": result.step_id,
+                        "step_title": completed_step.title,
+                        "assigned_agent": result.assigned_agent,
+                        "status": result.status,
+                        "latency_ms": result.latency_ms,
+                    },
+                )
 
             awaiting_results = [
                 result
@@ -501,6 +535,7 @@ class MultiAgentTaskScheduler:
                 payload={
                     "multi_agent_task_id": multi_agent_task_id,
                     "step_id": step.step_id,
+                    "step_title": step.title,
                     "assigned_agent": step.assigned_agent,
                     "error_type": type(exc).__name__,
                     "error_message": str(exc),
@@ -585,6 +620,8 @@ def _skip_steps_with_blocking_dependencies(
                 "multi_agent_task_id": multi_agent_task_id,
                 "plan_id": plan.plan_id,
                 "step_id": step.step_id,
+                "step_title": step.title,
+                "assigned_agent": step.assigned_agent,
                 "blocking_dependency_ids": blocking_dependency_ids,
             },
         )

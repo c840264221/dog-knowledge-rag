@@ -26,6 +26,7 @@ ROUTE_ALIASES: dict[str, RootRoute] = {
     "general": "general_agent",
     "tool_agent": "tool_agent",
     "tool": "tool_agent",
+    "multi_agent": "multi_agent",
     "FINISH": "FINISH",
     "finish": "FINISH",
 }
@@ -91,7 +92,8 @@ def normalize_root_route(
         1. dog_knowledge_agent
         2. general_agent
         3. tool_agent
-        4. FINISH
+        4. multi_agent
+        5. FINISH
 
         同时兼容旧 route key：
         1. recommendation_agent -> dog_knowledge_agent
@@ -205,5 +207,6 @@ def build_root_route_alias_map(
         "dog_knowledge_agent": "dog_knowledge_agent",
         "general_agent": "general",
         "tool_agent": "tool_agent",
+        "multi_agent": "multi_agent",
         "FINISH": end_node,
     }

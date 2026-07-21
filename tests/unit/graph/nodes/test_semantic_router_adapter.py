@@ -16,6 +16,12 @@ semantic_router Adapter 单元测试。
 
 import pytest
 
+from src.agents.collaboration import (
+    AgentTaskPlan,
+    AgentTaskResult,
+    AgentTaskStep,
+    MultiAgentTaskResult,
+)
 from src.graph.nodes.router_node import (
     semantic_router_node,
 )
@@ -40,6 +46,10 @@ from src.graph.nodes.router_node import (
         (
             "你好，你是谁？",
             "general_agent",
+        ),
+        (
+            "为狗狗制定健康和训练综合方案",
+            "multi_agent",
         ),
     ],
 )
@@ -211,3 +221,57 @@ async def test_semantic_router_should_keep_partial_clarification_in_tool_agent()
     assert result["tool_agent_clarification_request"]["missing_fields"] == [
         "table_name",
     ]
+
+
+@pytest.mark.asyncio
+async def test_semantic_router_should_route_multi_agent_resume() -> None:
+    """
+    测试暂停任务的用户回答会先转换成恢复输入并路由到 multi_agent。
+
+    参数：无。
+    返回值：None。
+    """
+
+    step = AgentTaskStep(
+        step_id="confirm_profile",
+        title="确认读取资料",
+        assigned_agent="dog_knowledge_agent",
+        status="awaiting_input",
+    )
+    paused_result = MultiAgentTaskResult(
+        collaboration_id="router_resume_task",
+        plan=AgentTaskPlan(
+            plan_id="router_resume_plan",
+            objective="生成综合方案",
+            steps=[step],
+            status="awaiting_input",
+            requires_user_input=True,
+            clarification_prompt="是否允许读取资料？",
+        ),
+        status="awaiting_input",
+        task_results=[
+            AgentTaskResult(
+                step_id=step.step_id,
+                assigned_agent=step.assigned_agent,
+                status="awaiting_input",
+                requires_user_input=True,
+                clarification_prompt="是否允许读取资料？",
+            )
+        ],
+    )
+
+    result = await semantic_router_node(
+        {
+            "question": "允许读取",
+            "multi_agent_task_result": paused_result.model_dump(
+                mode="python"
+            ),
+        }
+    )
+
+    assert result["next_agent"] == "multi_agent"
+    assert result["multi_agent_resume_action"] == "resume"
+    assert result["multi_agent_resume_inputs"] == {
+        "confirm_profile": "允许读取"
+    }
+    assert result["multi_agent_resume_ready"] is True

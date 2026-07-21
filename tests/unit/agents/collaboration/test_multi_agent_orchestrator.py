@@ -291,6 +291,53 @@ def test_orchestrator_should_run_complete_multi_agent_flow() -> None:
     ]
 
 
+def test_orchestrator_should_attach_runtime_identity_to_worker_steps() -> None:
+    """
+    检查主图运行身份是否由程序写入全部 Worker 步骤。
+
+    功能：
+        验证 user_id、session_id 和 trace_id 不依赖 Planner 自行复制，且
+        Worker 最终得到的计划中保存的是调用方提供的可信值。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    provider = FakeOrchestrationLLMProvider(
+        [
+            build_orchestration_plan_json(),
+            build_orchestration_answer_json(),
+        ]
+    )
+    calls: list[str] = []
+    worker = build_success_worker(calls)
+    orchestrator = build_orchestrator(
+        provider=provider,
+        profile_worker=worker,
+        health_worker=worker,
+    )
+
+    result = asyncio.run(
+        orchestrator.run(
+            "为幼犬制定健康建议",
+            context={
+                "user_id": "user_001",
+                "session_id": "session_001",
+                "trace_id": "trace_001",
+            },
+            plan_id="plan_orchestration_001",
+        )
+    )
+
+    for step in result.plan.steps:
+        assert step.input_data["user_id"] == "user_001"
+        assert step.input_data["session_id"] == "session_001"
+        assert step.input_data["trace_id"] == "trace_001"
+
+
 def test_orchestrator_should_stop_when_plan_awaits_user() -> None:
     """
     检查计划等待用户输入时是否停止在调度阶段且不调用 Worker 和聚合器。

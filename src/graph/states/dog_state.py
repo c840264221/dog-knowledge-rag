@@ -324,6 +324,26 @@ class DogState(TypedDict, total=False):
     dog_knowledge_debug_report: dict[str, Any]
 
     # =========================
+    # 11.1 多 Agent 协作与跨轮恢复字段
+    # 字典形式便于写入 LangGraph SQLite Checkpoint。
+    # =========================
+
+    # 最近一次多 Agent 任务结果；awaiting_input 时也包含暂停计划和已有步骤结果。
+    multi_agent_task_result: Dict[str, Any]
+
+    # 主图对本轮输入的判断，例如 none、resume、cancelled 或 new_question。
+    multi_agent_resume_action: str
+
+    # 等待步骤编号到用户回答的映射，Scheduler.resume 会读取这个字段。
+    multi_agent_resume_inputs: Dict[str, Any]
+
+    # 当前输入是否已经整理成可以交给多 Agent 恢复入口的结构化回答。
+    multi_agent_resume_ready: bool
+
+    # 多个 Worker 同时等待且用户回答不完整时，需要继续展示的提示。
+    multi_agent_pending_prompt: str
+
+    # =========================
     # 12. Memory 记忆上下文
     # =========================
 

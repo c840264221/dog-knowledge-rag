@@ -14,7 +14,10 @@ from typing import Any, NoReturn
 from uuid import uuid4
 
 from src.agents.collaboration.aggregator import ResultAggregator
-from src.agents.collaboration.contracts import MultiAgentTaskResult
+from src.agents.collaboration.contracts import (
+    AgentTaskPlan,
+    MultiAgentTaskResult,
+)
 from src.agents.collaboration.planner import PlannerAgent
 from src.agents.collaboration.scheduler import MultiAgentTaskScheduler
 from src.logger import logger
@@ -142,6 +145,10 @@ class MultiAgentOrchestrator:
             plan = await self.planner.create_plan(
                 normalized_objective,
                 plan_id=plan_id,
+                context=context,
+            )
+            plan = _attach_worker_runtime_context(
+                plan=plan,
                 context=context,
             )
             visited_stages.append("planning")
@@ -282,6 +289,47 @@ class MultiAgentOrchestrator:
         )
         _log_orchestration_finished(final_result)
         return final_result
+
+
+def _attach_worker_runtime_context(
+    *,
+    plan: AgentTaskPlan,
+    context: Mapping[str, Any] | None,
+) -> AgentTaskPlan:
+    """
+    把主图中的可信运行身份写入每个 Worker 步骤。
+
+    功能：
+        Planner 可以参考 context，但不能保证把 user_id 等运行身份原样写入
+        每个步骤。本函数在计划通过校验后由程序统一补充身份，避免 Worker
+        子图回退到 default_user，同时阻止 LLM 伪造这些字段。
+
+    参数含义：
+        plan:
+            PlannerAgent 已经生成并通过校验的 AgentTaskPlan。
+        context:
+            主图传入的补充上下文，可能包含 user_id、session_id 和 trace_id。
+
+    返回值含义：
+        AgentTaskPlan:
+            每个步骤 input_data 都已合并可信运行身份的新计划对象。
+    """
+
+    runtime_identity = {
+        field_name: str((context or {}).get(field_name) or "").strip()
+        for field_name in ("user_id", "session_id", "trace_id")
+        if str((context or {}).get(field_name) or "").strip()
+    }
+    if not runtime_identity:
+        return plan
+
+    plan_data = plan.model_dump(mode="python")
+    for step_data in plan_data["steps"]:
+        step_data["input_data"] = {
+            **step_data["input_data"],
+            **runtime_identity,
+        }
+    return type(plan).model_validate(plan_data)
 
 
 def _attach_orchestration_metadata(

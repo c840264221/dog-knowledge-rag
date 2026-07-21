@@ -250,3 +250,41 @@ def test_default_state_builder_should_include_resume_context() -> None:
     assert "当前步骤正在从等待用户输入的状态恢复" in state["question"]
     assert "读取宠物档案" in state["question"]
     assert "允许读取" in state["question"]
+
+
+def test_default_state_builder_should_keep_identity_and_clear_control_fields(
+) -> None:
+    """
+    检查 Worker State 是否保留可信用户身份并清除 Planner 内部路由字段。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    step = AgentTaskStep(
+        step_id="query_health",
+        title="查询健康知识",
+        assigned_agent="dog_knowledge_agent",
+        input_data={
+            "question": "查询金毛健康知识",
+            "user_id": "user_001",
+            "session_id": "session_001",
+            "trace_id": "trace_001",
+            "intent": "dog_recommendation",
+            "route_decision": {"route": "recommendation_agent"},
+            "answer_strategy": {"task_type": "recommendation"},
+        },
+    )
+
+    state = build_default_agent_state(step, {})
+
+    assert state["user_id"] == "user_001"
+    assert state["session_id"] == "session_001"
+    assert state["trace_id"] == "trace_001"
+    assert state["question"] == "查询金毛健康知识"
+    assert "intent" not in state
+    assert "route_decision" not in state
+    assert "answer_strategy" not in state

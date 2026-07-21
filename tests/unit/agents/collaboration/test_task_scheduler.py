@@ -381,6 +381,70 @@ def test_scheduler_log_should_use_indented_json(monkeypatch) -> None:
     assert '\n    "plan_id": "plan_001"' in messages[0]
 
 
+def test_scheduler_logs_should_include_step_title_and_agent(
+    monkeypatch,
+) -> None:
+    """
+    检查任务、批次和步骤完成日志是否包含可读步骤信息。
+
+    功能：
+        保留稳定 step_id 的同时，验证日志还会展示 title 和 assigned_agent，
+        方便并发执行时区分每条日志属于哪个业务步骤和 Worker Agent。
+
+    参数含义：
+        monkeypatch:
+            pytest 提供的临时替换工具，用来接收日志而不写入真实控制台。
+
+    返回值含义：
+        None。
+    """
+
+    messages: list[str] = []
+    recording_logger = SimpleNamespace(
+        info=messages.append,
+        warning=messages.append,
+        error=messages.append,
+    )
+    monkeypatch.setattr(scheduler_module, "logger", recording_logger)
+
+    async def health_worker(
+        step: AgentTaskStep,
+        dependency_results: Mapping[str, AgentTaskResult],
+    ) -> AgentTaskResult:
+        """返回健康分析步骤的固定成功结果。"""
+
+        _ = dependency_results
+        return AgentTaskResult(
+            step_id=step.step_id,
+            assigned_agent=step.assigned_agent,
+            status="completed",
+            summary="健康分析完成。",
+        )
+
+    scheduler = MultiAgentTaskScheduler(
+        workers={"dog_knowledge_agent": health_worker}
+    )
+    plan = AgentTaskPlan(
+        plan_id="readable_log_plan",
+        objective="生成健康方案",
+        steps=[
+            AgentTaskStep(
+                step_id="step1",
+                title="分析健康注意事项",
+                assigned_agent="dog_knowledge_agent",
+            )
+        ],
+    )
+
+    asyncio.run(scheduler.execute(plan))
+
+    joined_messages = "\n".join(messages)
+    assert '"step_id": "step1"' in joined_messages
+    assert '"title": "分析健康注意事项"' in joined_messages
+    assert '"step_title": "分析健康注意事项"' in joined_messages
+    assert '"assigned_agent": "dog_knowledge_agent"' in joined_messages
+
+
 def test_scheduler_should_pause_when_worker_awaits_input() -> None:
     """
     检查 Worker 等待用户确认时是否暂停计划且不执行后续步骤。
