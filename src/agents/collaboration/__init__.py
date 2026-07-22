@@ -39,8 +39,11 @@ from src.agents.collaboration.graph import (
     build_multi_agent_state_update,
 )
 from src.agents.collaboration.scheduler import (
+    MultiAgentTaskCancellationRegistry,
+    MultiAgentTaskCancellationToken,
     MultiAgentTaskScheduler,
     WorkerHandler,
+    build_multi_agent_task_id,
 )
 from src.agents.collaboration.workers import (
     AgentStateBuilder,
@@ -65,6 +68,8 @@ __all__ = [
     "resolve_multi_agent_resume_input",
     "PlannerAgent",
     "PlannerGenerationError",
+    "MultiAgentTaskCancellationRegistry",
+    "MultiAgentTaskCancellationToken",
     "MultiAgentTaskScheduler",
     "MultiAgentOrchestrationError",
     "MultiAgentOrchestrator",
@@ -72,6 +77,7 @@ __all__ = [
     "build_multi_agent_entry_node",
     "build_multi_agent_state_update",
     "WorkerHandler",
+    "build_multi_agent_task_id",
     "AgentStateBuilder",
     "AgentStateRunner",
     "GraphAgentWorkerAdapter",

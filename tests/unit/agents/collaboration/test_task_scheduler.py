@@ -19,9 +19,48 @@ from src.agents.collaboration import (
     AgentTaskPlan,
     AgentTaskResult,
     AgentTaskStep,
+    MultiAgentTaskCancellationRegistry,
+    MultiAgentTaskCancellationToken,
     MultiAgentTaskResult,
     MultiAgentTaskScheduler,
 )
+
+
+def test_cancellation_registry_should_manage_running_task_token() -> None:
+    """
+    检查取消登记表能注册、取消并移除运行中任务。
+
+    参数含义：无。
+    返回值含义：None。
+    """
+
+    registry = MultiAgentTaskCancellationRegistry()
+    token = registry.register("multi_agent_task_registry_001")
+
+    assert registry.contains("multi_agent_task_registry_001") is True
+    assert registry.cancel("multi_agent_task_registry_001") is True
+    assert token.is_cancelled is True
+    assert registry.unregister(
+        "multi_agent_task_registry_001",
+        token,
+    ) is True
+    assert registry.contains("multi_agent_task_registry_001") is False
+    assert registry.cancel("multi_agent_task_registry_001") is False
+
+
+def test_cancellation_registry_should_reject_duplicate_running_task() -> None:
+    """
+    检查同一任务编号不能同时登记两次。
+
+    参数含义：无。
+    返回值含义：None。
+    """
+
+    registry = MultiAgentTaskCancellationRegistry()
+    registry.register("multi_agent_task_duplicate")
+
+    with pytest.raises(ValueError, match="已经在运行"):
+        registry.register("multi_agent_task_duplicate")
 
 
 def build_scheduler_plan(
@@ -223,6 +262,7 @@ def test_scheduler_should_continue_after_allowed_failure() -> None:
     """
 
     calls: list[tuple[str, list[str]]] = []
+    failure_attempts: list[str] = []
     success_worker = build_success_worker(calls)
 
     def failing_profile_worker(
@@ -232,6 +272,7 @@ def test_scheduler_should_continue_after_allowed_failure() -> None:
         """返回一条允许继续执行的失败结果。"""
 
         _ = dependency_results
+        failure_attempts.append(step.step_id)
         return AgentTaskResult(
             step_id=step.step_id,
             assigned_agent=step.assigned_agent,
@@ -245,7 +286,8 @@ def test_scheduler_should_continue_after_allowed_failure() -> None:
             "health_agent": success_worker,
             "training_agent": success_worker,
             "general_agent": success_worker,
-        }
+        },
+        maximum_step_attempts=3,
     )
 
     result = asyncio.run(
@@ -256,11 +298,338 @@ def test_scheduler_should_continue_after_allowed_failure() -> None:
 
     assert result.status == "partial"
     assert result.plan.status == "partial"
+    assert failure_attempts == ["load_profile"]
     assert [call[0] for call in calls] == [
         "query_health",
         "query_training",
         "build_plan",
     ]
+
+
+@pytest.mark.parametrize("timeout_seconds", [0, -1])
+def test_scheduler_should_reject_non_positive_step_timeout(
+    timeout_seconds: float,
+) -> None:
+    """
+    检查单步骤超时秒数为零或负数时是否拒绝创建调度器。
+
+    参数含义：
+        timeout_seconds:
+            pytest 依次传入的非法超时秒数。
+
+    返回值含义：
+        None。
+    """
+
+    with pytest.raises(ValueError, match="step_timeout_seconds"):
+        MultiAgentTaskScheduler(
+            workers={"profile_agent": build_success_worker([])},
+            step_timeout_seconds=timeout_seconds,
+        )
+
+
+def test_scheduler_should_reject_non_positive_step_attempts() -> None:
+    """
+    检查单步骤最大尝试次数小于一时是否拒绝创建调度器。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    with pytest.raises(ValueError, match="maximum_step_attempts"):
+        MultiAgentTaskScheduler(
+            workers={"profile_agent": build_success_worker([])},
+            maximum_step_attempts=0,
+        )
+
+
+def test_scheduler_should_retry_worker_exception_until_success() -> None:
+    """
+    检查 Worker 临时抛出异常后是否在最大次数内重试并成功返回。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    attempt_numbers: list[int] = []
+
+    async def unstable_worker(
+        step: AgentTaskStep,
+        dependency_results: Mapping[str, AgentTaskResult],
+    ) -> AgentTaskResult:
+        """第一次模拟临时故障，第二次返回成功结果。"""
+
+        _ = dependency_results
+        attempt_numbers.append(len(attempt_numbers) + 1)
+        if len(attempt_numbers) == 1:
+            raise ConnectionError("临时网络错误")
+        return AgentTaskResult(
+            step_id=step.step_id,
+            assigned_agent=step.assigned_agent,
+            status="completed",
+            summary="第二次执行成功。",
+        )
+
+    scheduler = MultiAgentTaskScheduler(
+        workers={"profile_agent": unstable_worker},
+        maximum_step_attempts=2,
+    )
+    plan = AgentTaskPlan(
+        plan_id="worker_retry_plan",
+        objective="测试 Worker 异常重试",
+        steps=[
+            AgentTaskStep(
+                step_id="load_profile",
+                title="读取资料",
+                assigned_agent="profile_agent",
+            )
+        ],
+    )
+
+    result = asyncio.run(scheduler.execute(plan))
+
+    assert result.status == "running"
+    assert attempt_numbers == [1, 2]
+    assert result.task_results[0].status == "completed"
+    assert result.task_results[0].metadata["scheduler_attempt_count"] == 2
+    assert result.metadata["maximum_step_attempts"] == 2
+
+
+def test_scheduler_should_convert_worker_timeout_to_failure() -> None:
+    """
+    检查异步 Worker 超时后是否转换成包含超时信息的标准失败结果。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    attempt_numbers: list[int] = []
+
+    async def slow_worker(
+        step: AgentTaskStep,
+        dependency_results: Mapping[str, AgentTaskResult],
+    ) -> AgentTaskResult:
+        """模拟长时间没有返回结果的异步 Worker。"""
+
+        _ = dependency_results
+        attempt_numbers.append(len(attempt_numbers) + 1)
+        await asyncio.sleep(60)
+        return AgentTaskResult(
+            step_id=step.step_id,
+            assigned_agent=step.assigned_agent,
+            status="completed",
+        )
+
+    scheduler = MultiAgentTaskScheduler(
+        workers={"profile_agent": slow_worker},
+        step_timeout_seconds=0.01,
+        maximum_step_attempts=2,
+    )
+    plan = AgentTaskPlan(
+        plan_id="worker_timeout_plan",
+        objective="测试 Worker 超时保护",
+        steps=[
+            AgentTaskStep(
+                step_id="load_profile",
+                title="读取资料",
+                assigned_agent="profile_agent",
+            )
+        ],
+    )
+
+    result = asyncio.run(scheduler.execute(plan))
+    timeout_result = result.task_results[0]
+
+    assert result.status == "failed"
+    assert timeout_result.status == "failed"
+    assert "执行超过 0.01 秒" in str(timeout_result.error_message)
+    assert timeout_result.metadata["scheduler_generated_failure"] is True
+    assert timeout_result.metadata["timed_out"] is True
+    assert timeout_result.metadata["timeout_seconds"] == 0.01
+    assert timeout_result.metadata["scheduler_attempt_count"] == 2
+    assert attempt_numbers == [1, 2]
+    assert result.metadata["step_timeout_seconds"] == 0.01
+
+
+def test_scheduler_should_continue_after_allowed_timeout() -> None:
+    """
+    检查允许失败的步骤超时后是否继续执行依赖它的后续步骤。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    calls: list[tuple[str, list[str]]] = []
+    success_worker = build_success_worker(calls)
+
+    async def slow_profile_worker(
+        step: AgentTaskStep,
+        dependency_results: Mapping[str, AgentTaskResult],
+    ) -> AgentTaskResult:
+        """模拟允许失败但执行超时的资料读取 Worker。"""
+
+        _ = dependency_results
+        await asyncio.sleep(60)
+        return AgentTaskResult(
+            step_id=step.step_id,
+            assigned_agent=step.assigned_agent,
+            status="completed",
+        )
+
+    scheduler = MultiAgentTaskScheduler(
+        workers={
+            "profile_agent": slow_profile_worker,
+            "health_agent": success_worker,
+            "training_agent": success_worker,
+            "general_agent": success_worker,
+        },
+        step_timeout_seconds=0.05,
+    )
+
+    result = asyncio.run(
+        scheduler.execute(
+            build_scheduler_plan(profile_allow_failure=True)
+        )
+    )
+
+    assert result.status == "partial"
+    assert result.plan.status == "partial"
+    assert result.task_results[0].metadata["timed_out"] is True
+    assert [call[0] for call in calls] == [
+        "query_health",
+        "query_training",
+        "build_plan",
+    ]
+
+
+def test_scheduler_should_cancel_before_starting_workers() -> None:
+    """
+    检查执行前已经收到取消请求时是否跳过全部步骤且不调用 Worker。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    calls: list[tuple[str, list[str]]] = []
+    cancellation_token = MultiAgentTaskCancellationToken()
+    cancellation_token.cancel()
+    scheduler = MultiAgentTaskScheduler(
+        workers={"profile_agent": build_success_worker(calls)}
+    )
+
+    result = asyncio.run(
+        scheduler.execute(
+            build_scheduler_plan(),
+            cancellation_token=cancellation_token,
+        )
+    )
+
+    assert result.status == "cancelled"
+    assert result.plan.status == "cancelled"
+    assert result.plan.requires_user_input is False
+    assert result.final_answer == "多 Agent 任务已取消。"
+    assert result.metadata["cancellation_requested"] is True
+    assert all(
+        task_result.status == "skipped"
+        for task_result in result.task_results
+    )
+    assert calls == []
+
+
+def test_scheduler_should_cancel_running_worker_without_retry() -> None:
+    """
+    检查执行中取消时是否终止异步 Worker，并且不把取消当成异常重试。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    async def run_cancellation_scenario() -> tuple[
+        MultiAgentTaskResult,
+        list[str],
+    ]:
+        """
+        启动一个持续等待的 Worker，在确认启动后发出取消请求。
+
+        返回值含义：
+            tuple[MultiAgentTaskResult, list[str]]:
+                取消后的任务结果和 Worker 实际调用记录。
+        """
+
+        calls: list[str] = []
+        worker_started = asyncio.Event()
+        cancellation_token = MultiAgentTaskCancellationToken()
+
+        async def waiting_worker(
+            step: AgentTaskStep,
+            dependency_results: Mapping[str, AgentTaskResult],
+        ) -> AgentTaskResult:
+            """模拟已经开始但长时间没有完成的异步 Worker。"""
+
+            _ = dependency_results
+            calls.append(step.step_id)
+            worker_started.set()
+            await asyncio.sleep(60)
+            return AgentTaskResult(
+                step_id=step.step_id,
+                assigned_agent=step.assigned_agent,
+                status="completed",
+            )
+
+        scheduler = MultiAgentTaskScheduler(
+            workers={"profile_agent": waiting_worker},
+            maximum_step_attempts=3,
+        )
+        plan = AgentTaskPlan(
+            plan_id="running_cancellation_plan",
+            objective="测试执行中取消",
+            steps=[
+                AgentTaskStep(
+                    step_id="load_profile",
+                    title="读取资料",
+                    assigned_agent="profile_agent",
+                )
+            ],
+        )
+        execution_task = asyncio.create_task(
+            scheduler.execute(
+                plan,
+                cancellation_token=cancellation_token,
+            )
+        )
+        await worker_started.wait()
+        cancellation_token.cancel()
+        result = await asyncio.wait_for(execution_task, timeout=1)
+        return result, calls
+
+    result, calls = asyncio.run(run_cancellation_scenario())
+
+    assert result.status == "cancelled"
+    assert result.plan.status == "cancelled"
+    assert result.task_results[0].status == "skipped"
+    assert result.task_results[0].metadata["cancelled"] is True
+    assert result.task_results[0].metadata[
+        "scheduler_attempt_count"
+    ] == 1
+    assert calls == ["load_profile"]
 
 
 def test_scheduler_should_not_run_plan_waiting_for_user() -> None:

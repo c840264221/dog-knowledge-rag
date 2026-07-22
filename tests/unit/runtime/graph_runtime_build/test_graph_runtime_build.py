@@ -98,6 +98,72 @@ class FakeStateGraph:
         return self
 
 
+def test_multi_agent_scheduler_options_should_follow_runtime_settings(
+    monkeypatch,
+) -> None:
+    """
+    测试多 Agent Scheduler 参数是否来自 Runtime Settings。
+
+    参数：
+        monkeypatch:
+            pytest 提供的临时属性替换工具。
+
+    返回值：
+        None。
+    """
+
+    runtime_settings = graph_runtime_service.settings.runtime
+    monkeypatch.setattr(runtime_settings, "enable_timeout", True)
+    monkeypatch.setattr(runtime_settings, "enable_retry", True)
+    monkeypatch.setattr(
+        runtime_settings,
+        "multi_agent_maximum_parallel_steps",
+        3,
+    )
+    monkeypatch.setattr(
+        runtime_settings,
+        "multi_agent_step_timeout_seconds",
+        45.0,
+    )
+    monkeypatch.setattr(
+        runtime_settings,
+        "multi_agent_maximum_step_attempts",
+        4,
+    )
+
+    options = graph_runtime_service._build_multi_agent_scheduler_options()
+
+    assert options == {
+        "maximum_parallel_steps": 3,
+        "step_timeout_seconds": 45.0,
+        "maximum_step_attempts": 4,
+    }
+
+
+def test_multi_agent_scheduler_options_should_respect_disabled_controls(
+    monkeypatch,
+) -> None:
+    """
+    测试关闭全局开关时多 Agent 超时和重试是否回退到兼容行为。
+
+    参数：
+        monkeypatch:
+            pytest 提供的临时属性替换工具。
+
+    返回值：
+        None。
+    """
+
+    runtime_settings = graph_runtime_service.settings.runtime
+    monkeypatch.setattr(runtime_settings, "enable_timeout", False)
+    monkeypatch.setattr(runtime_settings, "enable_retry", False)
+
+    options = graph_runtime_service._build_multi_agent_scheduler_options()
+
+    assert options["step_timeout_seconds"] is None
+    assert options["maximum_step_attempts"] == 1
+
+
 def test_graph_runtime_should_pass_sqlite_mcp_provider_to_tool_agent(
     monkeypatch,
 ) -> None:
@@ -252,3 +318,20 @@ async def test_graph_runtime_should_inject_memory_extract_node_dependencies(
     }
     assert graph.nodes["memory_extract"] is injected_node
     assert graph.nodes["multi_agent"] == "multi_agent"
+
+
+def test_graph_runtime_should_cancel_registered_multi_agent_task() -> None:
+    """
+    检查 GraphRuntimeService 会把外部取消请求转交给运行中任务登记表。
+
+    参数含义：无。
+    返回值含义：None。
+    """
+
+    service = GraphRuntimeService()
+    task_id = "multi_agent_task_runtime_cancel"
+    token = service._multi_agent_cancellation_registry.register(task_id)
+
+    assert service.cancel_multi_agent_task(task_id) is True
+    assert token.is_cancelled is True
+    assert service.cancel_multi_agent_task("unknown_task") is False

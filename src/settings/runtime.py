@@ -1,3 +1,5 @@
+from pydantic import Field
+
 from src.settings.base import BaseAppSettings
 
 
@@ -29,6 +31,19 @@ class RuntimeSettings(BaseAppSettings):
 
     # 流式响应中每个数据块的超时时间
     stream_chunk_timeout: int = 120
+
+    # =========================
+    # Multi-Agent Scheduler
+    # =========================
+
+    # 同一批多 Agent 步骤最多并发执行数量
+    multi_agent_maximum_parallel_steps: int = Field(default=4, ge=1)
+
+    # 单个异步 Worker 最长执行秒数
+    multi_agent_step_timeout_seconds: float = Field(default=120.0, gt=0)
+
+    # 单个 Worker 总尝试次数，包含第一次执行
+    multi_agent_maximum_step_attempts: int = Field(default=2, ge=1)
 
     # =========================
     # Middleware

@@ -5,10 +5,14 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+import pytest
+
 from src.agents.collaboration import (
     AgentTaskPlan,
     AgentTaskResult,
     AgentTaskStep,
+    MultiAgentTaskCancellationRegistry,
+    MultiAgentTaskCancellationToken,
     MultiAgentTaskResult,
     build_multi_agent_entry_node,
 )
@@ -37,6 +41,7 @@ class FakeMultiAgentOrchestrator:
         task_result: MultiAgentTaskResult,
         *,
         user_inputs: dict[str, Any],
+        cancellation_token: MultiAgentTaskCancellationToken | None = None,
     ) -> MultiAgentTaskResult:
         """记录恢复调用并返回固定结果。"""
 
@@ -44,6 +49,7 @@ class FakeMultiAgentOrchestrator:
             {
                 "task_result": task_result,
                 "user_inputs": user_inputs,
+                "cancellation_token": cancellation_token,
             }
         )
         return self.result
@@ -121,6 +127,10 @@ def test_entry_node_should_run_new_task() -> None:
     assert orchestrator.run_calls[0]["objective"] == (
         "生成健康和训练综合方案"
     )
+    assert orchestrator.run_calls[0]["multi_agent_task_id"].startswith(
+        "multi_agent_task_"
+    )
+    assert orchestrator.run_calls[0]["cancellation_token"] is None
     assert orchestrator.resume_calls == []
     assert update["final_answer"] == "综合方案已生成。"
 
@@ -241,3 +251,93 @@ def test_entry_node_should_save_awaiting_result_for_checkpoint() -> None:
     assert update["multi_agent_pending_prompt"] == "是否继续？"
     assert update["waiting_user_input"] is True
     assert update["final_answer"] == "是否继续？"
+
+
+def test_entry_node_should_register_and_cleanup_cancellation_token() -> None:
+    """
+    检查多 Agent 入口会在调用期间登记令牌并在结束后清理。
+
+    功能：
+        使用固定 trace_id 验证任务编号可预测、编排器收到共享令牌，并且
+        正常返回后登记表不再保留已经结束的任务。
+
+    参数含义：无。
+    返回值含义：None。
+    """
+
+    registry = MultiAgentTaskCancellationRegistry()
+    orchestrator = FakeMultiAgentOrchestrator(
+        build_entry_task_result(status="completed")
+    )
+    node = build_multi_agent_entry_node(
+        orchestrator=orchestrator,
+        cancellation_registry=registry,
+    )
+
+    update = asyncio.run(
+        node(
+            {
+                "question": "生成健康和训练综合方案",
+                "trace_id": "trace_cancel_001",
+                "multi_agent_resume_action": "none",
+            }
+        )
+    )
+
+    run_call = orchestrator.run_calls[0]
+    task_id = "multi_agent_task_trace_cancel_001"
+    assert run_call["multi_agent_task_id"] == task_id
+    assert isinstance(
+        run_call["cancellation_token"],
+        MultiAgentTaskCancellationToken,
+    )
+    assert registry.contains(task_id) is False
+    assert update["final_answer"] == "综合方案已生成。"
+
+
+def test_entry_node_should_cleanup_registry_after_orchestration_error() -> None:
+    """
+    检查编排器抛出异常时运行中任务登记也会被清理。
+
+    功能：
+        验证入口使用 finally 清理令牌，避免失败任务永久占用任务编号。
+
+    参数含义：无。
+    返回值含义：None。
+    """
+
+    class FailingOrchestrator(FakeMultiAgentOrchestrator):
+        """模拟执行期间抛出异常的多 Agent 编排器。"""
+
+        async def run(
+            self,
+            objective: str,
+            **kwargs: Any,
+        ) -> MultiAgentTaskResult:
+            """记录调用后抛出固定异常。"""
+
+            self.run_calls.append({"objective": objective, **kwargs})
+            raise RuntimeError("模拟编排失败")
+
+    registry = MultiAgentTaskCancellationRegistry()
+    orchestrator = FailingOrchestrator(
+        build_entry_task_result(status="completed")
+    )
+    node = build_multi_agent_entry_node(
+        orchestrator=orchestrator,
+        cancellation_registry=registry,
+    )
+    task_id = "multi_agent_task_trace_error_001"
+
+    with pytest.raises(RuntimeError, match="模拟编排失败"):
+        asyncio.run(
+            node(
+                {
+                    "question": "生成综合方案",
+                    "trace_id": "trace_error_001",
+                    "multi_agent_resume_action": "none",
+                }
+            )
+        )
+
+    assert registry.contains(task_id) is False
