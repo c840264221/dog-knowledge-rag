@@ -19,7 +19,10 @@ from src.agents.collaboration.contracts import (
     MultiAgentTaskResult,
 )
 from src.agents.collaboration.planner import PlannerAgent
-from src.agents.collaboration.scheduler import MultiAgentTaskScheduler
+from src.agents.collaboration.scheduler import (
+    MultiAgentTaskCancellationToken,
+    MultiAgentTaskScheduler,
+)
 from src.logger import logger
 
 
@@ -97,6 +100,7 @@ class MultiAgentOrchestrator:
         context: Mapping[str, Any] | None = None,
         plan_id: str | None = None,
         multi_agent_task_id: str | None = None,
+        cancellation_token: MultiAgentTaskCancellationToken | None = None,
     ) -> MultiAgentTaskResult:
         """
         执行一次完整的多 Agent 任务。
@@ -114,6 +118,8 @@ class MultiAgentOrchestrator:
                 可选计划编号；不传时由 PlannerAgent 自动生成。
             multi_agent_task_id:
                 可选的整次多 Agent 任务编号；不传时由总编排器自动生成。
+            cancellation_token:
+                可选任务取消令牌，会传给 Scheduler 停止未完成步骤。
 
         返回值含义：
             MultiAgentTaskResult:
@@ -163,6 +169,7 @@ class MultiAgentOrchestrator:
             scheduled_result = await self.scheduler.execute(
                 plan,
                 collaboration_id=resolved_task_id,
+                cancellation_token=cancellation_token,
             )
             visited_stages.append("scheduling")
         except Exception as exc:
@@ -172,7 +179,11 @@ class MultiAgentOrchestrator:
                 error=exc,
             )
 
-        if scheduled_result.status in {"awaiting_input", "failed"}:
+        if scheduled_result.status in {
+            "awaiting_input",
+            "failed",
+            "cancelled",
+        }:
             final_result = _attach_orchestration_metadata(
                 task_result=scheduled_result,
                 visited_stages=visited_stages,
@@ -214,6 +225,7 @@ class MultiAgentOrchestrator:
         task_result: MultiAgentTaskResult,
         *,
         user_inputs: Mapping[str, Any],
+        cancellation_token: MultiAgentTaskCancellationToken | None = None,
     ) -> MultiAgentTaskResult:
         """
         根据用户回答恢复一份等待输入的多 Agent 任务。
@@ -227,6 +239,8 @@ class MultiAgentOrchestrator:
                 上一次返回给用户的 awaiting_input 多 Agent 任务结果。
             user_inputs:
                 等待步骤编号到用户回答的映射。
+            cancellation_token:
+                可选任务取消令牌，会传给 Scheduler 停止未完成步骤。
 
         返回值含义：
             MultiAgentTaskResult:
@@ -244,6 +258,7 @@ class MultiAgentOrchestrator:
             scheduled_result = await self.scheduler.resume(
                 task_result,
                 user_inputs=user_inputs,
+                cancellation_token=cancellation_token,
             )
             visited_stages.append("resume_scheduling")
         except Exception as exc:
@@ -253,7 +268,11 @@ class MultiAgentOrchestrator:
                 error=exc,
             )
 
-        if scheduled_result.status in {"awaiting_input", "failed"}:
+        if scheduled_result.status in {
+            "awaiting_input",
+            "failed",
+            "cancelled",
+        }:
             final_result = _attach_orchestration_metadata(
                 task_result=scheduled_result,
                 visited_stages=visited_stages,

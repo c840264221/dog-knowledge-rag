@@ -20,6 +20,7 @@ from src.agents.collaboration import (
     AgentTaskStep,
     MultiAgentOrchestrationError,
     MultiAgentOrchestrator,
+    MultiAgentTaskCancellationToken,
     MultiAgentTaskScheduler,
     PlannerAgent,
     ResultAggregator,
@@ -288,6 +289,49 @@ def test_orchestrator_should_run_complete_multi_agent_flow() -> None:
         "planning",
         "scheduling",
         "aggregation",
+    ]
+
+
+def test_orchestrator_should_not_aggregate_cancelled_task() -> None:
+    """
+    检查 Scheduler 返回 cancelled 后总编排器是否直接结束且不调用聚合器。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    provider = FakeOrchestrationLLMProvider(
+        [build_orchestration_plan_json()]
+    )
+    calls: list[str] = []
+    worker = build_success_worker(calls)
+    orchestrator = build_orchestrator(
+        provider=provider,
+        profile_worker=worker,
+        health_worker=worker,
+    )
+    cancellation_token = MultiAgentTaskCancellationToken()
+    cancellation_token.cancel()
+
+    result = asyncio.run(
+        orchestrator.run(
+            "为幼犬制定健康建议",
+            plan_id="plan_orchestration_001",
+            multi_agent_task_id="task_orchestration_cancelled",
+            cancellation_token=cancellation_token,
+        )
+    )
+
+    assert result.status == "cancelled"
+    assert result.final_answer == "多 Agent 任务已取消。"
+    assert calls == []
+    assert len(provider.prompts) == 1
+    assert result.metadata["orchestration"]["visited_stages"] == [
+        "planning",
+        "scheduling",
     ]
 
 

@@ -6,11 +6,17 @@
 """
 
 from src.agents.collaboration.scheduler.scheduler import (
+    MultiAgentTaskCancellationRegistry,
+    MultiAgentTaskCancellationToken,
     MultiAgentTaskScheduler,
     WorkerHandler,
+    build_multi_agent_task_id,
 )
 
 __all__ = [
+    "MultiAgentTaskCancellationRegistry",
+    "MultiAgentTaskCancellationToken",
     "MultiAgentTaskScheduler",
     "WorkerHandler",
+    "build_multi_agent_task_id",
 ]

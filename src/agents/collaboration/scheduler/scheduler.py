@@ -13,6 +13,7 @@ import inspect
 import json
 import time
 from collections.abc import Awaitable, Callable, Mapping
+from threading import Lock
 from typing import Any
 from uuid import uuid4
 
@@ -35,13 +36,249 @@ WorkerHandler = Callable[
 ]
 
 
+def build_multi_agent_task_id(trace_id: str | None = None) -> str:
+    """
+    根据链路追踪编号构建整次多 Agent 任务编号。
+
+    功能：
+        有 trace_id 时生成可由 UI 和主图共同推导的稳定编号；没有时使用
+        随机编号，避免不同任务互相覆盖。
+
+    参数含义：
+        trace_id:
+            当前请求的链路追踪编号。
+
+    返回值含义：
+        str:
+            以 multi_agent_task_ 开头的整次任务编号。
+    """
+
+    normalized_trace_id = str(trace_id or "").strip()
+    task_suffix = normalized_trace_id or uuid4().hex
+    return f"multi_agent_task_{task_suffix}"
+
+
+class _WorkerStepTimeoutError(TimeoutError):
+    """
+    表示调度器等待异步 Worker 时超过了单步骤时间限制。
+
+    参数含义：
+        step_id:
+            发生超时的任务步骤编号。
+        timeout_seconds:
+            当前调度器配置的单步骤超时秒数。
+
+    返回值含义：
+        _WorkerStepTimeoutError:
+            供调度器内部区分超时和普通 Worker 异常的异常对象。
+    """
+
+    def __init__(self, step_id: str, timeout_seconds: float) -> None:
+        self.step_id = step_id
+        self.timeout_seconds = timeout_seconds
+        super().__init__(
+            f"步骤 {step_id} 执行超过 {timeout_seconds:g} 秒"
+        )
+
+
+class _WorkerStepCancelledError(RuntimeError):
+    """表示异步 Worker 因整次多 Agent 任务取消而停止执行。"""
+
+
+class MultiAgentTaskCancellationToken:
+    """
+    保存一次多 Agent 任务的协作式取消信号。
+
+    功能：
+        调用方通过 cancel 发出取消请求；Scheduler 和正在等待的异步 Worker
+        通过 is_cancelled 或 wait 感知请求。令牌只管理信号，不保存任务结果。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        MultiAgentTaskCancellationToken:
+            可以在 Scheduler 与外部控制端之间共享的取消令牌。
+    """
+
+    def __init__(self) -> None:
+        self._cancelled_event = asyncio.Event()
+        self._cancelled = False
+        self._event_loop: asyncio.AbstractEventLoop | None = None
+        self._lock = Lock()
+
+    @property
+    def is_cancelled(self) -> bool:
+        """
+        返回当前任务是否已经收到取消请求。
+
+        返回值含义：
+            bool:
+                cancel 已被调用时返回 True，否则返回 False。
+        """
+
+        with self._lock:
+            return self._cancelled
+
+    def cancel(self) -> None:
+        """
+        发出取消请求并唤醒正在等待该信号的 Scheduler。
+
+        返回值含义：
+            None。
+        """
+
+        with self._lock:
+            self._cancelled = True
+            event_loop = self._event_loop
+
+        # UI 和 Worker 可能由不同线程中的事件循环驱动。已经有等待者时，
+        # 必须通过目标事件循环的线程安全入口唤醒它。
+        if event_loop is not None and event_loop.is_running():
+            event_loop.call_soon_threadsafe(self._cancelled_event.set)
+        else:
+            self._cancelled_event.set()
+
+    async def wait(self) -> None:
+        """
+        异步等待取消请求到达。
+
+        返回值含义：
+            None:
+                cancel 被调用后结束等待。
+        """
+
+        event_loop = asyncio.get_running_loop()
+        with self._lock:
+            self._event_loop = event_loop
+            already_cancelled = self._cancelled
+        if already_cancelled:
+            self._cancelled_event.set()
+        await self._cancelled_event.wait()
+
+
+class MultiAgentTaskCancellationRegistry:
+    """
+    保存当前进程中正在运行的多 Agent 任务取消令牌。
+
+    功能：
+        使用 multi_agent_task_id 注册、查找和移除取消令牌，让 UI、API
+        等外部入口能够找到正在运行的任务并发出取消请求。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        MultiAgentTaskCancellationRegistry:
+            可以由 GraphRuntimeService 长期持有的运行中任务登记表。
+    """
+
+    def __init__(self) -> None:
+        self._tokens: dict[str, MultiAgentTaskCancellationToken] = {}
+        self._lock = Lock()
+
+    def register(
+        self,
+        multi_agent_task_id: str,
+    ) -> MultiAgentTaskCancellationToken:
+        """
+        为一份正在启动的任务创建并登记取消令牌。
+
+        参数含义：
+            multi_agent_task_id:
+                整次多 Agent 任务的唯一编号。
+
+        返回值含义：
+            MultiAgentTaskCancellationToken:
+                Scheduler 与外部取消入口共享的取消令牌。
+        """
+
+        normalized_task_id = str(multi_agent_task_id or "").strip()
+        if not normalized_task_id:
+            raise ValueError("multi_agent_task_id 不能为空")
+        with self._lock:
+            if normalized_task_id in self._tokens:
+                raise ValueError(
+                    "多 Agent 任务已经在运行: "
+                    f"{normalized_task_id}"
+                )
+            token = MultiAgentTaskCancellationToken()
+            self._tokens[normalized_task_id] = token
+        return token
+
+    def cancel(self, multi_agent_task_id: str) -> bool:
+        """
+        向指定的运行中任务发出取消请求。
+
+        参数含义：
+            multi_agent_task_id:
+                需要取消的整次多 Agent 任务编号。
+
+        返回值含义：
+            bool:
+                找到运行中任务并发出信号时返回 True，否则返回 False。
+        """
+
+        normalized_task_id = str(multi_agent_task_id or "").strip()
+        with self._lock:
+            token = self._tokens.get(normalized_task_id)
+        if token is None:
+            return False
+        token.cancel()
+        return True
+
+    def unregister(
+        self,
+        multi_agent_task_id: str,
+        token: MultiAgentTaskCancellationToken,
+    ) -> bool:
+        """
+        移除已经结束的任务令牌。
+
+        参数含义：
+            multi_agent_task_id:
+                已经结束的整次多 Agent 任务编号。
+            token:
+                启动该任务时得到的令牌，用于避免误删同编号的新任务。
+
+        返回值含义：
+            bool:
+                成功移除当前令牌时返回 True，否则返回 False。
+        """
+
+        normalized_task_id = str(multi_agent_task_id or "").strip()
+        with self._lock:
+            if self._tokens.get(normalized_task_id) is not token:
+                return False
+            del self._tokens[normalized_task_id]
+        return True
+
+    def contains(self, multi_agent_task_id: str) -> bool:
+        """
+        检查指定任务当前是否仍登记为运行中。
+
+        参数含义：
+            multi_agent_task_id:
+                需要检查的整次多 Agent 任务编号。
+
+        返回值含义：
+            bool:
+                登记表中存在该任务时返回 True，否则返回 False。
+        """
+
+        normalized_task_id = str(multi_agent_task_id or "").strip()
+        with self._lock:
+            return normalized_task_id in self._tokens
+
+
 class MultiAgentTaskScheduler:
     """
     按任务依赖关系调用 Worker Agent。
 
     功能：
         每轮寻找依赖结果已经齐全的步骤，并发调用对应 Worker。Worker 必须
-        返回 AgentTaskResult；异常会被转换成失败结果，不会让调度器直接崩溃。
+        返回 AgentTaskResult；调用异常会在限制次数内重试，最终仍失败时
+        转换成失败结果，不会让调度器直接崩溃。
 
     参数含义：
         workers:
@@ -49,6 +286,11 @@ class MultiAgentTaskScheduler:
             assigned_agent 一致。
         maximum_parallel_steps:
             同一批最多并发执行多少个步骤，避免一次启动过多外部调用。
+        step_timeout_seconds:
+            单个异步 Worker 最长允许执行多少秒；None 表示不启用超时限制。
+        maximum_step_attempts:
+            单个 Worker 最多尝试执行多少次，包含第一次执行；默认 1 表示
+            不重试。
 
     返回值含义：
         MultiAgentTaskScheduler:
@@ -60,11 +302,17 @@ class MultiAgentTaskScheduler:
         *,
         workers: Mapping[str, WorkerHandler],
         maximum_parallel_steps: int = 4,
+        step_timeout_seconds: float | None = None,
+        maximum_step_attempts: int = 1,
     ) -> None:
         if not workers:
             raise ValueError("任务调度器必须至少注册一个 Worker")
         if maximum_parallel_steps < 1:
             raise ValueError("maximum_parallel_steps 必须大于 0")
+        if step_timeout_seconds is not None and step_timeout_seconds <= 0:
+            raise ValueError("step_timeout_seconds 必须大于 0 或为 None")
+        if maximum_step_attempts < 1:
+            raise ValueError("maximum_step_attempts 必须大于 0")
 
         self.workers = {
             str(name).strip(): worker
@@ -76,12 +324,19 @@ class MultiAgentTaskScheduler:
         if not all(callable(worker) for worker in self.workers.values()):
             raise ValueError("每个 Worker 都必须是可调用对象")
         self.maximum_parallel_steps = maximum_parallel_steps
+        self.step_timeout_seconds = (
+            float(step_timeout_seconds)
+            if step_timeout_seconds is not None
+            else None
+        )
+        self.maximum_step_attempts = maximum_step_attempts
 
     async def execute(
         self,
         plan: AgentTaskPlan,
         *,
         collaboration_id: str | None = None,
+        cancellation_token: MultiAgentTaskCancellationToken | None = None,
     ) -> MultiAgentTaskResult:
         """
         按依赖关系执行一份多 Agent 任务计划。
@@ -95,6 +350,8 @@ class MultiAgentTaskScheduler:
                 PlannerAgent 生成且已经通过依赖校验的任务计划。
             collaboration_id:
                 可选的多 Agent 任务编号；未提供时由调度器生成。
+            cancellation_token:
+                可选任务取消令牌；收到取消请求后停止未完成步骤。
 
         返回值含义：
             MultiAgentTaskResult:
@@ -116,6 +373,8 @@ class MultiAgentTaskScheduler:
                 "plan_id": plan.plan_id,
                 "plan_status": plan.status,
                 "step_count": len(plan.steps),
+                "step_timeout_seconds": self.step_timeout_seconds,
+                "maximum_step_attempts": self.maximum_step_attempts,
                 "steps": [
                     {
                         "step_id": step.step_id,
@@ -126,6 +385,18 @@ class MultiAgentTaskScheduler:
                 ],
             },
         )
+
+        if cancellation_token is not None and cancellation_token.is_cancelled:
+            return _build_cancelled_task_result(
+                plan=plan,
+                multi_agent_task_id=resolved_id,
+                results_by_step_id={},
+                ready_batches=[],
+                base_metadata={
+                    "step_timeout_seconds": self.step_timeout_seconds,
+                    "maximum_step_attempts": self.maximum_step_attempts,
+                },
+            )
 
         if plan.status == "awaiting_input" or plan.requires_user_input:
             awaiting_plan = _build_updated_plan(
@@ -140,6 +411,8 @@ class MultiAgentTaskScheduler:
                 metadata={
                     "scheduler": type(self).__name__,
                     "ready_batches": [],
+                    "step_timeout_seconds": self.step_timeout_seconds,
+                    "maximum_step_attempts": self.maximum_step_attempts,
                 },
             )
             _log_scheduler_event(
@@ -194,7 +467,11 @@ class MultiAgentTaskScheduler:
             multi_agent_task_id=resolved_id,
             results_by_step_id={},
             ready_batches=[],
-            base_metadata={},
+            base_metadata={
+                "step_timeout_seconds": self.step_timeout_seconds,
+                "maximum_step_attempts": self.maximum_step_attempts,
+            },
+            cancellation_token=cancellation_token,
         )
 
     async def resume(
@@ -202,6 +479,7 @@ class MultiAgentTaskScheduler:
         task_result: MultiAgentTaskResult,
         *,
         user_inputs: Mapping[str, Any],
+        cancellation_token: MultiAgentTaskCancellationToken | None = None,
     ) -> MultiAgentTaskResult:
         """
         根据用户补充内容恢复一份暂停的多 Agent 任务。
@@ -215,6 +493,8 @@ class MultiAgentTaskScheduler:
                 Scheduler 之前返回的 awaiting_input 暂停结果。
             user_inputs:
                 等待步骤编号到用户回答的映射。键必须覆盖全部等待步骤。
+            cancellation_token:
+                可选任务取消令牌；收到取消请求后停止未完成步骤。
 
         返回值含义：
             MultiAgentTaskResult:
@@ -258,10 +538,13 @@ class MultiAgentTaskScheduler:
             ready_batches=ready_batches,
             base_metadata={
                 **task_result.metadata,
+                "step_timeout_seconds": self.step_timeout_seconds,
+                "maximum_step_attempts": self.maximum_step_attempts,
                 "resume_count": int(
                     task_result.metadata.get("resume_count", 0)
                 ) + 1,
             },
+            cancellation_token=cancellation_token,
         )
 
     async def _execute_remaining_steps(
@@ -272,6 +555,7 @@ class MultiAgentTaskScheduler:
         results_by_step_id: dict[str, AgentTaskResult],
         ready_batches: list[list[str]],
         base_metadata: Mapping[str, Any],
+        cancellation_token: MultiAgentTaskCancellationToken | None,
     ) -> MultiAgentTaskResult:
         """
         执行一份计划中尚未产生结果的步骤。
@@ -291,6 +575,8 @@ class MultiAgentTaskScheduler:
                 之前已经启动过的执行批次，会继续追加新批次。
             base_metadata:
                 首次执行或暂停结果中需要继续保留的任务扩展信息。
+            cancellation_token:
+                可选任务取消令牌，用于执行前和执行中停止剩余步骤。
 
         返回值含义：
             MultiAgentTaskResult:
@@ -308,6 +594,18 @@ class MultiAgentTaskScheduler:
         }
 
         while pending_step_ids:
+            if (
+                cancellation_token is not None
+                and cancellation_token.is_cancelled
+            ):
+                return _build_cancelled_task_result(
+                    plan=plan,
+                    multi_agent_task_id=multi_agent_task_id,
+                    results_by_step_id=results_by_step_id,
+                    ready_batches=ready_batches,
+                    base_metadata=base_metadata,
+                )
+
             skipped_step_ids = _skip_steps_with_blocking_dependencies(
                 plan=plan,
                 multi_agent_task_id=multi_agent_task_id,
@@ -361,6 +659,7 @@ class MultiAgentTaskScheduler:
                     self._execute_step(
                         step=step,
                         multi_agent_task_id=multi_agent_task_id,
+                        cancellation_token=cancellation_token,
                         dependency_results={
                             dependency_id: results_by_step_id[dependency_id]
                             for dependency_id in step.depends_on
@@ -389,6 +688,18 @@ class MultiAgentTaskScheduler:
                         "status": result.status,
                         "latency_ms": result.latency_ms,
                     },
+                )
+
+            if (
+                cancellation_token is not None
+                and cancellation_token.is_cancelled
+            ):
+                return _build_cancelled_task_result(
+                    plan=plan,
+                    multi_agent_task_id=multi_agent_task_id,
+                    results_by_step_id=results_by_step_id,
+                    ready_batches=ready_batches,
+                    base_metadata=base_metadata,
                 )
 
             awaiting_results = [
@@ -489,16 +800,19 @@ class MultiAgentTaskScheduler:
         *,
         step: AgentTaskStep,
         multi_agent_task_id: str,
+        cancellation_token: MultiAgentTaskCancellationToken | None,
         dependency_results: Mapping[str, AgentTaskResult],
     ) -> AgentTaskResult:
         """
-        调用一个步骤指定的 Worker，并把异常转换成失败结果。
+        调用一个步骤指定的 Worker，有限重试后把异常转换成失败结果。
 
         参数含义：
             step:
                 当前需要执行的完整任务步骤。
             multi_agent_task_id:
                 当前步骤所属的整次多 Agent 任务编号，用于关联日志。
+            cancellation_token:
+                可选任务取消令牌，用于终止正在等待的异步 Worker。
             dependency_results:
                 当前步骤依赖的前置步骤结果，键为前置 step_id。
 
@@ -508,15 +822,72 @@ class MultiAgentTaskScheduler:
         """
 
         started_at = time.perf_counter()
+        attempt_count = 0
         try:
             worker = self.workers.get(step.assigned_agent)
             if worker is None:
                 raise ValueError(
                     f"没有注册 Worker: {step.assigned_agent}"
                 )
-            raw_result = worker(step, dependency_results)
-            if inspect.isawaitable(raw_result):
-                raw_result = await raw_result
+
+            # maximum_step_attempts 包含第一次执行。例如值为 3，表示首次
+            # 执行失败后最多再重试两次。
+            for attempt_number in range(1, self.maximum_step_attempts + 1):
+                if (
+                    cancellation_token is not None
+                    and cancellation_token.is_cancelled
+                ):
+                    raise _WorkerStepCancelledError(
+                        "多 Agent 任务收到取消请求"
+                    )
+                attempt_count = attempt_number
+                try:
+                    raw_result = worker(step, dependency_results)
+                    if inspect.isawaitable(raw_result):
+                        # 超时只包住异步 Worker；同步函数在返回前会占用当前
+                        # 线程，无法由 asyncio 安全地中断。
+                        if self.step_timeout_seconds is None:
+                            raw_result = await self._await_worker_result(
+                                raw_result=raw_result,
+                                cancellation_token=cancellation_token,
+                            )
+                        else:
+                            try:
+                                raw_result = await self._await_worker_result(
+                                    raw_result=raw_result,
+                                    cancellation_token=cancellation_token,
+                                )
+                            except TimeoutError as exc:
+                                raise _WorkerStepTimeoutError(
+                                    step.step_id,
+                                    self.step_timeout_seconds,
+                                ) from exc
+                    break
+                except _WorkerStepCancelledError:
+                    raise
+                except Exception as exc:
+                    if attempt_number >= self.maximum_step_attempts:
+                        raise
+                    _log_scheduler_event(
+                        level="warning",
+                        event="multi_agent_step_retrying",
+                        payload={
+                            "multi_agent_task_id": multi_agent_task_id,
+                            "step_id": step.step_id,
+                            "step_title": step.title,
+                            "assigned_agent": step.assigned_agent,
+                            "failed_attempt_number": attempt_number,
+                            "next_attempt_number": attempt_number + 1,
+                            "maximum_step_attempts": (
+                                self.maximum_step_attempts
+                            ),
+                            "error_type": type(exc).__name__,
+                            "error_message": str(exc),
+                        },
+                    )
+
+            # Worker 已经正常返回后再检查契约；类型或编号错误属于代码问题，
+            # 重复调用通常不会修好，因此不进入上面的重试循环。
             if not isinstance(raw_result, AgentTaskResult):
                 raise TypeError("Worker 必须返回 AgentTaskResult")
             if raw_result.step_id != step.step_id:
@@ -527,7 +898,65 @@ class MultiAgentTaskScheduler:
             result_data = raw_result.model_dump(mode="python")
             if result_data["latency_ms"] is None:
                 result_data["latency_ms"] = _elapsed_ms(started_at)
+            result_data["metadata"] = {
+                **result_data["metadata"],
+                "scheduler_attempt_count": attempt_count,
+            }
             return AgentTaskResult.model_validate(result_data)
+        except _WorkerStepCancelledError:
+            _log_scheduler_event(
+                level="info",
+                event="multi_agent_step_cancelled",
+                payload={
+                    "multi_agent_task_id": multi_agent_task_id,
+                    "step_id": step.step_id,
+                    "step_title": step.title,
+                    "assigned_agent": step.assigned_agent,
+                    "attempt_count": attempt_count,
+                },
+            )
+            return AgentTaskResult(
+                step_id=step.step_id,
+                assigned_agent=step.assigned_agent,
+                status="skipped",
+                summary="多 Agent 任务已取消，当前步骤停止执行。",
+                latency_ms=_elapsed_ms(started_at),
+                metadata={
+                    "cancelled": True,
+                    "scheduler_attempt_count": attempt_count,
+                },
+            )
+        except _WorkerStepTimeoutError as exc:
+            timeout_seconds = exc.timeout_seconds
+            error_message = (
+                f"步骤 {step.step_id} 执行超过 "
+                f"{timeout_seconds:g} 秒，已由调度器终止等待"
+            )
+            _log_scheduler_event(
+                level="warning",
+                event="multi_agent_step_timed_out",
+                payload={
+                    "multi_agent_task_id": multi_agent_task_id,
+                    "step_id": step.step_id,
+                    "step_title": step.title,
+                    "assigned_agent": step.assigned_agent,
+                    "timeout_seconds": timeout_seconds,
+                    "attempt_count": attempt_count,
+                },
+            )
+            return AgentTaskResult(
+                step_id=step.step_id,
+                assigned_agent=step.assigned_agent,
+                status="failed",
+                error_message=error_message,
+                latency_ms=_elapsed_ms(started_at),
+                metadata={
+                    "scheduler_generated_failure": True,
+                    "timed_out": True,
+                    "timeout_seconds": timeout_seconds,
+                    "scheduler_attempt_count": attempt_count,
+                },
+            )
         except Exception as exc:
             _log_scheduler_event(
                 level="warning",
@@ -537,6 +966,7 @@ class MultiAgentTaskScheduler:
                     "step_id": step.step_id,
                     "step_title": step.title,
                     "assigned_agent": step.assigned_agent,
+                    "attempt_count": attempt_count,
                     "error_type": type(exc).__name__,
                     "error_message": str(exc),
                 },
@@ -549,8 +979,167 @@ class MultiAgentTaskScheduler:
                 latency_ms=_elapsed_ms(started_at),
                 metadata={
                     "scheduler_generated_failure": True,
+                    "scheduler_attempt_count": attempt_count,
                 },
             )
+
+    async def _await_worker_result(
+        self,
+        *,
+        raw_result: Awaitable[AgentTaskResult],
+        cancellation_token: MultiAgentTaskCancellationToken | None,
+    ) -> AgentTaskResult:
+        """
+        同时等待异步 Worker 完成、任务取消或步骤超时。
+
+        功能：
+            Worker 与取消信号竞速；取消先到时撤销 Worker，Worker 先完成时
+            返回结果，两者都未完成且超过限制时抛出 TimeoutError。
+
+        参数含义：
+            raw_result:
+                Worker 返回的异步结果。
+            cancellation_token:
+                可选任务取消令牌。
+
+        返回值含义：
+            AgentTaskResult:
+                Worker 正常完成后返回的原始步骤结果。
+        """
+
+        if cancellation_token is None:
+            if self.step_timeout_seconds is None:
+                return await raw_result
+            return await asyncio.wait_for(
+                raw_result,
+                timeout=self.step_timeout_seconds,
+            )
+
+        worker_future = asyncio.ensure_future(raw_result)
+        cancellation_future = asyncio.create_task(
+            cancellation_token.wait()
+        )
+        watched_futures = [worker_future, cancellation_future]
+        try:
+            done, _ = await asyncio.wait(
+                watched_futures,
+                timeout=self.step_timeout_seconds,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if cancellation_future in done:
+                raise _WorkerStepCancelledError(
+                    "多 Agent 任务收到取消请求"
+                )
+            if worker_future in done:
+                return worker_future.result()
+            raise TimeoutError("异步 Worker 执行超时")
+        finally:
+            unfinished_futures = [
+                future
+                for future in watched_futures
+                if not future.done()
+            ]
+            for future in unfinished_futures:
+                future.cancel()
+            # 同时回收已完成和被取消的 Future，避免竞速时遗留
+            # “Task exception was never retrieved” 警告。
+            await asyncio.gather(
+                *watched_futures,
+                return_exceptions=True,
+            )
+
+
+def _build_cancelled_task_result(
+    *,
+    plan: AgentTaskPlan,
+    multi_agent_task_id: str,
+    results_by_step_id: Mapping[str, AgentTaskResult],
+    ready_batches: list[list[str]],
+    base_metadata: Mapping[str, Any],
+) -> MultiAgentTaskResult:
+    """
+    构建整次多 Agent 任务取消后的标准结果。
+
+    功能：
+        保留取消前已经进入终态的步骤结果，把正在等待输入和其余未执行
+        步骤统一标记为 skipped，并把计划及整次任务状态更新为 cancelled。
+
+    参数含义：
+        plan:
+            当前正在执行的任务计划。
+        multi_agent_task_id:
+            整次多 Agent 任务编号。
+        results_by_step_id:
+            取消发生前已经产生的步骤结果。
+        ready_batches:
+            取消前实际启动过的步骤批次。
+        base_metadata:
+            需要继续保留的任务扩展信息。
+
+    返回值含义：
+        MultiAgentTaskResult:
+            状态为 cancelled 且覆盖全部计划步骤的取消结果。
+    """
+
+    cancelled_results = {
+        step_id: result
+        for step_id, result in results_by_step_id.items()
+        if result.status != "awaiting_input"
+    }
+    for step in plan.steps:
+        if step.step_id in cancelled_results:
+            continue
+        cancelled_results[step.step_id] = AgentTaskResult(
+            step_id=step.step_id,
+            assigned_agent=step.assigned_agent,
+            status="skipped",
+            summary="多 Agent 任务已取消，当前步骤未执行。",
+            metadata={
+                "cancelled": True,
+            },
+        )
+
+    updated_plan = _build_updated_plan(
+        plan=plan,
+        results_by_step_id=cancelled_results,
+        status="cancelled",
+    )
+    ordered_results = [
+        cancelled_results[step.step_id]
+        for step in plan.steps
+    ]
+    _log_scheduler_event(
+        level="info",
+        event="multi_agent_task_cancelled",
+        payload={
+            "multi_agent_task_id": multi_agent_task_id,
+            "plan_id": plan.plan_id,
+            "completed_step_ids": [
+                result.step_id
+                for result in ordered_results
+                if result.status == "completed"
+            ],
+            "skipped_step_ids": [
+                result.step_id
+                for result in ordered_results
+                if result.status == "skipped"
+            ],
+        },
+    )
+    return MultiAgentTaskResult(
+        collaboration_id=multi_agent_task_id,
+        plan=updated_plan,
+        status="cancelled",
+        task_results=ordered_results,
+        final_answer="多 Agent 任务已取消。",
+        metadata={
+            **base_metadata,
+            "scheduler": "MultiAgentTaskScheduler",
+            "ready_batches": ready_batches,
+            "cancellation_requested": True,
+            "awaiting_result_aggregation": False,
+        },
+    )
 
 
 def _skip_steps_with_blocking_dependencies(
@@ -854,6 +1443,10 @@ def _build_updated_plan(
     if status == "awaiting_input" and clarification_prompt:
         plan_data["requires_user_input"] = True
         plan_data["clarification_prompt"] = clarification_prompt
+    elif status != "awaiting_input":
+        # 任务完成、失败或取消后，不应继续携带上一轮等待用户的标记。
+        plan_data["requires_user_input"] = False
+        plan_data["clarification_prompt"] = ""
     for step_data in plan_data["steps"]:
         result = results_by_step_id.get(step_data["step_id"])
         if result is not None:

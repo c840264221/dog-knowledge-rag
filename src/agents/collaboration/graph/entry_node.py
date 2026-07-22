@@ -12,6 +12,11 @@ from collections.abc import Callable, Mapping
 from typing import Any, Awaitable
 
 from src.agents.collaboration.contracts import MultiAgentTaskResult
+from src.agents.collaboration.scheduler import (
+    MultiAgentTaskCancellationRegistry,
+    MultiAgentTaskCancellationToken,
+    build_multi_agent_task_id,
+)
 from src.graph.states.dog_state import DogState
 
 
@@ -24,6 +29,7 @@ MultiAgentEntryNode = Callable[
 def build_multi_agent_entry_node(
     *,
     orchestrator: Any,
+    cancellation_registry: MultiAgentTaskCancellationRegistry | None = None,
 ) -> MultiAgentEntryNode:
     """
     构建注入 MultiAgentOrchestrator 的主图异步节点。
@@ -35,6 +41,8 @@ def build_multi_agent_entry_node(
     参数含义：
         orchestrator:
             提供 run 和 resume 方法的多 Agent 总编排器。
+        cancellation_registry:
+            可选的运行中任务取消登记表；提供后会为每次执行登记取消令牌。
 
     返回值含义：
         MultiAgentEntryNode:
@@ -81,43 +89,102 @@ def build_multi_agent_entry_node(
         if action == "resume":
             task_result = _load_pending_task_result(state)
             user_inputs = _load_resume_inputs(state)
-            result = await orchestrator.resume(
-                task_result,
-                user_inputs=user_inputs,
+            result = await _run_with_registered_cancellation(
+                cancellation_registry=cancellation_registry,
+                multi_agent_task_id=task_result.collaboration_id,
+                operation=lambda token: orchestrator.resume(
+                    task_result,
+                    user_inputs=user_inputs,
+                    cancellation_token=token,
+                ),
             )
         elif action == "replan":
             task_result = _load_pending_task_result(state)
             resume_inputs = _load_resume_inputs(state)
-            result = await orchestrator.run(
-                task_result.plan.objective,
-                context={
-                    "user_clarification": resume_inputs.get(
-                        "planner_clarification",
-                        "",
-                    ),
-                    "previous_clarification_prompt": (
-                        task_result.plan.clarification_prompt
-                    ),
-                    "memory_context": state.get("memory_context", ""),
-                    "user_id": state.get("user_id", ""),
-                    "session_id": state.get("session_id", ""),
-                    "trace_id": state.get("trace_id", ""),
-                },
+            result = await _run_with_registered_cancellation(
+                cancellation_registry=cancellation_registry,
+                multi_agent_task_id=task_result.collaboration_id,
+                operation=lambda token: orchestrator.run(
+                    task_result.plan.objective,
+                    multi_agent_task_id=task_result.collaboration_id,
+                    cancellation_token=token,
+                    context={
+                        "user_clarification": resume_inputs.get(
+                            "planner_clarification",
+                            "",
+                        ),
+                        "previous_clarification_prompt": (
+                            task_result.plan.clarification_prompt
+                        ),
+                        "memory_context": state.get("memory_context", ""),
+                        "user_id": state.get("user_id", ""),
+                        "session_id": state.get("session_id", ""),
+                        "trace_id": state.get("trace_id", ""),
+                    },
+                ),
             )
         else:
-            result = await orchestrator.run(
-                str(state.get("question") or "").strip(),
-                context={
-                    "memory_context": state.get("memory_context", ""),
-                    "user_id": state.get("user_id", ""),
-                    "session_id": state.get("session_id", ""),
-                    "trace_id": state.get("trace_id", ""),
-                },
+            multi_agent_task_id = build_multi_agent_task_id(
+                str(state.get("trace_id") or "")
+            )
+            result = await _run_with_registered_cancellation(
+                cancellation_registry=cancellation_registry,
+                multi_agent_task_id=multi_agent_task_id,
+                operation=lambda token: orchestrator.run(
+                    str(state.get("question") or "").strip(),
+                    multi_agent_task_id=multi_agent_task_id,
+                    cancellation_token=token,
+                    context={
+                        "memory_context": state.get("memory_context", ""),
+                        "user_id": state.get("user_id", ""),
+                        "session_id": state.get("session_id", ""),
+                        "trace_id": state.get("trace_id", ""),
+                    },
+                ),
             )
 
         return build_multi_agent_state_update(result)
 
     return multi_agent_entry_node
+
+
+async def _run_with_registered_cancellation(
+    *,
+    cancellation_registry: MultiAgentTaskCancellationRegistry | None,
+    multi_agent_task_id: str,
+    operation: Callable[
+        [MultiAgentTaskCancellationToken | None],
+        Awaitable[MultiAgentTaskResult],
+    ],
+) -> MultiAgentTaskResult:
+    """
+    在运行中任务登记表的保护下执行一次编排操作。
+
+    功能：
+        有登记表时创建共享取消令牌并传给编排器；操作结束后无论成功或
+        抛出异常都移除登记，避免已结束任务继续占用任务编号。
+
+    参数含义：
+        cancellation_registry:
+            可选的运行中任务取消登记表。
+        multi_agent_task_id:
+            当前整次多 Agent 任务编号。
+        operation:
+            接收取消令牌并返回任务结果的异步编排调用。
+
+    返回值含义：
+        MultiAgentTaskResult:
+            编排器生成的最新多 Agent 任务结果。
+    """
+
+    if cancellation_registry is None:
+        return await operation(None)
+
+    token = cancellation_registry.register(multi_agent_task_id)
+    try:
+        return await operation(token)
+    finally:
+        cancellation_registry.unregister(multi_agent_task_id, token)
 
 
 def _load_pending_task_result(

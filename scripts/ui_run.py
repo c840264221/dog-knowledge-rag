@@ -1,5 +1,6 @@
 import gradio as gr
 import src.runtime.events.setup  # noqa: F401
+from src.agents.collaboration.scheduler import build_multi_agent_task_id
 from src.graph.graph_run import run_main_graph_with_result
 from src.logger import logger
 
@@ -19,8 +20,53 @@ from src.runtime.resume.contracts import (
 )
 
 from src.runtime.timeline.timeline_reporter import TimelineReporter
+from src.runtime.services.multi_agent_ui_task_tracker import (
+    MultiAgentUiTaskTracker,
+)
 
 from src.settings import settings
+
+
+multi_agent_ui_task_tracker = MultiAgentUiTaskTracker()
+
+
+def cancel_active_multi_agent_task(request: gr.Request) -> str:
+    """
+    取消当前 Gradio 会话中正在运行的多 Agent 任务。
+
+    功能：
+        使用 session_hash 查找本轮预测的 multi_agent_task_id，再调用
+        GraphRuntimeService 向已经登记的 Scheduler 取消令牌发出信号。
+
+    参数含义：
+        request:
+            Gradio 当前按钮请求，提供稳定的 session_hash。
+
+    返回值含义：
+        str:
+            可以直接展示在 UI 中的取消请求处理结果。
+    """
+
+    session_id = request.session_hash
+    multi_agent_task_id = multi_agent_ui_task_tracker.get(session_id)
+    if multi_agent_task_id is None:
+        return "当前会话没有正在运行的请求。"
+
+    graph_runtime = container.get("graph_runtime")
+    cancellation_requested = graph_runtime.cancel_multi_agent_task(
+        multi_agent_task_id
+    )
+    if not cancellation_requested:
+        return (
+            "当前请求尚未进入多 Agent 执行阶段，"
+            "或任务已经结束，请稍后重试。"
+        )
+
+    logger.info(
+        "UI 已发送多 Agent 任务取消请求: "
+        f"{multi_agent_task_id}"
+    )
+    return "已发送取消请求，正在停止未完成步骤。"
 
 
 
@@ -278,14 +324,25 @@ async def respond_and_process(
 
     # ===== 调用图 =====
 
-    result = await run_main_graph_with_result(
-
-        question,
-
-        thread_id=session_id,
-
-        trace_id=trace_id
+    multi_agent_task_id = build_multi_agent_task_id(trace_id)
+    multi_agent_ui_task_tracker.register(
+        session_id,
+        multi_agent_task_id,
     )
+    try:
+        result = await run_main_graph_with_result(
+
+            question,
+
+            thread_id=session_id,
+
+            trace_id=trace_id
+        )
+    finally:
+        multi_agent_ui_task_tracker.unregister(
+            session_id,
+            multi_agent_task_id,
+        )
 
     # ===== interrupt =====
 
@@ -627,7 +684,7 @@ async def resume_agent(
 
 # 清空对话
 def clear_all():
-    return [], {}, gr.update(visible=False), ""
+    return [], {}, gr.update(visible=False), "", ""
 
 # Gradio 界面
 with gr.Blocks(title="狗狗百科 AI Agent", theme=gr.themes.Soft()) as demo:
@@ -636,7 +693,13 @@ with gr.Blocks(title="狗狗百科 AI Agent", theme=gr.themes.Soft()) as demo:
 
     chatbot = gr.Chatbot(label="对话记录")
     msg = gr.Textbox(label="输入你的问题", placeholder="例如：推荐三种不爱叫的大型犬", scale=9)
-    clear = gr.Button("清空对话")
+    with gr.Row():
+        clear = gr.Button("清空对话")
+        cancel_multi_agent = gr.Button(
+            "取消当前多 Agent 任务",
+            variant="stop",
+        )
+    cancel_status = gr.Markdown("")
 
     # 确认面板（初始隐藏）
     with gr.Row(visible=False) as confirm_row:
@@ -667,7 +730,20 @@ with gr.Blocks(title="狗狗百科 AI Agent", theme=gr.themes.Soft()) as demo:
     clear.click(
         clear_all,
         None,
-        [chatbot, session_state, confirm_row, confirm_prompt]
+        [
+            chatbot,
+            session_state,
+            confirm_row,
+            confirm_prompt,
+            cancel_status,
+        ]
+    )
+
+    cancel_multi_agent.click(
+        cancel_active_multi_agent_task,
+        None,
+        cancel_status,
+        queue=False,
     )
 
     # 示例问题

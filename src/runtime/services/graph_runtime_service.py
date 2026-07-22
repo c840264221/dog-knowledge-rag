@@ -55,8 +55,45 @@ from src.agents.collaboration.aggregator import ResultAggregator
 from src.agents.collaboration.graph import build_multi_agent_entry_node
 from src.agents.collaboration.orchestrator import MultiAgentOrchestrator
 from src.agents.collaboration.planner import PlannerAgent
-from src.agents.collaboration.scheduler import MultiAgentTaskScheduler
+from src.agents.collaboration.scheduler import (
+    MultiAgentTaskCancellationRegistry,
+    MultiAgentTaskScheduler,
+)
 from src.agents.collaboration.workers import GraphAgentWorkerAdapter
+
+
+def _build_multi_agent_scheduler_options() -> dict[str, int | float | None]:
+    """
+    根据 Runtime Settings 构建多 Agent Scheduler 参数。
+
+    功能：
+        读取多 Agent 并发、超时和尝试次数；全局超时或重试开关关闭时，
+        分别回退为不限制超时和只执行一次。
+
+    参数：
+        无。
+
+    返回值：
+        dict[str, int | float | None]:
+            可以解包传给 MultiAgentTaskScheduler 的配置字典。
+    """
+
+    runtime_settings = settings.runtime
+    return {
+        "maximum_parallel_steps": (
+            runtime_settings.multi_agent_maximum_parallel_steps
+        ),
+        "step_timeout_seconds": (
+            runtime_settings.multi_agent_step_timeout_seconds
+            if runtime_settings.enable_timeout
+            else None
+        ),
+        "maximum_step_attempts": (
+            runtime_settings.multi_agent_maximum_step_attempts
+            if runtime_settings.enable_retry
+            else 1
+        ),
+    }
 
 
 class GraphRuntimeService:
@@ -158,6 +195,31 @@ class GraphRuntimeService:
         self._checkpointer = None
 
         self._checkpointer_cm = None
+
+        self._multi_agent_cancellation_registry = (
+            MultiAgentTaskCancellationRegistry()
+        )
+
+    def cancel_multi_agent_task(self, multi_agent_task_id: str) -> bool:
+        """
+        取消当前进程中指定的运行中多 Agent 任务。
+
+        功能：
+            通过任务编号找到入口节点登记的共享取消令牌，并向 Scheduler
+            发出协作式取消信号。找不到任务时不会抛出异常。
+
+        参数含义：
+            multi_agent_task_id:
+                需要取消的整次多 Agent 任务编号。
+
+        返回值含义：
+            bool:
+                已找到运行中任务并发出取消信号时返回 True，否则返回 False。
+        """
+
+        return self._multi_agent_cancellation_registry.cancel(
+            multi_agent_task_id
+        )
 
     async def startup(self):
         """
@@ -482,6 +544,7 @@ class GraphRuntimeService:
                     runner=general_agent.ainvoke,
                 ),
             },
+            **_build_multi_agent_scheduler_options(),
         )
         result_aggregator = ResultAggregator(
             llm_provider=self.llm_provider,
@@ -493,6 +556,9 @@ class GraphRuntimeService:
         )
         return build_multi_agent_entry_node(
             orchestrator=orchestrator,
+            cancellation_registry=(
+                self._multi_agent_cancellation_registry
+            ),
         )
 
     def _build_tool_agent_node(self):
