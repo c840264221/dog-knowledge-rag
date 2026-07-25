@@ -54,7 +54,7 @@ jobs:
         run: |
           pytest tests/unit/evaluation -v
 
-      - name: Run core evaluation quality gate
+      - name: Run core evaluation quality gate including V1.16 multi-agent
         shell: pwsh
         run: |
           python -m scripts.evaluation.evaluate_v112_all --profile core

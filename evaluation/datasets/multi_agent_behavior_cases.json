@@ -1,0 +1,268 @@
+[
+    {
+        "case_id": "multi_agent_completed_dependencies_001",
+        "category": "multi_agent_behavior",
+        "question": "读取资料，分别查询健康和训练知识，再生成方案。",
+        "input_state": {
+            "plan": {
+                "plan_id": "plan_completed_dependencies",
+                "objective": "生成健康与训练综合方案",
+                "steps": [
+                    {
+                        "step_id": "step_read",
+                        "title": "读取资料",
+                        "assigned_agent": "knowledge_agent"
+                    },
+                    {
+                        "step_id": "step_health",
+                        "title": "查询健康知识",
+                        "assigned_agent": "health_agent",
+                        "depends_on": ["step_read"]
+                    },
+                    {
+                        "step_id": "step_training",
+                        "title": "查询训练知识",
+                        "assigned_agent": "training_agent",
+                        "depends_on": ["step_read"]
+                    },
+                    {
+                        "step_id": "step_plan",
+                        "title": "生成方案",
+                        "assigned_agent": "plan_agent",
+                        "depends_on": ["step_health", "step_training"]
+                    }
+                ]
+            },
+            "scheduler_settings": {
+                "maximum_parallel_steps": 2
+            }
+        },
+        "expected": {
+            "task_status": "running",
+            "plan_status": "completed",
+            "step_statuses": {
+                "step_read": "completed",
+                "step_health": "completed",
+                "step_training": "completed",
+                "step_plan": "completed"
+            },
+            "ready_batches": [
+                ["step_read"],
+                ["step_health", "step_training"],
+                ["step_plan"]
+            ],
+            "awaiting_result_aggregation": true
+        },
+        "tags": ["multi_agent", "dependency", "parallel_batch"]
+    },
+    {
+        "case_id": "multi_agent_retry_success_001",
+        "category": "multi_agent_behavior",
+        "question": "临时失败后重试查询资料。",
+        "input_state": {
+            "plan": {
+                "plan_id": "plan_retry_success",
+                "objective": "验证可恢复异常重试",
+                "steps": [
+                    {
+                        "step_id": "step_retry",
+                        "title": "查询资料",
+                        "assigned_agent": "knowledge_agent"
+                    }
+                ]
+            },
+            "worker_behaviors": {
+                "step_retry": {
+                    "outcomes": ["error", "completed"],
+                    "error_message": "临时网络异常"
+                }
+            },
+            "scheduler_settings": {
+                "maximum_step_attempts": 2
+            }
+        },
+        "expected": {
+            "task_status": "running",
+            "plan_status": "completed",
+            "worker_call_counts": {
+                "step_retry": 2
+            },
+            "worker_call_sequence": ["step_retry", "step_retry"],
+            "completed_step_ids": ["step_retry"]
+        },
+        "tags": ["multi_agent", "retry", "transient_error"]
+    },
+    {
+        "case_id": "multi_agent_partial_allowed_failure_001",
+        "category": "multi_agent_behavior",
+        "question": "主步骤成功，可选步骤失败时仍返回部分结果。",
+        "input_state": {
+            "plan": {
+                "plan_id": "plan_partial",
+                "objective": "验证允许失败步骤",
+                "steps": [
+                    {
+                        "step_id": "step_required",
+                        "title": "生成核心建议",
+                        "assigned_agent": "core_agent"
+                    },
+                    {
+                        "step_id": "step_optional",
+                        "title": "查询补充资料",
+                        "assigned_agent": "optional_agent",
+                        "allow_failure": true
+                    }
+                ]
+            },
+            "worker_behaviors": {
+                "step_optional": {
+                    "outcomes": ["failed"],
+                    "error_message": "补充资料暂时不可用"
+                }
+            }
+        },
+        "expected": {
+            "task_status": "partial",
+            "plan_status": "partial",
+            "step_statuses": {
+                "step_required": "completed",
+                "step_optional": "failed"
+            },
+            "completed_step_ids": ["step_required"],
+            "failed_step_ids": ["step_optional"]
+        },
+        "tags": ["multi_agent", "partial", "allowed_failure"]
+    },
+    {
+        "case_id": "multi_agent_blocking_failure_001",
+        "category": "multi_agent_behavior",
+        "question": "前置健康检查失败后跳过方案生成。",
+        "input_state": {
+            "plan": {
+                "plan_id": "plan_blocking_failure",
+                "objective": "验证失败依赖阻断",
+                "steps": [
+                    {
+                        "step_id": "step_health",
+                        "title": "健康检查",
+                        "assigned_agent": "health_agent"
+                    },
+                    {
+                        "step_id": "step_plan",
+                        "title": "生成方案",
+                        "assigned_agent": "plan_agent",
+                        "depends_on": ["step_health"]
+                    }
+                ]
+            },
+            "worker_behaviors": {
+                "step_health": {
+                    "outcomes": ["failed"],
+                    "error_message": "健康信息不足"
+                }
+            }
+        },
+        "expected": {
+            "task_status": "failed",
+            "plan_status": "failed",
+            "step_statuses": {
+                "step_health": "failed",
+                "step_plan": "skipped"
+            },
+            "ready_batches": [["step_health"]],
+            "failed_step_ids": ["step_health"],
+            "skipped_step_ids": ["step_plan"]
+        },
+        "tags": ["multi_agent", "blocking_failure", "skipped"]
+    },
+    {
+        "case_id": "multi_agent_awaiting_resume_001",
+        "category": "multi_agent_behavior",
+        "question": "缺少年龄时先询问，用户补充后继续生成方案。",
+        "input_state": {
+            "plan": {
+                "plan_id": "plan_awaiting_resume",
+                "objective": "验证 Worker 等待输入和恢复",
+                "steps": [
+                    {
+                        "step_id": "step_profile",
+                        "title": "补全狗狗档案",
+                        "assigned_agent": "profile_agent"
+                    },
+                    {
+                        "step_id": "step_plan",
+                        "title": "生成方案",
+                        "assigned_agent": "plan_agent",
+                        "depends_on": ["step_profile"]
+                    }
+                ]
+            },
+            "worker_behaviors": {
+                "step_profile": {
+                    "outcomes": ["awaiting_input", "completed"],
+                    "clarification_prompt": "请补充狗狗年龄。"
+                }
+            },
+            "resume_user_inputs": {
+                "step_profile": "6岁"
+            }
+        },
+        "expected": {
+            "task_status": "running",
+            "plan_status": "completed",
+            "step_statuses": {
+                "step_profile": "completed",
+                "step_plan": "completed"
+            },
+            "ready_batches": [
+                ["step_profile"],
+                ["step_profile"],
+                ["step_plan"]
+            ],
+            "worker_call_counts": {
+                "step_profile": 2,
+                "step_plan": 1
+            },
+            "resume_count": 1
+        },
+        "tags": ["multi_agent", "awaiting_input", "resume"]
+    },
+    {
+        "case_id": "multi_agent_pre_cancelled_001",
+        "category": "multi_agent_behavior",
+        "question": "任务启动前已经收到取消请求。",
+        "input_state": {
+            "plan": {
+                "plan_id": "plan_pre_cancelled",
+                "objective": "验证执行前取消",
+                "steps": [
+                    {
+                        "step_id": "step_one",
+                        "title": "步骤一",
+                        "assigned_agent": "worker_agent"
+                    },
+                    {
+                        "step_id": "step_two",
+                        "title": "步骤二",
+                        "assigned_agent": "worker_agent",
+                        "depends_on": ["step_one"]
+                    }
+                ]
+            },
+            "pre_cancelled": true
+        },
+        "expected": {
+            "task_status": "cancelled",
+            "plan_status": "cancelled",
+            "step_statuses": {
+                "step_one": "skipped",
+                "step_two": "skipped"
+            },
+            "ready_batches": [],
+            "worker_call_counts": {},
+            "skipped_step_ids": ["step_one", "step_two"],
+            "cancellation_requested": true
+        },
+        "tags": ["multi_agent", "cancelled", "no_worker_started"]
+    }
+]
