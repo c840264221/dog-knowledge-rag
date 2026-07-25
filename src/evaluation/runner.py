@@ -11,6 +11,7 @@ from src.evaluation.evaluators import (
     DogKnowledgeBehaviorEvaluator,
     MainGraphBehaviorEvaluator,
     MemoryRecallBehaviorEvaluator,
+    MultiAgentBehaviorEvaluator,
     RagRetrievalBehaviorEvaluator,
     RootRouteEvaluator,
     ToolAgentBehaviorEvaluator,
@@ -122,6 +123,13 @@ CORE_EVALUATION_TARGETS = (
         category="main_graph_behavior",
         dataset_path=Path("evaluation/datasets/main_graph_behavior_cases.json"),
         evaluator_factory=MainGraphBehaviorEvaluator,
+    ),
+    EvaluationTarget(
+        category="multi_agent_behavior",
+        dataset_path=Path(
+            "evaluation/datasets/multi_agent_behavior_cases.json"
+        ),
+        evaluator_factory=MultiAgentBehaviorEvaluator,
     ),
 )
 

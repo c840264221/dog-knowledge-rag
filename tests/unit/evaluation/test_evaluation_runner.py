@@ -269,7 +269,8 @@ def test_default_targets_should_include_real_rag_retrieval() -> None:
 
 def test_core_and_full_targets_should_have_clear_dependency_boundary() -> None:
     """
-    测试 core 档位不包含真实 RAG，而 full 档位包含真实 RAG。
+    测试 core 包含确定性多 Agent 评估但不包含真实 RAG，
+    full 档位在 core 基础上增加真实 RAG。
 
     参数含义：
         无。
@@ -288,5 +289,15 @@ def test_core_and_full_targets_should_have_clear_dependency_boundary() -> None:
     }
 
     assert "rag_retrieval_behavior" not in core_categories
+    assert "multi_agent_behavior" in core_categories
     assert full_categories == core_categories | {"rag_retrieval_behavior"}
     assert DEFAULT_EVALUATION_TARGETS == FULL_EVALUATION_TARGETS
+
+    multi_agent_target = next(
+        target
+        for target in CORE_EVALUATION_TARGETS
+        if target.category == "multi_agent_behavior"
+    )
+    assert multi_agent_target.dataset_path == Path(
+        "evaluation/datasets/multi_agent_behavior_cases.json"
+    )
