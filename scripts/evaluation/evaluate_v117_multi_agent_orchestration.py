@@ -4,27 +4,23 @@ import asyncio
 from pathlib import Path
 
 from src.evaluation import load_agent_evaluation_cases
-from src.evaluation.evaluators import MultiAgentBehaviorEvaluator
+from src.evaluation.evaluators import MultiAgentOrchestrationEvaluator
 
 
 DEFAULT_DATASET_PATH = Path(
-    "evaluation/datasets/multi_agent_behavior_cases.json"
+    "evaluation/datasets/multi_agent_orchestration_cases.json"
 )
 
 
-async def run_multi_agent_behavior_evaluation(
+async def run_multi_agent_orchestration_evaluation(
     dataset_path: Path = DEFAULT_DATASET_PATH,
-    *,
-    report_title: str = "V1.16 Multi-Agent Behavior Evaluation Report",
 ) -> int:
     """
-    执行从 V1.16 开始持续扩展的多 Agent 行为黄金集评估。
+    执行 V1.17 多 Agent 总编排集成评估。
 
     参数含义：
         dataset_path:
-            多 Agent 行为黄金数据集路径。
-        report_title:
-            命令行报告标题，供后续版本复用同一评估实现。
+            总编排行为黄金数据集路径。
 
     返回值含义：
         int:
@@ -32,26 +28,20 @@ async def run_multi_agent_behavior_evaluation(
     """
 
     eval_cases = load_agent_evaluation_cases(dataset_path)
-    evaluator = MultiAgentBehaviorEvaluator()
-    results = await evaluator.evaluate_many(eval_cases)
-    passed_results = [result for result in results if result.passed]
+    results = await MultiAgentOrchestrationEvaluator().evaluate_many(
+        eval_cases
+    )
     failed_results = [result for result in results if not result.passed]
 
     print("=" * 80)
-    print(report_title)
+    print("V1.17 Multi-Agent Orchestration Evaluation Report")
     print("=" * 80)
     print(f"dataset: {dataset_path.as_posix()}")
     print(f"total_cases: {len(results)}")
-    print(f"passed_cases: {len(passed_results)}")
+    print(f"passed_cases: {len(results) - len(failed_results)}")
     print(f"failed_cases: {len(failed_results)}")
-    print(
-        "pass_rate: "
-        f"{(len(passed_results) / len(results)) if results else 0.0:.2%}"
-    )
-
     if failed_results:
         print("-" * 80)
-        print("失败用例:")
         for result in failed_results:
             print(f"- {result.case_id}")
             if result.error_message:
@@ -60,17 +50,15 @@ async def run_multi_agent_behavior_evaluation(
                 print(
                     f"  check={check.check_name}, "
                     f"expected={check.expected!r}, "
-                    f"actual={check.actual!r}, "
-                    f"message={check.message}"
+                    f"actual={check.actual!r}"
                 )
-
     print("=" * 80)
     return 1 if failed_results else 0
 
 
 def main() -> None:
     """
-    运行多 Agent 行为评估命令行入口。
+    运行总编排评估命令行入口。
 
     参数含义：
         无。
@@ -80,10 +68,9 @@ def main() -> None:
             使用进程退出码表示黄金集是否全部通过。
     """
 
-    exit_code = asyncio.run(
-        run_multi_agent_behavior_evaluation()
+    raise SystemExit(
+        asyncio.run(run_multi_agent_orchestration_evaluation())
     )
-    raise SystemExit(exit_code)
 
 
 if __name__ == "__main__":

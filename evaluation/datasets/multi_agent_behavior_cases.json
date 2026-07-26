@@ -51,6 +51,18 @@
                 ["step_health", "step_training"],
                 ["step_plan"]
             ],
+            "worker_step_trace_statuses": {
+                "step_read": "completed",
+                "step_health": "completed",
+                "step_training": "completed",
+                "step_plan": "completed"
+            },
+            "worker_step_trace_batch_numbers": {
+                "step_read": [1],
+                "step_health": [2],
+                "step_training": [2],
+                "step_plan": [3]
+            },
             "awaiting_result_aggregation": true
         },
         "tags": ["multi_agent", "dependency", "parallel_batch"]
@@ -264,5 +276,279 @@
             "cancellation_requested": true
         },
         "tags": ["multi_agent", "cancelled", "no_worker_started"]
+    },
+    {
+        "case_id": "multi_agent_runtime_cancelled_001",
+        "category": "multi_agent_behavior",
+        "question": "Worker 已经运行后取消整次多 Agent 任务。",
+        "input_state": {
+            "plan": {
+                "plan_id": "plan_runtime_cancelled",
+                "objective": "验证运行中取消不会进入重试",
+                "steps": [
+                    {
+                        "step_id": "step_running",
+                        "title": "执行长耗时任务",
+                        "assigned_agent": "worker_agent"
+                    },
+                    {
+                        "step_id": "step_after",
+                        "title": "执行后续任务",
+                        "assigned_agent": "worker_agent",
+                        "depends_on": ["step_running"]
+                    }
+                ]
+            },
+            "worker_behaviors": {
+                "step_running": {
+                    "outcomes": ["wait_for_cancellation"]
+                }
+            },
+            "scheduler_settings": {
+                "maximum_step_attempts": 3
+            },
+            "cancel_after_started_step_ids": ["step_running"]
+        },
+        "expected": {
+            "task_status": "cancelled",
+            "plan_status": "cancelled",
+            "step_statuses": {
+                "step_running": "skipped",
+                "step_after": "skipped"
+            },
+            "ready_batches": [["step_running"]],
+            "worker_call_counts": {
+                "step_running": 1
+            },
+            "step_attempt_counts": {
+                "step_running": 1,
+                "step_after": 0
+            },
+            "cancelled_worker_step_ids": ["step_running"],
+            "skipped_step_ids": ["step_running", "step_after"],
+            "cancellation_requested": true,
+            "cancellation_response_latency_recorded": true,
+            "worker_step_trace_statuses": {
+                "step_running": "skipped",
+                "step_after": "skipped"
+            },
+            "worker_step_trace_batch_numbers": {
+                "step_running": [1],
+                "step_after": []
+            },
+            "awaiting_result_aggregation": false
+        },
+        "tags": [
+            "multi_agent",
+            "cancelled",
+            "runtime_cancellation",
+            "no_retry"
+        ]
+    },
+    {
+        "case_id": "multi_agent_timeout_exhausted_001",
+        "category": "multi_agent_behavior",
+        "question": "Worker 连续超时并耗尽全部尝试次数。",
+        "input_state": {
+            "plan": {
+                "plan_id": "plan_timeout_exhausted",
+                "objective": "验证步骤超时和重试耗尽",
+                "steps": [
+                    {
+                        "step_id": "step_timeout",
+                        "title": "执行超时任务",
+                        "assigned_agent": "worker_agent"
+                    }
+                ]
+            },
+            "worker_behaviors": {
+                "step_timeout": {
+                    "outcomes": ["timeout"]
+                }
+            },
+            "scheduler_settings": {
+                "maximum_step_attempts": 2,
+                "step_timeout_seconds": 0.01
+            }
+        },
+        "expected": {
+            "task_status": "failed",
+            "plan_status": "failed",
+            "step_statuses": {
+                "step_timeout": "failed"
+            },
+            "worker_call_counts": {
+                "step_timeout": 2
+            },
+            "step_attempt_counts": {
+                "step_timeout": 2
+            },
+            "timed_out_step_ids": ["step_timeout"],
+            "failed_step_ids": ["step_timeout"]
+        },
+        "tags": [
+            "multi_agent",
+            "timeout",
+            "retry_exhausted"
+        ]
+    },
+    {
+        "case_id": "multi_agent_error_retry_exhausted_001",
+        "category": "multi_agent_behavior",
+        "question": "Worker 持续抛出普通异常并耗尽重试。",
+        "input_state": {
+            "plan": {
+                "plan_id": "plan_error_retry_exhausted",
+                "objective": "验证普通异常的最大尝试次数",
+                "steps": [
+                    {
+                        "step_id": "step_error",
+                        "title": "执行持续失败任务",
+                        "assigned_agent": "worker_agent"
+                    }
+                ]
+            },
+            "worker_behaviors": {
+                "step_error": {
+                    "outcomes": ["error"],
+                    "error_message": "评估模拟的持续异常"
+                }
+            },
+            "scheduler_settings": {
+                "maximum_step_attempts": 3
+            }
+        },
+        "expected": {
+            "task_status": "failed",
+            "plan_status": "failed",
+            "step_statuses": {
+                "step_error": "failed"
+            },
+            "worker_call_counts": {
+                "step_error": 3
+            },
+            "worker_call_sequence": [
+                "step_error",
+                "step_error",
+                "step_error"
+            ],
+            "step_attempt_counts": {
+                "step_error": 3
+            },
+            "timed_out_step_ids": [],
+            "failed_step_ids": ["step_error"]
+        },
+        "tags": [
+            "multi_agent",
+            "error",
+            "retry_exhausted"
+        ]
+    },
+    {
+        "case_id": "multi_agent_resume_missing_input_001",
+        "category": "multi_agent_behavior",
+        "question": "恢复等待步骤时没有提供任何回答。",
+        "input_state": {
+            "plan": {
+                "plan_id": "plan_resume_missing_input",
+                "objective": "验证恢复输入缺失校验",
+                "steps": [
+                    {
+                        "step_id": "step_profile",
+                        "title": "补全档案",
+                        "assigned_agent": "profile_agent"
+                    }
+                ]
+            },
+            "worker_behaviors": {
+                "step_profile": {
+                    "outcomes": ["awaiting_input"],
+                    "clarification_prompt": "请补充年龄。"
+                }
+            },
+            "attempt_resume": true,
+            "resume_user_inputs": {}
+        },
+        "expected": {
+            "runtime_error_message": "恢复任务仍缺少等待步骤的用户回答: ['step_profile']"
+        },
+        "tags": [
+            "multi_agent",
+            "resume_validation",
+            "missing_input"
+        ]
+    },
+    {
+        "case_id": "multi_agent_resume_unknown_input_001",
+        "category": "multi_agent_behavior",
+        "question": "恢复任务时提供了一个并未等待输入的步骤编号。",
+        "input_state": {
+            "plan": {
+                "plan_id": "plan_resume_unknown_input",
+                "objective": "验证恢复输入未知步骤校验",
+                "steps": [
+                    {
+                        "step_id": "step_profile",
+                        "title": "补全档案",
+                        "assigned_agent": "profile_agent"
+                    }
+                ]
+            },
+            "worker_behaviors": {
+                "step_profile": {
+                    "outcomes": ["awaiting_input"],
+                    "clarification_prompt": "请补充年龄。"
+                }
+            },
+            "attempt_resume": true,
+            "resume_user_inputs": {
+                "step_profile": "6岁",
+                "step_unknown": "额外回答"
+            }
+        },
+        "expected": {
+            "runtime_error_message": "恢复任务包含并未等待输入的步骤编号: ['step_unknown']"
+        },
+        "tags": [
+            "multi_agent",
+            "resume_validation",
+            "unknown_step"
+        ]
+    },
+    {
+        "case_id": "multi_agent_resume_empty_input_001",
+        "category": "multi_agent_behavior",
+        "question": "恢复等待步骤时提供空白回答。",
+        "input_state": {
+            "plan": {
+                "plan_id": "plan_resume_empty_input",
+                "objective": "验证恢复输入空值校验",
+                "steps": [
+                    {
+                        "step_id": "step_profile",
+                        "title": "补全档案",
+                        "assigned_agent": "profile_agent"
+                    }
+                ]
+            },
+            "worker_behaviors": {
+                "step_profile": {
+                    "outcomes": ["awaiting_input"],
+                    "clarification_prompt": "请补充年龄。"
+                }
+            },
+            "attempt_resume": true,
+            "resume_user_inputs": {
+                "step_profile": "   "
+            }
+        },
+        "expected": {
+            "runtime_error_message": "等待步骤的用户回答不能为空: ['step_profile']"
+        },
+        "tags": [
+            "multi_agent",
+            "resume_validation",
+            "empty_input"
+        ]
     }
 ]

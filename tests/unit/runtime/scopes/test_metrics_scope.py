@@ -107,6 +107,9 @@ def test_metrics_scope_init_metrics_should_create_default_metrics():
         "error_count": 0,
         "tool_latency": 0,
         "llm_latency": 0,
+        "llm_input_tokens": 0,
+        "llm_output_tokens": 0,
+        "llm_total_tokens": 0,
     }
 
 
@@ -137,6 +140,9 @@ def test_metrics_scope_init_metrics_should_store_data_in_request_scope():
         "error_count": 0,
         "tool_latency": 0,
         "llm_latency": 0,
+        "llm_input_tokens": 0,
+        "llm_output_tokens": 0,
+        "llm_total_tokens": 0,
     }
 
 
@@ -486,6 +492,9 @@ async def test_metrics_scope_startup_should_init_metrics_when_empty():
         "error_count": 0,
         "tool_latency": 0,
         "llm_latency": 0,
+        "llm_input_tokens": 0,
+        "llm_output_tokens": 0,
+        "llm_total_tokens": 0,
     }
 
 

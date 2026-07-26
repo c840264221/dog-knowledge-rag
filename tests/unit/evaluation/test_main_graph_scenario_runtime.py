@@ -3,6 +3,7 @@ import pytest
 from src.evaluation import AgentEvaluationCase
 from src.evaluation.scenarios.main_graph_scenario_runtime import (
     EvaluationMainGraphLLMProvider,
+    EvaluationMainGraphPlanningProvider,
     build_main_graph_scenario_runtime,
 )
 
@@ -82,3 +83,44 @@ async def test_build_main_graph_runtime_should_strip_evaluation_fields() -> None
         "need_tool": False,
         "tool_calls": [],
     }
+
+
+@pytest.mark.asyncio
+async def test_main_graph_planning_provider_should_use_runtime_ids() -> None:
+    """
+    测试主图计划 Provider 会回填真实 Planner 本轮编号和目标。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    provider = EvaluationMainGraphPlanningProvider(
+        {
+            "plan_id": "golden_plan",
+            "objective": "黄金目标",
+            "steps": [
+                {
+                    "step_id": "step_one",
+                    "title": "执行步骤",
+                    "assigned_agent": "worker_agent",
+                }
+            ],
+        }
+    )
+
+    message = await provider.safe_ainvoke(
+        llm=provider.main_llm,
+        prompt="""
+8. plan_id 必须原样返回为 'runtime_plan_001'。
+用户目标开始：
+运行时真实目标
+用户目标结束。
+""".strip(),
+    )
+
+    assert '"plan_id": "runtime_plan_001"' in message.content
+    assert '"objective": "运行时真实目标"' in message.content
+    assert len(provider.prompts) == 1

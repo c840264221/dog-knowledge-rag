@@ -1,12 +1,27 @@
 from __future__ import annotations
 
+import ast
+import json
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
 from langchain_core.messages import AIMessage
 
+from src.agents.collaboration.aggregator import ResultAggregator
+from src.agents.collaboration.graph import build_multi_agent_entry_node
+from src.agents.collaboration.orchestrator import MultiAgentOrchestrator
+from src.agents.collaboration.planner import PlannerAgent
+from src.agents.collaboration.scheduler import MultiAgentTaskScheduler
 from src.agents.tool_agent.graph import build_tool_agent_graph
 from src.evaluation.schemas import AgentEvaluationCase
+from src.evaluation.scenarios.multi_agent_orchestration_scenario_runtime import (
+    EvaluationOrchestrationMessage,
+    EvaluationOrchestrationLLMProvider,
+)
+from src.evaluation.scenarios.multi_agent_scenario_runtime import (
+    EvaluationMultiAgentWorker,
+)
 from src.evaluation.scenarios.dog_knowledge_scenario_runtime import (
     EvaluationDogQueryParser,
     EvaluationMetadataFilterRetriever,
@@ -193,6 +208,128 @@ class EvaluationMainGraphLLMProvider:
         return "fallback", str(fallback_response or "评估模型未识别调用类型")
 
 
+class EvaluationMainGraphPlanningProvider(
+    EvaluationOrchestrationLLMProvider
+):
+    """
+    为主图多 Agent 评估返回匹配本轮运行编号的固定计划。
+
+    功能：
+        保留黄金用例声明的步骤结构，同时从真实 Planner 提示词提取程序
+        本轮生成的 plan_id 和原始 objective，避免固定测试数据与随机运行
+        编号冲突，并继续接受真实 Planner 的完整输出校验。
+
+    参数含义：
+        plan_template:
+            黄金用例声明的固定计划模板。
+
+    返回值含义：
+        EvaluationMainGraphPlanningProvider:
+            可注入真实 PlannerAgent 的确定性评估 Provider。
+    """
+
+    def __init__(self, plan_template: dict[str, Any]) -> None:
+        """
+        初始化主图多 Agent 计划评估 Provider。
+
+        参数含义：
+            plan_template:
+                需要保留步骤、依赖和 Agent 分配的计划模板。
+
+        返回值含义：
+            None。
+        """
+
+        super().__init__([])
+        self.plan_template = dict(plan_template)
+
+    async def safe_ainvoke(
+        self,
+        *,
+        llm: Any,
+        prompt: str,
+        fallback_response: str | None = None,
+    ) -> EvaluationOrchestrationMessage:
+        """
+        根据真实 Planner 提示词生成本轮合法的确定性计划响应。
+
+        参数含义：
+            llm:
+                Planner 选择的模型对象，评估环境不会访问该模型。
+            prompt:
+                包含本轮 plan_id 和原始目标的真实 Planner 提示词。
+            fallback_response:
+                真实 Provider 的可选兜底文本，本评估替身不会使用。
+
+        返回值含义：
+            EvaluationOrchestrationMessage:
+                包含动态运行编号和固定步骤结构的 JSON 消息。
+        """
+
+        _ = llm, fallback_response
+        self.prompts.append(prompt)
+        plan_data = dict(self.plan_template)
+        plan_data["plan_id"] = _extract_planner_plan_id(prompt)
+        plan_data["objective"] = _extract_planner_objective(prompt)
+        return EvaluationOrchestrationMessage(
+            json.dumps(plan_data, ensure_ascii=False)
+        )
+
+
+def _extract_planner_plan_id(prompt: str) -> str:
+    """
+    从真实 Planner 提示词提取程序生成的计划编号。
+
+    参数含义：
+        prompt:
+            build_planner_prompt 生成的完整提示词。
+
+    返回值含义：
+        str:
+            Planner 要求 LLM 原样返回的 plan_id。
+    """
+
+    match = re.search(
+        r"plan_id 必须原样返回为 (.+?)。",
+        prompt,
+    )
+    if match is None:
+        raise ValueError("主图评估无法从 Planner 提示词提取 plan_id")
+    try:
+        plan_id = ast.literal_eval(match.group(1))
+    except (SyntaxError, ValueError) as exc:
+        raise ValueError("Planner 提示词中的 plan_id 格式不合法") from exc
+    if not isinstance(plan_id, str) or not plan_id:
+        raise ValueError("Planner 提示词中的 plan_id 不能为空")
+    return plan_id
+
+
+def _extract_planner_objective(prompt: str) -> str:
+    """
+    从真实 Planner 提示词提取未改写的用户目标。
+
+    参数含义：
+        prompt:
+            build_planner_prompt 生成的完整提示词。
+
+    返回值含义：
+        str:
+            位于用户目标开始和结束标记之间的原始目标。
+    """
+
+    match = re.search(
+        r"用户目标开始：\s*(.*?)\s*用户目标结束。",
+        prompt,
+        flags=re.DOTALL,
+    )
+    if match is None:
+        raise ValueError("主图评估无法从 Planner 提示词提取 objective")
+    objective = match.group(1).strip()
+    if not objective:
+        raise ValueError("Planner 提示词中的 objective 不能为空")
+    return objective
+
+
 def build_main_graph_evaluation_initial_state(
     question: str,
     user_id: str,
@@ -263,6 +400,11 @@ def build_main_graph_evaluation_initial_state(
         "memory_saved": False,
         "memory_extract_result": {},
         "memory_save_result": None,
+        "multi_agent_task_result": {},
+        "multi_agent_resume_action": "none",
+        "multi_agent_resume_inputs": {},
+        "multi_agent_resume_ready": False,
+        "multi_agent_pending_prompt": "",
     }
 
 
@@ -280,6 +422,8 @@ class EvaluationMainGraphRuntimeService(GraphRuntimeService):
             返回黄金用例预设工具调用的确定性解析器。
         tool_executor:
             返回固定工具结果并记录执行轨迹的确定性执行器。
+        multi_agent_node:
+            可选确定性多 Agent 入口；未提供时继续使用生产组装逻辑。
         其他参数:
             继续沿用 GraphRuntimeService 的 Provider 注入参数。
 
@@ -293,6 +437,7 @@ class EvaluationMainGraphRuntimeService(GraphRuntimeService):
         *,
         tool_parser: EvaluationToolParser,
         tool_executor: EvaluationToolExecutor,
+        multi_agent_node: Any | None = None,
         **kwargs: Any,
     ) -> None:
         """
@@ -303,6 +448,8 @@ class EvaluationMainGraphRuntimeService(GraphRuntimeService):
                 ToolAgent 使用的确定性工具解析器。
             tool_executor:
                 ToolAgent 使用的确定性工具执行器。
+            multi_agent_node:
+                多 Agent 黄金用例使用的确定性主图入口。
             **kwargs:
                 传给 GraphRuntimeService 的其他 Provider 依赖。
 
@@ -315,6 +462,7 @@ class EvaluationMainGraphRuntimeService(GraphRuntimeService):
             **kwargs,
         )
         self.evaluation_tool_executor = tool_executor
+        self.evaluation_multi_agent_node = multi_agent_node
 
     def _build_tool_agent_node(self) -> Any:
         """
@@ -338,6 +486,37 @@ class EvaluationMainGraphRuntimeService(GraphRuntimeService):
             interrupt_func=None,
         )
 
+    def _build_multi_agent_node(
+        self,
+        *,
+        dog_knowledge_agent: Any,
+        general_agent: Any,
+    ) -> Any:
+        """
+        为主图评估选择确定性或生产多 Agent 入口。
+
+        功能：
+            多 Agent 黄金用例返回注入确定性依赖的真实入口；其他主图用例
+            继续调用父类生产组装逻辑，避免改变既有评估行为。
+
+        参数含义：
+            dog_knowledge_agent:
+                父类生产组装需要的狗狗知识子图。
+            general_agent:
+                父类生产组装需要的通用问答子图。
+
+        返回值含义：
+            Any:
+                可注册到主图 multi_agent 节点的异步入口。
+        """
+
+        if self.evaluation_multi_agent_node is not None:
+            return self.evaluation_multi_agent_node
+        return super()._build_multi_agent_node(
+            dog_knowledge_agent=dog_knowledge_agent,
+            general_agent=general_agent,
+        )
+
 
 @dataclass
 class MainGraphScenarioRuntime:
@@ -355,6 +534,10 @@ class MainGraphScenarioRuntime:
             DogKnowledgeAgent 的确定性外部依赖。
         tool_parser、tool_executor:
             ToolAgent 的确定性外部依赖。
+        multi_agent_worker:
+            可选确定性多 Agent Worker 及其步骤调用轨迹。
+        multi_agent_planning_provider、multi_agent_aggregation_provider:
+            可选 Planner 与 Aggregator 固定响应及提示词调用轨迹。
         runtime_context:
             当前评估用例独享的真实 RuntimeContext（运行时上下文）。
 
@@ -371,6 +554,13 @@ class MainGraphScenarioRuntime:
     dog_reranker: EvaluationRerankerModel
     tool_parser: EvaluationToolParser
     tool_executor: EvaluationToolExecutor
+    multi_agent_worker: EvaluationMultiAgentWorker | None = None
+    multi_agent_planning_provider: (
+        EvaluationOrchestrationLLMProvider | None
+    ) = None
+    multi_agent_aggregation_provider: (
+        EvaluationOrchestrationLLMProvider | None
+    ) = None
     runtime_context: RuntimeContext = field(default_factory=RuntimeContext)
 
     async def invoke(self) -> dict[str, Any]:
@@ -451,6 +641,22 @@ async def build_main_graph_scenario_runtime(
             "工具已经执行完成。",
         )
     )
+    raw_multi_agent_plan = raw_state.pop(
+        "evaluation_multi_agent_plan",
+        None,
+    )
+    raw_multi_agent_pending_result = raw_state.pop(
+        "evaluation_multi_agent_pending_result",
+        None,
+    )
+    raw_multi_agent_behaviors = raw_state.pop(
+        "evaluation_multi_agent_worker_behaviors",
+        {},
+    )
+    raw_multi_agent_aggregation = raw_state.pop(
+        "evaluation_multi_agent_aggregation_response",
+        None,
+    )
 
     if not isinstance(parser_filters, dict):
         raise ValueError("evaluation_parser_filters 必须是 dict")
@@ -458,6 +664,29 @@ async def build_main_graph_scenario_runtime(
         raise ValueError("evaluation_rag_context 必须是 dict")
     if not isinstance(raw_tool_parser_result, dict):
         raise ValueError("evaluation_tool_parser_result 必须是 dict")
+    if (
+        raw_multi_agent_plan is not None
+        and not isinstance(raw_multi_agent_plan, dict)
+    ):
+        raise ValueError("evaluation_multi_agent_plan 必须是 dict")
+    if (
+        raw_multi_agent_pending_result is not None
+        and not isinstance(raw_multi_agent_pending_result, dict)
+    ):
+        raise ValueError(
+            "evaluation_multi_agent_pending_result 必须是 dict"
+        )
+    if not isinstance(raw_multi_agent_behaviors, dict):
+        raise ValueError(
+            "evaluation_multi_agent_worker_behaviors 必须是 dict"
+        )
+    if (
+        raw_multi_agent_aggregation is not None
+        and not isinstance(raw_multi_agent_aggregation, dict)
+    ):
+        raise ValueError(
+            "evaluation_multi_agent_aggregation_response 必须是 dict"
+        )
 
     llm_provider = EvaluationMainGraphLLMProvider(
         general_answer=general_answer,
@@ -471,6 +700,17 @@ async def build_main_graph_scenario_runtime(
     dog_reranker = EvaluationRerankerModel()
     tool_parser = EvaluationToolParser(raw_tool_parser_result)
     tool_executor = EvaluationToolExecutor()
+    (
+        multi_agent_node,
+        multi_agent_worker,
+        multi_agent_planning_provider,
+        multi_agent_aggregation_provider,
+    ) = _build_main_graph_multi_agent_evaluation_dependencies(
+        raw_plan=raw_multi_agent_plan,
+        raw_pending_result=raw_multi_agent_pending_result,
+        raw_behaviors=raw_multi_agent_behaviors,
+        raw_aggregation=raw_multi_agent_aggregation,
+    )
 
     graph_runtime = EvaluationMainGraphRuntimeService(
         llm_provider=llm_provider,
@@ -484,6 +724,7 @@ async def build_main_graph_scenario_runtime(
         sqlite_mcp_provider=None,
         tool_parser=tool_parser,
         tool_executor=tool_executor,
+        multi_agent_node=multi_agent_node,
     )
     graph = await graph_runtime._build_graph()
 
@@ -506,6 +747,10 @@ async def build_main_graph_scenario_runtime(
             "messages": list(raw_state.get("messages", [])),
         }
     )
+    if raw_multi_agent_pending_result is not None:
+        initial_state["multi_agent_task_result"] = dict(
+            raw_multi_agent_pending_result
+        )
 
     return MainGraphScenarioRuntime(
         graph=graph,
@@ -516,9 +761,121 @@ async def build_main_graph_scenario_runtime(
         dog_reranker=dog_reranker,
         tool_parser=tool_parser,
         tool_executor=tool_executor,
+        multi_agent_worker=multi_agent_worker,
+        multi_agent_planning_provider=multi_agent_planning_provider,
+        multi_agent_aggregation_provider=(
+            multi_agent_aggregation_provider
+        ),
         runtime_context=RuntimeContext(
             trace_id=trace_id,
             user_id=initial_state["user_id"],
             component="main_graph_evaluation",
         ),
+    )
+
+
+def _build_main_graph_multi_agent_evaluation_dependencies(
+    *,
+    raw_plan: dict[str, Any] | None,
+    raw_pending_result: dict[str, Any] | None,
+    raw_behaviors: dict[str, Any],
+    raw_aggregation: dict[str, Any] | None,
+) -> tuple[
+    Any | None,
+    EvaluationMultiAgentWorker | None,
+    EvaluationOrchestrationLLMProvider | None,
+    EvaluationOrchestrationLLMProvider | None,
+]:
+    """
+    为主图多 Agent 黄金用例组装确定性入口依赖。
+
+    功能：
+        创建真实 Planner、Scheduler、Aggregator、Orchestrator 和入口节点，
+        只把 LLM 响应与 Worker 输出替换为黄金用例中的确定性数据。
+        普通主图用例没有多 Agent 配置时返回四个 None。
+
+    参数含义：
+        raw_plan:
+            新任务或 replan 使用的固定 Planner 输出。
+        raw_pending_result:
+            resume、replan 或澄清场景使用的暂停任务结果。
+        raw_behaviors:
+            各步骤的确定性 Worker 行为。
+        raw_aggregation:
+            可选固定聚合响应。
+
+    返回值含义：
+        tuple:
+            依次返回入口节点、Worker、Planner Provider 和 Aggregator
+            Provider；非多 Agent 用例全部为 None。
+    """
+
+    if raw_plan is None and raw_pending_result is None:
+        return None, None, None, None
+
+    plan_data = raw_plan
+    if plan_data is None and raw_pending_result is not None:
+        pending_plan = raw_pending_result.get("plan")
+        if not isinstance(pending_plan, dict):
+            raise ValueError("暂停任务缺少合法 plan")
+        plan_data = dict(pending_plan)
+
+    raw_steps = plan_data.get("steps") if plan_data else None
+    if not isinstance(raw_steps, list) or not raw_steps:
+        raise ValueError("主图多 Agent 评估计划缺少 steps")
+    available_agents = {
+        str(step.get("assigned_agent") or "").strip(): (
+            f"执行步骤：{str(step.get('title') or '').strip()}"
+        )
+        for step in raw_steps
+        if isinstance(step, dict)
+        and str(step.get("assigned_agent") or "").strip()
+    }
+    if not available_agents:
+        raise ValueError("主图多 Agent 评估计划缺少可用 Agent")
+
+    planning_provider = EvaluationMainGraphPlanningProvider(
+        plan_data
+    )
+    aggregation_response = raw_aggregation or {
+        "final_answer": "主图多 Agent 评估完成。",
+        "used_step_ids": [
+            str(step.get("step_id"))
+            for step in raw_steps
+            if isinstance(step, dict)
+        ],
+        "limitations": [],
+    }
+    aggregation_provider = EvaluationOrchestrationLLMProvider(
+        [json.dumps(aggregation_response, ensure_ascii=False)]
+    )
+    worker = EvaluationMultiAgentWorker(raw_behaviors)
+    planner = PlannerAgent(
+        llm_provider=planning_provider,
+        available_agents=available_agents,
+        maximum_plan_attempts=1,
+    )
+    scheduler = MultiAgentTaskScheduler(
+        workers={
+            agent_name: worker
+            for agent_name in available_agents
+        },
+        maximum_step_attempts=1,
+    )
+    aggregator = ResultAggregator(
+        llm_provider=aggregation_provider,
+        maximum_aggregation_attempts=1,
+    )
+    entry_node = build_multi_agent_entry_node(
+        orchestrator=MultiAgentOrchestrator(
+            planner=planner,
+            scheduler=scheduler,
+            result_aggregator=aggregator,
+        )
+    )
+    return (
+        entry_node,
+        worker,
+        planning_provider,
+        aggregation_provider,
     )

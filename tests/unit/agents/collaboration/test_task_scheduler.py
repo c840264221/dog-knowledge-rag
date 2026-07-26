@@ -40,6 +40,10 @@ def test_cancellation_registry_should_manage_running_task_token() -> None:
     assert registry.contains("multi_agent_task_registry_001") is True
     assert registry.cancel("multi_agent_task_registry_001") is True
     assert token.is_cancelled is True
+    first_cancel_requested_at = token.cancel_requested_at
+    assert isinstance(first_cancel_requested_at, float)
+    token.cancel()
+    assert token.cancel_requested_at == first_cancel_requested_at
     assert registry.unregister(
         "multi_agent_task_registry_001",
         token,
@@ -200,6 +204,40 @@ def test_scheduler_should_execute_steps_by_dependency_batches() -> None:
         ("build_plan", ["query_health", "query_training"]),
     ]
     assert result.metadata["awaiting_result_aggregation"] is True
+    assert [
+        {
+            "step_id": item["step_id"],
+            "batch_numbers": item["batch_numbers"],
+            "status": item["status"],
+            "attempt_count": item["attempt_count"],
+        }
+        for item in result.metadata["worker_step_trace"]
+    ] == [
+        {
+            "step_id": "load_profile",
+            "batch_numbers": [1],
+            "status": "completed",
+            "attempt_count": 1,
+        },
+        {
+            "step_id": "query_health",
+            "batch_numbers": [2],
+            "status": "completed",
+            "attempt_count": 1,
+        },
+        {
+            "step_id": "query_training",
+            "batch_numbers": [2],
+            "status": "completed",
+            "attempt_count": 1,
+        },
+        {
+            "step_id": "build_plan",
+            "batch_numbers": [3],
+            "status": "completed",
+            "attempt_count": 1,
+        },
+    ]
 
 
 def test_scheduler_should_skip_steps_blocked_by_failure() -> None:
@@ -629,6 +667,21 @@ def test_scheduler_should_cancel_running_worker_without_retry() -> None:
     assert result.task_results[0].metadata[
         "scheduler_attempt_count"
     ] == 1
+    assert result.metadata["cancellation_response_latency_ms"] >= 0
+    assert result.metadata["worker_step_trace"] == [
+        {
+            "step_id": "load_profile",
+            "step_title": "读取资料",
+            "assigned_agent": "profile_agent",
+            "depends_on": [],
+            "batch_numbers": [1],
+            "status": "skipped",
+            "attempt_count": 1,
+            "latency_ms": result.task_results[0].latency_ms,
+            "timed_out": False,
+            "cancelled": True,
+        }
+    ]
     assert calls == ["load_profile"]
 
 

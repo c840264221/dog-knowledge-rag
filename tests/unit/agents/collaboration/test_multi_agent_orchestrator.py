@@ -290,6 +290,20 @@ def test_orchestrator_should_run_complete_multi_agent_flow() -> None:
         "scheduling",
         "aggregation",
     ]
+    stage_metrics = result.metadata["orchestration"]["stage_metrics"]
+    assert [
+        (metric["stage"], metric["status"])
+        for metric in stage_metrics
+    ] == [
+        ("planning", "completed"),
+        ("scheduling", "completed"),
+        ("aggregation", "completed"),
+    ]
+    assert all(metric["latency_ms"] >= 0.0 for metric in stage_metrics)
+    assert result.metadata["orchestration"]["active_latency_ms"] == sum(
+        metric["latency_ms"]
+        for metric in stage_metrics
+    )
 
 
 def test_orchestrator_should_not_aggregate_cancelled_task() -> None:
@@ -333,6 +347,14 @@ def test_orchestrator_should_not_aggregate_cancelled_task() -> None:
         "planning",
         "scheduling",
     ]
+    assert [
+        (metric["stage"], metric["status"])
+        for metric in result.metadata["orchestration"]["stage_metrics"]
+    ] == [
+        ("planning", "completed"),
+        ("scheduling", "completed"),
+    ]
+    assert result.metadata["orchestration"]["active_latency_ms"] >= 0.0
 
 
 def test_orchestrator_should_attach_runtime_identity_to_worker_steps() -> None:
@@ -547,6 +569,17 @@ def test_orchestrator_should_resume_and_aggregate_result() -> None:
         "resume_scheduling",
         "aggregation",
     ]
+    assert [
+        metric["stage"]
+        for metric in final_result.metadata["orchestration"][
+            "stage_metrics"
+        ]
+    ] == [
+        "planning",
+        "scheduling",
+        "resume_scheduling",
+        "aggregation",
+    ]
 
 
 def test_orchestrator_should_stop_after_blocking_worker_failure() -> None:
@@ -625,4 +658,8 @@ def test_orchestrator_should_mark_planning_error_stage() -> None:
         )
 
     assert exc_info.value.stage == "planning"
+    assert exc_info.value.stage_metrics[0]["stage"] == "planning"
+    assert exc_info.value.stage_metrics[0]["status"] == "failed"
+    assert exc_info.value.stage_metrics[0]["latency_ms"] >= 0.0
+    assert exc_info.value.active_latency_ms >= 0.0
     assert calls == []

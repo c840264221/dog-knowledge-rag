@@ -1,0 +1,217 @@
+[
+    {
+        "case_id": "multi_agent_orchestration_completed_001",
+        "category": "multi_agent_orchestration",
+        "question": "生成幼犬健康方案",
+        "input_state": {
+            "plan": {
+                "plan_id": "plan_orchestration_completed",
+                "objective": "生成幼犬健康方案",
+                "steps": [
+                    {
+                        "step_id": "step_profile",
+                        "title": "读取幼犬档案",
+                        "assigned_agent": "profile_agent"
+                    },
+                    {
+                        "step_id": "step_health",
+                        "title": "查询健康知识",
+                        "assigned_agent": "health_agent",
+                        "depends_on": ["step_profile"]
+                    }
+                ]
+            },
+            "aggregation_response": {
+                "final_answer": "幼犬应规律体检并按计划完成免疫。",
+                "used_step_ids": ["step_profile", "step_health"],
+                "limitations": []
+            }
+        },
+        "expected": {
+            "task_status": "completed",
+            "plan_status": "completed",
+            "step_statuses": {
+                "step_profile": "completed",
+                "step_health": "completed"
+            },
+            "visited_stages": ["planning", "scheduling", "aggregation"],
+            "stage_statuses": [
+                {"stage": "planning", "status": "completed"},
+                {"stage": "scheduling", "status": "completed"},
+                {"stage": "aggregation", "status": "completed"}
+            ],
+            "stage_latency_recorded": true,
+            "planner_call_count": 1,
+            "aggregator_call_count": 1,
+            "worker_call_counts": {
+                "step_profile": 1,
+                "step_health": 1
+            },
+            "final_answer": "幼犬应规律体检并按计划完成免疫。"
+        },
+        "tags": ["multi_agent", "orchestration", "completed"]
+    },
+    {
+        "case_id": "multi_agent_orchestration_awaiting_001",
+        "category": "multi_agent_orchestration",
+        "question": "读取档案后生成建议",
+        "input_state": {
+            "plan": {
+                "plan_id": "plan_orchestration_awaiting",
+                "objective": "读取档案后生成建议",
+                "steps": [
+                    {
+                        "step_id": "step_profile",
+                        "title": "读取狗狗档案",
+                        "assigned_agent": "profile_agent"
+                    }
+                ]
+            },
+            "worker_behaviors": {
+                "step_profile": {
+                    "outcomes": ["awaiting_input"],
+                    "clarification_prompt": "是否允许读取狗狗档案？"
+                }
+            }
+        },
+        "expected": {
+            "task_status": "awaiting_input",
+            "plan_status": "awaiting_input",
+            "step_statuses": {
+                "step_profile": "awaiting_input"
+            },
+            "visited_stages": ["planning", "scheduling"],
+            "stage_statuses": [
+                {"stage": "planning", "status": "completed"},
+                {"stage": "scheduling", "status": "completed"}
+            ],
+            "stage_latency_recorded": true,
+            "planner_call_count": 1,
+            "aggregator_call_count": 0,
+            "worker_call_counts": {
+                "step_profile": 1
+            },
+            "final_answer": ""
+        },
+        "tags": ["multi_agent", "orchestration", "awaiting_input"]
+    },
+    {
+        "case_id": "multi_agent_orchestration_failed_001",
+        "category": "multi_agent_orchestration",
+        "question": "读取档案并生成健康建议",
+        "input_state": {
+            "plan": {
+                "plan_id": "plan_orchestration_failed",
+                "objective": "读取档案并生成健康建议",
+                "steps": [
+                    {
+                        "step_id": "step_profile",
+                        "title": "读取狗狗档案",
+                        "assigned_agent": "profile_agent"
+                    },
+                    {
+                        "step_id": "step_health",
+                        "title": "生成健康建议",
+                        "assigned_agent": "health_agent",
+                        "depends_on": ["step_profile"]
+                    }
+                ]
+            },
+            "worker_behaviors": {
+                "step_profile": {
+                    "outcomes": ["failed"],
+                    "error_message": "档案服务不可用"
+                }
+            }
+        },
+        "expected": {
+            "task_status": "failed",
+            "plan_status": "failed",
+            "step_statuses": {
+                "step_profile": "failed",
+                "step_health": "skipped"
+            },
+            "visited_stages": ["planning", "scheduling"],
+            "stage_statuses": [
+                {"stage": "planning", "status": "completed"},
+                {"stage": "scheduling", "status": "completed"}
+            ],
+            "stage_latency_recorded": true,
+            "planner_call_count": 1,
+            "aggregator_call_count": 0,
+            "worker_call_counts": {
+                "step_profile": 1
+            },
+            "final_answer": ""
+        },
+        "tags": ["multi_agent", "orchestration", "blocking_failure"]
+    },
+    {
+        "case_id": "multi_agent_orchestration_resume_001",
+        "category": "multi_agent_orchestration",
+        "question": "读取档案后生成喂养建议",
+        "input_state": {
+            "plan": {
+                "plan_id": "plan_orchestration_resume",
+                "objective": "读取档案后生成喂养建议",
+                "steps": [
+                    {
+                        "step_id": "step_profile",
+                        "title": "读取狗狗档案",
+                        "assigned_agent": "profile_agent"
+                    },
+                    {
+                        "step_id": "step_plan",
+                        "title": "生成喂养建议",
+                        "assigned_agent": "plan_agent",
+                        "depends_on": ["step_profile"]
+                    }
+                ]
+            },
+            "worker_behaviors": {
+                "step_profile": {
+                    "outcomes": ["awaiting_input", "completed"],
+                    "clarification_prompt": "请确认是否允许读取档案。"
+                }
+            },
+            "resume_user_inputs": {
+                "step_profile": "允许读取"
+            },
+            "aggregation_response": {
+                "final_answer": "请根据年龄和体重分配每日喂食量。",
+                "used_step_ids": ["step_profile", "step_plan"],
+                "limitations": []
+            }
+        },
+        "expected": {
+            "task_status": "completed",
+            "plan_status": "completed",
+            "step_statuses": {
+                "step_profile": "completed",
+                "step_plan": "completed"
+            },
+            "visited_stages": [
+                "planning",
+                "scheduling",
+                "resume_scheduling",
+                "aggregation"
+            ],
+            "stage_statuses": [
+                {"stage": "planning", "status": "completed"},
+                {"stage": "scheduling", "status": "completed"},
+                {"stage": "resume_scheduling", "status": "completed"},
+                {"stage": "aggregation", "status": "completed"}
+            ],
+            "stage_latency_recorded": true,
+            "planner_call_count": 1,
+            "aggregator_call_count": 1,
+            "worker_call_counts": {
+                "step_profile": 2,
+                "step_plan": 1
+            },
+            "final_answer": "请根据年龄和体重分配每日喂食量。",
+            "resume_count": 1
+        },
+        "tags": ["multi_agent", "orchestration", "resume"]
+    }
+]

@@ -183,5 +183,249 @@
             ]
         },
         "tags": ["main_graph", "finish"]
+    },
+    {
+        "case_id": "main_graph_multi_agent_completed_001",
+        "category": "main_graph_behavior",
+        "question": "请使用多个智能体分别分析金毛的健康、饮食和训练，并生成综合方案。",
+        "input_state": {
+            "user_id": "evaluation_user",
+            "evaluation_multi_agent_plan": {
+                "plan_id": "main_graph_multi_completed_plan",
+                "objective": "请使用多个智能体分别分析金毛的健康、饮食和训练，并生成综合方案。",
+                "steps": [
+                    {
+                        "step_id": "step_knowledge",
+                        "title": "分析健康饮食训练知识",
+                        "assigned_agent": "dog_knowledge_agent"
+                    },
+                    {
+                        "step_id": "step_summary",
+                        "title": "生成综合方案",
+                        "assigned_agent": "general_agent",
+                        "depends_on": ["step_knowledge"]
+                    }
+                ]
+            },
+            "evaluation_multi_agent_aggregation_response": {
+                "final_answer": "已生成金毛健康、饮食和训练综合方案。",
+                "used_step_ids": ["step_knowledge", "step_summary"],
+                "limitations": []
+            }
+        },
+        "expected": {
+            "route": "multi_agent",
+            "query_type": "multi_agent_task",
+            "final_answer_contains": "综合方案",
+            "memory_extract_call_count": 1,
+            "multi_agent_task_status": "completed",
+            "multi_agent_plan_status": "completed",
+            "state_multi_agent_resume_action": "none",
+            "waiting_user_input": false,
+            "multi_agent_planner_call_count": 1,
+            "multi_agent_aggregator_call_count": 1,
+            "multi_agent_worker_call_counts": {
+                "step_knowledge": 1,
+                "step_summary": 1
+            },
+            "required_state_fields": [
+                "route_decision",
+                "multi_agent_task_result",
+                "multi_agent_resume_action",
+                "final_answer"
+            ]
+        },
+        "tags": ["main_graph", "multi_agent", "completed"]
+    },
+    {
+        "case_id": "main_graph_multi_agent_resume_001",
+        "category": "main_graph_behavior",
+        "question": "6岁",
+        "input_state": {
+            "user_id": "evaluation_user",
+            "evaluation_multi_agent_pending_result": {
+                "collaboration_id": "main_graph_resume_task",
+                "plan": {
+                    "plan_id": "main_graph_resume_plan",
+                    "objective": "根据档案生成健康方案",
+                    "steps": [
+                        {
+                            "step_id": "step_profile",
+                            "title": "补全狗狗档案",
+                            "assigned_agent": "profile_agent",
+                            "status": "awaiting_input"
+                        },
+                        {
+                            "step_id": "step_plan",
+                            "title": "生成健康方案",
+                            "assigned_agent": "plan_agent",
+                            "depends_on": ["step_profile"]
+                        }
+                    ],
+                    "status": "awaiting_input",
+                    "requires_user_input": true,
+                    "clarification_prompt": "请补充狗狗年龄。"
+                },
+                "status": "awaiting_input",
+                "task_results": [
+                    {
+                        "step_id": "step_profile",
+                        "assigned_agent": "profile_agent",
+                        "status": "awaiting_input",
+                        "requires_user_input": true,
+                        "clarification_prompt": "请补充狗狗年龄。"
+                    }
+                ]
+            },
+            "evaluation_multi_agent_aggregation_response": {
+                "final_answer": "已根据6岁档案生成健康方案。",
+                "used_step_ids": ["step_profile", "step_plan"],
+                "limitations": []
+            }
+        },
+        "expected": {
+            "route": "multi_agent",
+            "query_type": "multi_agent_task",
+            "routed_multi_agent_action": "resume",
+            "final_answer_contains": "6岁",
+            "multi_agent_task_status": "completed",
+            "multi_agent_plan_status": "completed",
+            "state_multi_agent_resume_action": "none",
+            "waiting_user_input": false,
+            "multi_agent_planner_call_count": 0,
+            "multi_agent_aggregator_call_count": 1,
+            "multi_agent_worker_call_counts": {
+                "step_profile": 1,
+                "step_plan": 1
+            }
+        },
+        "tags": ["main_graph", "multi_agent", "resume"]
+    },
+    {
+        "case_id": "main_graph_multi_agent_replan_001",
+        "category": "main_graph_behavior",
+        "question": "3岁，20公斤",
+        "input_state": {
+            "user_id": "evaluation_user",
+            "memory_context": "用户养的是一只金毛。",
+            "evaluation_multi_agent_pending_result": {
+                "collaboration_id": "main_graph_replan_task",
+                "plan": {
+                    "plan_id": "main_graph_replan_pending_plan",
+                    "objective": "制定金毛健康方案",
+                    "steps": [
+                        {
+                            "step_id": "step_plan",
+                            "title": "生成健康方案",
+                            "assigned_agent": "plan_agent"
+                        }
+                    ],
+                    "status": "awaiting_input",
+                    "requires_user_input": true,
+                    "clarification_prompt": "请补充年龄和体重。"
+                },
+                "status": "awaiting_input",
+                "task_results": []
+            },
+            "evaluation_multi_agent_plan": {
+                "plan_id": "main_graph_replan_clarified_plan",
+                "objective": "制定金毛健康方案",
+                "steps": [
+                    {
+                        "step_id": "step_plan",
+                        "title": "根据年龄体重生成健康方案",
+                        "assigned_agent": "plan_agent"
+                    }
+                ]
+            },
+            "evaluation_multi_agent_aggregation_response": {
+                "final_answer": "已根据3岁、20公斤信息重新规划健康方案。",
+                "used_step_ids": ["step_plan"],
+                "limitations": []
+            }
+        },
+        "expected": {
+            "route": "multi_agent",
+            "query_type": "multi_agent_task",
+            "routed_multi_agent_action": "replan",
+            "final_answer_contains": "重新规划",
+            "multi_agent_task_status": "completed",
+            "multi_agent_plan_status": "completed",
+            "state_multi_agent_resume_action": "none",
+            "waiting_user_input": false,
+            "multi_agent_planner_call_count": 1,
+            "multi_agent_aggregator_call_count": 1,
+            "multi_agent_worker_call_counts": {
+                "step_plan": 1
+            }
+        },
+        "tags": ["main_graph", "multi_agent", "replan"]
+    },
+    {
+        "case_id": "main_graph_multi_agent_needs_clarification_001",
+        "category": "main_graph_behavior",
+        "question": "一个是6岁",
+        "input_state": {
+            "user_id": "evaluation_user",
+            "evaluation_multi_agent_pending_result": {
+                "collaboration_id": "main_graph_clarification_task",
+                "plan": {
+                    "plan_id": "main_graph_clarification_plan",
+                    "objective": "补全两只狗狗档案",
+                    "steps": [
+                        {
+                            "step_id": "step_first",
+                            "title": "补全第一只狗狗",
+                            "assigned_agent": "profile_agent",
+                            "status": "awaiting_input"
+                        },
+                        {
+                            "step_id": "step_second",
+                            "title": "补全第二只狗狗",
+                            "assigned_agent": "profile_agent",
+                            "status": "awaiting_input"
+                        }
+                    ],
+                    "status": "awaiting_input",
+                    "requires_user_input": true,
+                    "clarification_prompt": "请分别补充两只狗狗的年龄。"
+                },
+                "status": "awaiting_input",
+                "task_results": [
+                    {
+                        "step_id": "step_first",
+                        "assigned_agent": "profile_agent",
+                        "status": "awaiting_input",
+                        "requires_user_input": true,
+                        "clarification_prompt": "请补充第一只狗狗年龄。"
+                    },
+                    {
+                        "step_id": "step_second",
+                        "assigned_agent": "profile_agent",
+                        "status": "awaiting_input",
+                        "requires_user_input": true,
+                        "clarification_prompt": "请补充第二只狗狗年龄。"
+                    }
+                ]
+            }
+        },
+        "expected": {
+            "route": "multi_agent",
+            "query_type": "multi_agent_task",
+            "routed_multi_agent_action": "needs_clarification",
+            "state_multi_agent_resume_action": "needs_clarification",
+            "final_answer_contains": "当前有多个步骤等待输入",
+            "multi_agent_task_status": "awaiting_input",
+            "multi_agent_plan_status": "awaiting_input",
+            "waiting_user_input": true,
+            "multi_agent_planner_call_count": 0,
+            "multi_agent_aggregator_call_count": 0,
+            "multi_agent_worker_call_counts": {}
+        },
+        "tags": [
+            "main_graph",
+            "multi_agent",
+            "needs_clarification"
+        ]
     }
 ]

@@ -34,6 +34,13 @@ SUPPORTED_EXPECTED_FIELDS = {
     "resume_count",
     "cancellation_requested",
     "awaiting_result_aggregation",
+    "step_attempt_counts",
+    "timed_out_step_ids",
+    "cancelled_worker_step_ids",
+    "worker_step_trace_statuses",
+    "worker_step_trace_batch_numbers",
+    "cancellation_response_latency_recorded",
+    "runtime_error_message",
 }
 
 
@@ -93,11 +100,19 @@ class MultiAgentBehaviorEvaluator:
         try:
             self._validate_case(eval_case)
             runtime = self.scenario_runtime_builder(eval_case)
-            task_result = await runtime.run()
-            output = self._build_output(
-                task_result=task_result,
-                runtime=runtime,
-            )
+            try:
+                task_result = await runtime.run()
+            except Exception as exc:
+                if "runtime_error_message" not in eval_case.expected:
+                    raise
+                output = {
+                    "runtime_error_message": str(exc),
+                }
+            else:
+                output = self._build_output(
+                    task_result=task_result,
+                    runtime=runtime,
+                )
             checks = self._build_checks(
                 expected=eval_case.expected,
                 output=output,
@@ -198,6 +213,14 @@ class MultiAgentBehaviorEvaluator:
             result.step_id: result.status
             for result in task_result.task_results
         }
+        worker_step_trace = [
+            dict(item)
+            for item in task_result.metadata.get(
+                "worker_step_trace",
+                [],
+            )
+            if isinstance(item, dict)
+        ]
         return {
             "task_status": task_result.status,
             "plan_status": task_result.plan.status,
@@ -249,6 +272,49 @@ class MultiAgentBehaviorEvaluator:
                     False,
                 )
             ),
+            "step_attempt_counts": {
+                result.step_id: int(
+                    result.metadata.get(
+                        "scheduler_attempt_count",
+                        0,
+                    )
+                )
+                for result in task_result.task_results
+            },
+            "timed_out_step_ids": [
+                result.step_id
+                for result in task_result.task_results
+                if bool(result.metadata.get("timed_out"))
+            ],
+            "cancelled_worker_step_ids": list(
+                getattr(
+                    runtime.worker,
+                    "cancelled_step_ids",
+                    [],
+                )
+            ),
+            "worker_step_trace_statuses": {
+                str(item.get("step_id")): str(item.get("status"))
+                for item in worker_step_trace
+            },
+            "worker_step_trace_batch_numbers": {
+                str(item.get("step_id")): list(
+                    item.get("batch_numbers", [])
+                )
+                for item in worker_step_trace
+            },
+            "cancellation_response_latency_recorded": (
+                isinstance(
+                    task_result.metadata.get(
+                        "cancellation_response_latency_ms"
+                    ),
+                    (int, float),
+                )
+                and task_result.metadata[
+                    "cancellation_response_latency_ms"
+                ] >= 0
+            ),
+            "runtime_error_message": None,
         }
 
     def _build_checks(

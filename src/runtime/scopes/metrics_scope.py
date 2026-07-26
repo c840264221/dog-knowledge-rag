@@ -30,6 +30,12 @@ class MetricsScope(BaseScope):
                 "tool_latency": 0,
 
                 "llm_latency": 0,
+
+                "llm_input_tokens": 0,
+
+                "llm_output_tokens": 0,
+
+                "llm_total_tokens": 0,
             }
         )
 

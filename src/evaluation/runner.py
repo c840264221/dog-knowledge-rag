@@ -12,6 +12,7 @@ from src.evaluation.evaluators import (
     MainGraphBehaviorEvaluator,
     MemoryRecallBehaviorEvaluator,
     MultiAgentBehaviorEvaluator,
+    MultiAgentOrchestrationEvaluator,
     RagRetrievalBehaviorEvaluator,
     RootRouteEvaluator,
     ToolAgentBehaviorEvaluator,
@@ -130,6 +131,13 @@ CORE_EVALUATION_TARGETS = (
             "evaluation/datasets/multi_agent_behavior_cases.json"
         ),
         evaluator_factory=MultiAgentBehaviorEvaluator,
+    ),
+    EvaluationTarget(
+        category="multi_agent_orchestration",
+        dataset_path=Path(
+            "evaluation/datasets/multi_agent_orchestration_cases.json"
+        ),
+        evaluator_factory=MultiAgentOrchestrationEvaluator,
     ),
 )
 
