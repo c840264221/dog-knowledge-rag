@@ -37,6 +37,14 @@ SUPPORTED_EXPECTED_FIELDS = {
     "tool_answer_call_count",
     "tool_parser_call_count",
     "tool_executor_call_count",
+    "multi_agent_task_status",
+    "multi_agent_plan_status",
+    "routed_multi_agent_action",
+    "state_multi_agent_resume_action",
+    "waiting_user_input",
+    "multi_agent_planner_call_count",
+    "multi_agent_aggregator_call_count",
+    "multi_agent_worker_call_counts",
     "required_state_fields",
 }
 
@@ -221,6 +229,42 @@ class MainGraphBehaviorEvaluator:
             or result_state.get("answer")
             or ""
         )
+        multi_agent_result = result_state.get(
+            "multi_agent_task_result",
+            {},
+        )
+        normalized_multi_agent_result = (
+            dict(multi_agent_result)
+            if isinstance(multi_agent_result, Mapping)
+            else {}
+        )
+        multi_agent_plan = normalized_multi_agent_result.get("plan", {})
+        normalized_multi_agent_plan = (
+            dict(multi_agent_plan)
+            if isinstance(multi_agent_plan, Mapping)
+            else {}
+        )
+        route_hints = normalized_route_decision.get("hints", {})
+        normalized_route_hints = (
+            dict(route_hints)
+            if isinstance(route_hints, Mapping)
+            else {}
+        )
+        planning_provider = getattr(
+            runtime,
+            "multi_agent_planning_provider",
+            None,
+        )
+        aggregation_provider = getattr(
+            runtime,
+            "multi_agent_aggregation_provider",
+            None,
+        )
+        multi_agent_worker = getattr(
+            runtime,
+            "multi_agent_worker",
+            None,
+        )
 
         return {
             "route": normalized_route_decision.get("route"),
@@ -249,6 +293,36 @@ class MainGraphBehaviorEvaluator:
             "dog_reranker_call_count": len(runtime.dog_reranker.calls),
             "tool_parser_call_count": len(runtime.tool_parser.inputs),
             "tool_executor_call_count": len(runtime.tool_executor.calls),
+            "multi_agent_task_status": normalized_multi_agent_result.get(
+                "status"
+            ),
+            "multi_agent_plan_status": normalized_multi_agent_plan.get(
+                "status"
+            ),
+            "routed_multi_agent_action": normalized_route_hints.get(
+                "multi_agent_resume_action"
+            ),
+            "state_multi_agent_resume_action": result_state.get(
+                "multi_agent_resume_action"
+            ),
+            "waiting_user_input": bool(
+                result_state.get("waiting_user_input", False)
+            ),
+            "multi_agent_planner_call_count": (
+                len(planning_provider.prompts)
+                if planning_provider is not None
+                else 0
+            ),
+            "multi_agent_aggregator_call_count": (
+                len(aggregation_provider.prompts)
+                if aggregation_provider is not None
+                else 0
+            ),
+            "multi_agent_worker_call_counts": (
+                dict(multi_agent_worker.call_counts)
+                if multi_agent_worker is not None
+                else {}
+            ),
             "state_fields_present": sorted(result_state.keys()),
         }
 

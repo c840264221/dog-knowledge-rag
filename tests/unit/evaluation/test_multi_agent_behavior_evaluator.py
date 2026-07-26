@@ -60,6 +60,48 @@ class FakeMultiAgentRuntime:
         return self.task_result
 
 
+class FakeFailedMultiAgentRuntime:
+    """
+    为预期运行时错误评估提供固定异常。
+
+    参数含义：
+        error_message:
+            run 方法需要抛出的固定错误信息。
+
+    返回值含义：
+        FakeFailedMultiAgentRuntime:
+            具有异步 run 方法的失败场景对象。
+    """
+
+    def __init__(self, error_message: str) -> None:
+        """
+        初始化固定失败场景。
+
+        参数含义：
+            error_message:
+                run 方法抛出的错误信息。
+
+        返回值含义：
+            None。
+        """
+
+        self.error_message = error_message
+
+    async def run(self) -> MultiAgentTaskResult:
+        """
+        抛出预设运行时错误。
+
+        参数含义：
+            无。
+
+        返回值含义：
+            MultiAgentTaskResult:
+                本方法不会正常返回，而是抛出 ValueError。
+        """
+
+        raise ValueError(self.error_message)
+
+
 def build_completed_task_result() -> MultiAgentTaskResult:
     """
     构建评估器单元测试使用的调度完成结果。
@@ -98,6 +140,20 @@ def build_completed_task_result() -> MultiAgentTaskResult:
         ],
         metadata={
             "ready_batches": [["step_one"]],
+            "worker_step_trace": [
+                {
+                    "step_id": "step_one",
+                    "step_title": "步骤一",
+                    "assigned_agent": "worker_agent",
+                    "depends_on": [],
+                    "batch_numbers": [1],
+                    "status": "completed",
+                    "attempt_count": 1,
+                    "latency_ms": 1.0,
+                    "timed_out": False,
+                    "cancelled": False,
+                }
+            ],
             "awaiting_result_aggregation": True,
         },
     )
@@ -128,6 +184,12 @@ async def test_multi_agent_evaluator_should_build_passed_result() -> None:
             "plan_status": "completed",
             "ready_batches": [["step_one"]],
             "worker_call_counts": {"step_one": 1},
+            "worker_step_trace_statuses": {
+                "step_one": "completed",
+            },
+            "worker_step_trace_batch_numbers": {
+                "step_one": [1],
+            },
         },
     )
 
@@ -204,6 +266,45 @@ async def test_multi_agent_evaluator_should_reject_unknown_field() -> None:
 
     assert result.passed is False
     assert "不支持的 expected 字段" in str(result.error_message)
+
+
+@pytest.mark.asyncio
+async def test_multi_agent_evaluator_should_compare_expected_runtime_error() -> None:
+    """
+    测试恢复校验类预期异常可以转换成结构化检查结果。
+
+    功能：
+        只有黄金用例明确声明 runtime_error_message 时，评估器才把运行异常
+        当作可比较行为；未声明的异常仍然是评估执行错误。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    expected_error = "恢复任务仍缺少等待步骤的用户回答"
+    runtime = FakeFailedMultiAgentRuntime(expected_error)
+    evaluator = MultiAgentBehaviorEvaluator(
+        scenario_runtime_builder=lambda eval_case: runtime,
+    )
+    eval_case = AgentEvaluationCase(
+        case_id="multi_agent_eval_expected_error_001",
+        category="multi_agent_behavior",
+        question="尝试恢复缺少回答的任务",
+        expected={
+            "runtime_error_message": expected_error,
+        },
+    )
+
+    result = await evaluator.evaluate_case(eval_case)
+
+    assert result.passed is True
+    assert result.error_message is None
+    assert result.output == {
+        "runtime_error_message": expected_error,
+    }
 
 
 def test_multi_agent_runtime_type_is_exported() -> None:

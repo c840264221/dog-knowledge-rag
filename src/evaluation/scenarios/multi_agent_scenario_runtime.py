@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -56,6 +57,61 @@ class EvaluationMultiAgentWorker:
         }
         self.call_counts: dict[str, int] = {}
         self.calls: list[dict[str, Any]] = []
+        self.cancelled_step_ids: list[str] = []
+        self._started_events: dict[str, asyncio.Event] = {}
+
+    async def wait_until_started(
+        self,
+        step_ids: list[str],
+        *,
+        timeout_seconds: float,
+    ) -> None:
+        """
+        等待指定评估步骤全部真正进入 Worker。
+
+        功能：
+            为运行中取消场景提供确定同步点，避免测试使用固定 sleep 猜测
+            Worker 是否已经启动。
+
+        参数含义：
+            step_ids:
+                必须已经进入 Worker 的步骤编号列表。
+            timeout_seconds:
+                等待启动信号的最长秒数，超时会抛出 TimeoutError。
+
+        返回值含义：
+            None:
+                全部步骤发出启动信号后结束等待。
+        """
+
+        await asyncio.wait_for(
+            asyncio.gather(
+                *[
+                    self._started_event(step_id).wait()
+                    for step_id in step_ids
+                ]
+            ),
+            timeout=timeout_seconds,
+        )
+
+    def _started_event(self, step_id: str) -> asyncio.Event:
+        """
+        获取或创建某个评估步骤的启动事件。
+
+        参数含义：
+            step_id:
+                需要观察启动状态的步骤编号。
+
+        返回值含义：
+            asyncio.Event:
+                当前步骤在评估事件循环中共享的启动通知对象。
+        """
+
+        event = self._started_events.get(step_id)
+        if event is None:
+            event = asyncio.Event()
+            self._started_events[step_id] = event
+        return event
 
     async def __call__(
         self,
@@ -98,6 +154,16 @@ class EvaluationMultiAgentWorker:
         outcome_index = min(call_number - 1, len(outcomes) - 1)
         outcome = str(outcomes[outcome_index])
 
+        if outcome in {"timeout", "wait_for_cancellation"}:
+            self._started_event(step.step_id).set()
+            try:
+                # 该 Event 永远不会主动打开，只能由 Scheduler 的超时或
+                # 取消路径终止当前 Worker Task。
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                if outcome == "wait_for_cancellation":
+                    self.cancelled_step_ids.append(step.step_id)
+                raise
         if outcome == "error":
             raise RuntimeError(
                 str(
@@ -185,6 +251,13 @@ class MultiAgentScenarioRuntime:
             可选取消令牌；取消用例会在执行前打开信号。
         resume_user_inputs:
             等待输入用例恢复时使用的 step_id 到回答映射。
+        attempt_resume:
+            是否在恢复输入为空时仍然调用 Scheduler.resume，用于验证缺失
+            回答的校验分支。
+        cancel_after_started_step_ids:
+            这些步骤真正启动后触发运行中取消；空列表表示不主动取消。
+        cancellation_wait_timeout_seconds:
+            等待 Worker 启动信号的最长秒数。
 
     返回值含义：
         MultiAgentScenarioRuntime:
@@ -197,6 +270,9 @@ class MultiAgentScenarioRuntime:
     multi_agent_task_id: str
     cancellation_token: MultiAgentTaskCancellationToken | None
     resume_user_inputs: dict[str, Any]
+    attempt_resume: bool
+    cancel_after_started_step_ids: list[str]
+    cancellation_wait_timeout_seconds: float
 
     async def run(self) -> MultiAgentTaskResult:
         """
@@ -210,14 +286,17 @@ class MultiAgentScenarioRuntime:
                 首次调度或补充用户输入后得到的最新标准任务结果。
         """
 
-        result = await self.scheduler.execute(
-            self.plan,
-            collaboration_id=self.multi_agent_task_id,
-            cancellation_token=self.cancellation_token,
-        )
+        if self.cancel_after_started_step_ids:
+            result = await self._run_with_runtime_cancellation()
+        else:
+            result = await self.scheduler.execute(
+                self.plan,
+                collaboration_id=self.multi_agent_task_id,
+                cancellation_token=self.cancellation_token,
+            )
         if (
             result.status == "awaiting_input"
-            and self.resume_user_inputs
+            and (self.resume_user_inputs or self.attempt_resume)
         ):
             result = await self.scheduler.resume(
                 result,
@@ -225,6 +304,49 @@ class MultiAgentScenarioRuntime:
                 cancellation_token=self.cancellation_token,
             )
         return result
+
+    async def _run_with_runtime_cancellation(
+        self,
+    ) -> MultiAgentTaskResult:
+        """
+        在指定 Worker 启动后触发整次任务取消。
+
+        功能：
+            先把真实 Scheduler 放入后台 Task，等待确定性 Worker 发出启动
+            信号，再打开共享取消令牌并等待 Scheduler 完成清理。
+
+        参数含义：
+            无。
+
+        返回值含义：
+            MultiAgentTaskResult:
+                真实 Scheduler 构造的 cancelled 标准任务结果。
+        """
+
+        if self.cancellation_token is None:
+            raise ValueError("运行中取消场景缺少 cancellation_token")
+
+        execution_task = asyncio.create_task(
+            self.scheduler.execute(
+                self.plan,
+                collaboration_id=self.multi_agent_task_id,
+                cancellation_token=self.cancellation_token,
+            )
+        )
+        try:
+            await self.worker.wait_until_started(
+                self.cancel_after_started_step_ids,
+                timeout_seconds=self.cancellation_wait_timeout_seconds,
+            )
+            self.cancellation_token.cancel()
+            return await execution_task
+        finally:
+            if not execution_task.done():
+                execution_task.cancel()
+            await asyncio.gather(
+                execution_task,
+                return_exceptions=True,
+            )
 
 
 def build_multi_agent_scenario_runtime(
@@ -281,8 +403,25 @@ def build_multi_agent_scenario_runtime(
     )
 
     cancellation_token: MultiAgentTaskCancellationToken | None = None
-    if bool(eval_case.input_state.get("pre_cancelled")):
+    raw_cancel_after_started_step_ids = eval_case.input_state.get(
+        "cancel_after_started_step_ids",
+        [],
+    )
+    if not isinstance(raw_cancel_after_started_step_ids, list):
+        raise ValueError("cancel_after_started_step_ids 必须是步骤编号列表")
+    cancel_after_started_step_ids = [
+        str(step_id)
+        for step_id in raw_cancel_after_started_step_ids
+    ]
+    if (
+        bool(eval_case.input_state.get("pre_cancelled"))
+        or cancel_after_started_step_ids
+    ):
         cancellation_token = MultiAgentTaskCancellationToken()
+    if (
+        cancellation_token is not None
+        and bool(eval_case.input_state.get("pre_cancelled"))
+    ):
         cancellation_token.cancel()
 
     raw_resume_inputs = eval_case.input_state.get(
@@ -299,4 +438,14 @@ def build_multi_agent_scenario_runtime(
         multi_agent_task_id=f"evaluation_multi_agent_{eval_case.case_id}",
         cancellation_token=cancellation_token,
         resume_user_inputs=dict(raw_resume_inputs),
+        attempt_resume=bool(
+            eval_case.input_state.get("attempt_resume")
+        ),
+        cancel_after_started_step_ids=cancel_after_started_step_ids,
+        cancellation_wait_timeout_seconds=float(
+            eval_case.input_state.get(
+                "cancellation_wait_timeout_seconds",
+                1.0,
+            )
+        ),
     )

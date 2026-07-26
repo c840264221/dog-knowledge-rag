@@ -290,6 +290,7 @@ def test_core_and_full_targets_should_have_clear_dependency_boundary() -> None:
 
     assert "rag_retrieval_behavior" not in core_categories
     assert "multi_agent_behavior" in core_categories
+    assert "multi_agent_orchestration" in core_categories
     assert full_categories == core_categories | {"rag_retrieval_behavior"}
     assert DEFAULT_EVALUATION_TARGETS == FULL_EVALUATION_TARGETS
 
@@ -300,4 +301,12 @@ def test_core_and_full_targets_should_have_clear_dependency_boundary() -> None:
     )
     assert multi_agent_target.dataset_path == Path(
         "evaluation/datasets/multi_agent_behavior_cases.json"
+    )
+    orchestration_target = next(
+        target
+        for target in CORE_EVALUATION_TARGETS
+        if target.category == "multi_agent_orchestration"
+    )
+    assert orchestration_target.dataset_path == Path(
+        "evaluation/datasets/multi_agent_orchestration_cases.json"
     )

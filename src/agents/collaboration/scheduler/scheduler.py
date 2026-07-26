@@ -104,6 +104,7 @@ class MultiAgentTaskCancellationToken:
     def __init__(self) -> None:
         self._cancelled_event = asyncio.Event()
         self._cancelled = False
+        self._cancel_requested_at: float | None = None
         self._event_loop: asyncio.AbstractEventLoop | None = None
         self._lock = Lock()
 
@@ -120,6 +121,22 @@ class MultiAgentTaskCancellationToken:
         with self._lock:
             return self._cancelled
 
+    @property
+    def cancel_requested_at(self) -> float | None:
+        """
+        返回第一次收到取消请求时的单调时钟时间点。
+
+        功能：
+            为 Scheduler 计算取消请求到任务完成清理之间的响应耗时。
+
+        返回值含义：
+            float | None:
+                cancel 第一次被调用时的 perf_counter 值；尚未取消时为 None。
+        """
+
+        with self._lock:
+            return self._cancel_requested_at
+
     def cancel(self) -> None:
         """
         发出取消请求并唤醒正在等待该信号的 Scheduler。
@@ -129,7 +146,9 @@ class MultiAgentTaskCancellationToken:
         """
 
         with self._lock:
-            self._cancelled = True
+            if not self._cancelled:
+                self._cancelled = True
+                self._cancel_requested_at = time.perf_counter()
             event_loop = self._event_loop
 
         # UI 和 Worker 可能由不同线程中的事件循环驱动。已经有等待者时，
@@ -396,6 +415,7 @@ class MultiAgentTaskScheduler:
                     "step_timeout_seconds": self.step_timeout_seconds,
                     "maximum_step_attempts": self.maximum_step_attempts,
                 },
+                cancellation_token=cancellation_token,
             )
 
         if plan.status == "awaiting_input" or plan.requires_user_input:
@@ -411,6 +431,11 @@ class MultiAgentTaskScheduler:
                 metadata={
                     "scheduler": type(self).__name__,
                     "ready_batches": [],
+                    "worker_step_trace": _build_worker_step_trace(
+                        plan=awaiting_plan,
+                        results_by_step_id={},
+                        ready_batches=[],
+                    ),
                     "step_timeout_seconds": self.step_timeout_seconds,
                     "maximum_step_attempts": self.maximum_step_attempts,
                 },
@@ -604,6 +629,7 @@ class MultiAgentTaskScheduler:
                     results_by_step_id=results_by_step_id,
                     ready_batches=ready_batches,
                     base_metadata=base_metadata,
+                    cancellation_token=cancellation_token,
                 )
 
             skipped_step_ids = _skip_steps_with_blocking_dependencies(
@@ -700,6 +726,7 @@ class MultiAgentTaskScheduler:
                     results_by_step_id=results_by_step_id,
                     ready_batches=ready_batches,
                     base_metadata=base_metadata,
+                    cancellation_token=cancellation_token,
                 )
 
             awaiting_results = [
@@ -769,6 +796,11 @@ class MultiAgentTaskScheduler:
                 **base_metadata,
                 "scheduler": type(self).__name__,
                 "ready_batches": ready_batches,
+                "worker_step_trace": _build_worker_step_trace(
+                    plan=updated_plan,
+                    results_by_step_id=results_by_step_id,
+                    ready_batches=ready_batches,
+                ),
                 "awaiting_result_aggregation": task_status == "running",
             },
         )
@@ -1056,6 +1088,7 @@ def _build_cancelled_task_result(
     results_by_step_id: Mapping[str, AgentTaskResult],
     ready_batches: list[list[str]],
     base_metadata: Mapping[str, Any],
+    cancellation_token: MultiAgentTaskCancellationToken | None,
 ) -> MultiAgentTaskResult:
     """
     构建整次多 Agent 任务取消后的标准结果。
@@ -1075,6 +1108,8 @@ def _build_cancelled_task_result(
             取消前实际启动过的步骤批次。
         base_metadata:
             需要继续保留的任务扩展信息。
+        cancellation_token:
+            收到取消请求的共享令牌，用于计算取消响应耗时。
 
     返回值含义：
         MultiAgentTaskResult:
@@ -1108,6 +1143,14 @@ def _build_cancelled_task_result(
         cancelled_results[step.step_id]
         for step in plan.steps
     ]
+    cancellation_response_latency_ms = (
+        _build_cancellation_response_latency_ms(cancellation_token)
+    )
+    worker_step_trace = _build_worker_step_trace(
+        plan=updated_plan,
+        results_by_step_id=cancelled_results,
+        ready_batches=ready_batches,
+    )
     _log_scheduler_event(
         level="info",
         event="multi_agent_task_cancelled",
@@ -1124,6 +1167,9 @@ def _build_cancelled_task_result(
                 for result in ordered_results
                 if result.status == "skipped"
             ],
+            "cancellation_response_latency_ms": (
+                cancellation_response_latency_ms
+            ),
         },
     )
     return MultiAgentTaskResult(
@@ -1136,10 +1182,98 @@ def _build_cancelled_task_result(
             **base_metadata,
             "scheduler": "MultiAgentTaskScheduler",
             "ready_batches": ready_batches,
+            "worker_step_trace": worker_step_trace,
             "cancellation_requested": True,
+            "cancellation_response_latency_ms": (
+                cancellation_response_latency_ms
+            ),
             "awaiting_result_aggregation": False,
         },
     )
+
+
+def _build_cancellation_response_latency_ms(
+    cancellation_token: MultiAgentTaskCancellationToken | None,
+) -> float | None:
+    """
+    计算取消请求到 Scheduler 构造取消结果之间的响应耗时。
+
+    参数含义：
+        cancellation_token:
+            保存首次取消请求时间点的共享令牌。
+
+    返回值含义：
+        float | None:
+            非负毫秒耗时；没有可用取消时间点时返回 None。
+    """
+
+    if cancellation_token is None:
+        return None
+    requested_at = cancellation_token.cancel_requested_at
+    if requested_at is None:
+        return None
+    return round(max(0.0, (time.perf_counter() - requested_at) * 1000), 3)
+
+
+def _build_worker_step_trace(
+    *,
+    plan: AgentTaskPlan,
+    results_by_step_id: Mapping[str, AgentTaskResult],
+    ready_batches: list[list[str]],
+) -> list[dict[str, Any]]:
+    """
+    构建按计划顺序排列的 Worker 步骤执行轨迹。
+
+    功能：
+        把计划、实际启动批次和最终步骤结果整理成精简结构，方便 UI、日志
+        和评估直接观察每个步骤由谁执行、执行几次、耗时多久以及为何结束。
+
+    参数含义：
+        plan:
+            当前最新任务计划，用于读取步骤名称、Agent、依赖和最终状态。
+        results_by_step_id:
+            已经产生的步骤结果，包含耗时、尝试次数和异常标记。
+        ready_batches:
+            Scheduler 实际启动过的步骤批次；恢复步骤可能出现多次。
+
+    返回值含义：
+        list[dict[str, Any]]:
+            与计划步骤顺序一致的精简 Worker 轨迹列表。
+    """
+
+    batch_numbers_by_step_id: dict[str, list[int]] = {}
+    for batch_number, step_ids in enumerate(ready_batches, start=1):
+        for step_id in step_ids:
+            batch_numbers_by_step_id.setdefault(step_id, []).append(
+                batch_number
+            )
+
+    trace: list[dict[str, Any]] = []
+    for step in plan.steps:
+        result = results_by_step_id.get(step.step_id)
+        result_metadata = result.metadata if result is not None else {}
+        trace.append(
+            {
+                "step_id": step.step_id,
+                "step_title": step.title,
+                "assigned_agent": step.assigned_agent,
+                "depends_on": list(step.depends_on),
+                "batch_numbers": batch_numbers_by_step_id.get(
+                    step.step_id,
+                    [],
+                ),
+                "status": result.status if result is not None else step.status,
+                "attempt_count": int(
+                    result_metadata.get("scheduler_attempt_count", 0) or 0
+                ),
+                "latency_ms": (
+                    result.latency_ms if result is not None else None
+                ),
+                "timed_out": bool(result_metadata.get("timed_out")),
+                "cancelled": bool(result_metadata.get("cancelled")),
+            }
+        )
+    return trace
 
 
 def _skip_steps_with_blocking_dependencies(
@@ -1401,6 +1535,11 @@ def _build_awaiting_input_result(
             **base_metadata,
             "scheduler": "MultiAgentTaskScheduler",
             "ready_batches": ready_batches,
+            "worker_step_trace": _build_worker_step_trace(
+                plan=updated_plan,
+                results_by_step_id=results_by_step_id,
+                ready_batches=ready_batches,
+            ),
             "awaiting_step_ids": awaiting_step_ids,
             "clarification_prompt": (
                 first_awaiting_result.clarification_prompt

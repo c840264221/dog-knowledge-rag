@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Mapping
 from typing import Any, NoReturn
 from uuid import uuid4
@@ -39,15 +40,27 @@ class MultiAgentOrchestrationError(RuntimeError):
             发生异常的阶段，例如 planning、scheduling 或 aggregation。
         original_error:
             该阶段捕获到的原始异常。
+        stage_metrics:
+            失败前已完成阶段和当前失败阶段的可观测指标。
 
     返回值含义：
         MultiAgentOrchestrationError:
-            带失败阶段和原始异常的统一编排异常。
+            带失败阶段、原始异常和阶段指标的统一编排异常。
     """
 
-    def __init__(self, stage: str, original_error: Exception) -> None:
+    def __init__(
+        self,
+        stage: str,
+        original_error: Exception,
+        *,
+        stage_metrics: list[dict[str, Any]] | None = None,
+    ) -> None:
         self.stage = stage
         self.original_error = original_error
+        self.stage_metrics = list(stage_metrics or [])
+        self.active_latency_ms = _sum_stage_latency_ms(
+            self.stage_metrics
+        )
         super().__init__(
             f"多 Agent 任务在 {stage} 阶段失败: {original_error}"
         )
@@ -138,6 +151,7 @@ class MultiAgentOrchestrator:
             raise ValueError("multi_agent_task_id 不能为空")
 
         visited_stages: list[str] = []
+        stage_metrics: list[dict[str, Any]] = []
         _log_orchestration_event(
             level="info",
             event="multi_agent_orchestration_started",
@@ -147,6 +161,7 @@ class MultiAgentOrchestrator:
             },
         )
 
+        stage_started_at = time.perf_counter()
         try:
             plan = await self.planner.create_plan(
                 normalized_objective,
@@ -158,13 +173,23 @@ class MultiAgentOrchestrator:
                 context=context,
             )
             visited_stages.append("planning")
+            stage_metrics.append(
+                _build_stage_metric(
+                    stage="planning",
+                    status="completed",
+                    started_at=stage_started_at,
+                )
+            )
         except Exception as exc:
             _raise_orchestration_error(
                 stage="planning",
                 multi_agent_task_id=resolved_task_id,
                 error=exc,
+                stage_metrics=stage_metrics,
+                stage_started_at=stage_started_at,
             )
 
+        stage_started_at = time.perf_counter()
         try:
             scheduled_result = await self.scheduler.execute(
                 plan,
@@ -172,11 +197,20 @@ class MultiAgentOrchestrator:
                 cancellation_token=cancellation_token,
             )
             visited_stages.append("scheduling")
+            stage_metrics.append(
+                _build_stage_metric(
+                    stage="scheduling",
+                    status="completed",
+                    started_at=stage_started_at,
+                )
+            )
         except Exception as exc:
             _raise_orchestration_error(
                 stage="scheduling",
                 multi_agent_task_id=resolved_task_id,
                 error=exc,
+                stage_metrics=stage_metrics,
+                stage_started_at=stage_started_at,
             )
 
         if scheduled_result.status in {
@@ -187,6 +221,7 @@ class MultiAgentOrchestrator:
             final_result = _attach_orchestration_metadata(
                 task_result=scheduled_result,
                 visited_stages=visited_stages,
+                stage_metrics=stage_metrics,
             )
             _log_orchestration_finished(final_result)
             return final_result
@@ -199,23 +234,35 @@ class MultiAgentOrchestrator:
                     "调度器返回了无法继续处理的状态: "
                     f"{scheduled_result.status}"
                 ),
+                stage_metrics=stage_metrics,
             )
 
+        stage_started_at = time.perf_counter()
         try:
             aggregated_result = await self.result_aggregator.aggregate(
                 scheduled_result
             )
             visited_stages.append("aggregation")
+            stage_metrics.append(
+                _build_stage_metric(
+                    stage="aggregation",
+                    status="completed",
+                    started_at=stage_started_at,
+                )
+            )
         except Exception as exc:
             _raise_orchestration_error(
                 stage="aggregation",
                 multi_agent_task_id=resolved_task_id,
                 error=exc,
+                stage_metrics=stage_metrics,
+                stage_started_at=stage_started_at,
             )
 
         final_result = _attach_orchestration_metadata(
             task_result=aggregated_result,
             visited_stages=visited_stages,
+            stage_metrics=stage_metrics,
         )
         _log_orchestration_finished(final_result)
         return final_result
@@ -254,6 +301,15 @@ class MultiAgentOrchestrator:
         visited_stages = list(
             orchestration_metadata.get("visited_stages", [])
         )
+        stage_metrics = [
+            dict(metric)
+            for metric in orchestration_metadata.get(
+                "stage_metrics",
+                [],
+            )
+            if isinstance(metric, Mapping)
+        ]
+        stage_started_at = time.perf_counter()
         try:
             scheduled_result = await self.scheduler.resume(
                 task_result,
@@ -261,11 +317,20 @@ class MultiAgentOrchestrator:
                 cancellation_token=cancellation_token,
             )
             visited_stages.append("resume_scheduling")
+            stage_metrics.append(
+                _build_stage_metric(
+                    stage="resume_scheduling",
+                    status="completed",
+                    started_at=stage_started_at,
+                )
+            )
         except Exception as exc:
             _raise_orchestration_error(
                 stage="resume_scheduling",
                 multi_agent_task_id=task_result.collaboration_id,
                 error=exc,
+                stage_metrics=stage_metrics,
+                stage_started_at=stage_started_at,
             )
 
         if scheduled_result.status in {
@@ -276,6 +341,7 @@ class MultiAgentOrchestrator:
             final_result = _attach_orchestration_metadata(
                 task_result=scheduled_result,
                 visited_stages=visited_stages,
+                stage_metrics=stage_metrics,
             )
             _log_orchestration_finished(final_result)
             return final_result
@@ -288,23 +354,35 @@ class MultiAgentOrchestrator:
                     "恢复调度返回了无法继续处理的状态: "
                     f"{scheduled_result.status}"
                 ),
+                stage_metrics=stage_metrics,
             )
 
+        stage_started_at = time.perf_counter()
         try:
             aggregated_result = await self.result_aggregator.aggregate(
                 scheduled_result
             )
             visited_stages.append("aggregation")
+            stage_metrics.append(
+                _build_stage_metric(
+                    stage="aggregation",
+                    status="completed",
+                    started_at=stage_started_at,
+                )
+            )
         except Exception as exc:
             _raise_orchestration_error(
                 stage="aggregation",
                 multi_agent_task_id=task_result.collaboration_id,
                 error=exc,
+                stage_metrics=stage_metrics,
+                stage_started_at=stage_started_at,
             )
 
         final_result = _attach_orchestration_metadata(
             task_result=aggregated_result,
             visited_stages=visited_stages,
+            stage_metrics=stage_metrics,
         )
         _log_orchestration_finished(final_result)
         return final_result
@@ -355,6 +433,7 @@ def _attach_orchestration_metadata(
     *,
     task_result: MultiAgentTaskResult,
     visited_stages: list[str],
+    stage_metrics: list[dict[str, Any]],
 ) -> MultiAgentTaskResult:
     """
     给任务结果补充实际经过的编排阶段。
@@ -368,6 +447,8 @@ def _attach_orchestration_metadata(
             当前阶段产生的多 Agent 任务结果。
         visited_stages:
             本次任务实际完成的阶段名称列表。
+        stage_metrics:
+            各编排阶段的名称、状态和执行耗时记录。
 
     返回值含义：
         MultiAgentTaskResult:
@@ -380,6 +461,11 @@ def _attach_orchestration_metadata(
         "orchestration": {
             "orchestrator": "MultiAgentOrchestrator",
             "visited_stages": list(visited_stages),
+            "stage_metrics": [
+                dict(metric)
+                for metric in stage_metrics
+            ],
+            "active_latency_ms": _sum_stage_latency_ms(stage_metrics),
         },
     }
     return MultiAgentTaskResult.model_validate(result_data)
@@ -390,6 +476,8 @@ def _raise_orchestration_error(
     stage: str,
     multi_agent_task_id: str,
     error: Exception,
+    stage_metrics: list[dict[str, Any]] | None = None,
+    stage_started_at: float | None = None,
 ) -> NoReturn:
     """
     记录失败阶段并抛出统一编排异常。
@@ -405,12 +493,28 @@ def _raise_orchestration_error(
             发生失败的整次多 Agent 任务编号。
         error:
             当前阶段捕获到的原始异常。
+        stage_metrics:
+            失败前已经完成的阶段指标。
+        stage_started_at:
+            当前失败阶段的高精度开始时间；提供时会记录失败阶段耗时。
 
     返回值含义：
         NoReturn:
             本函数总会抛出异常，不会正常返回。
     """
 
+    resolved_stage_metrics = [
+        dict(metric)
+        for metric in (stage_metrics or [])
+    ]
+    if stage_started_at is not None:
+        resolved_stage_metrics.append(
+            _build_stage_metric(
+                stage=stage,
+                status="failed",
+                started_at=stage_started_at,
+            )
+        )
     _log_orchestration_event(
         level="error",
         event="multi_agent_orchestration_failed",
@@ -419,9 +523,78 @@ def _raise_orchestration_error(
             "failed_stage": stage,
             "error_type": type(error).__name__,
             "error_message": str(error),
+            "stage_metrics": resolved_stage_metrics,
+            "active_latency_ms": _sum_stage_latency_ms(
+                resolved_stage_metrics
+            ),
         },
     )
-    raise MultiAgentOrchestrationError(stage, error) from error
+    raise MultiAgentOrchestrationError(
+        stage,
+        error,
+        stage_metrics=resolved_stage_metrics,
+    ) from error
+
+
+def _build_stage_metric(
+    *,
+    stage: str,
+    status: str,
+    started_at: float,
+) -> dict[str, Any]:
+    """
+    构建一条多 Agent 编排阶段指标。
+
+    功能：
+        使用高精度计时器计算阶段执行耗时，并统一保存阶段名称、结束状态
+        和非负毫秒值。
+
+    参数含义：
+        stage:
+            planning、scheduling、resume_scheduling 或 aggregation。
+        status:
+            completed 或 failed。
+        started_at:
+            time.perf_counter 返回的阶段开始时间。
+
+    返回值含义：
+        dict[str, Any]:
+            可以写入任务 metadata 或编排异常的阶段指标。
+    """
+
+    return {
+        "stage": stage,
+        "status": status,
+        "latency_ms": max(
+            0.0,
+            (time.perf_counter() - started_at) * 1000,
+        ),
+    }
+
+
+def _sum_stage_latency_ms(
+    stage_metrics: list[dict[str, Any]],
+) -> float:
+    """
+    汇总多 Agent 真正执行阶段的累计耗时。
+
+    功能：
+        累加阶段指标中的 latency_ms，不包含等待用户补充信息期间的墙钟
+        时间，因此恢复任务不会把人工等待时间误算为系统处理耗时。
+
+    参数含义：
+        stage_metrics:
+            当前任务已经记录的全部阶段指标。
+
+    返回值含义：
+        float:
+            非负的累计活跃执行毫秒数。
+    """
+
+    return sum(
+        max(0.0, float(metric.get("latency_ms", 0.0)))
+        for metric in stage_metrics
+    )
 
 
 def _log_orchestration_finished(
@@ -461,6 +634,14 @@ def _log_orchestration_finished(
             "visited_stages": orchestration_metadata.get(
                 "visited_stages",
                 [],
+            ),
+            "stage_metrics": orchestration_metadata.get(
+                "stage_metrics",
+                [],
+            ),
+            "active_latency_ms": orchestration_metadata.get(
+                "active_latency_ms",
+                0.0,
             ),
         },
     )
