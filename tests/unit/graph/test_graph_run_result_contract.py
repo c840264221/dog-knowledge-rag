@@ -144,6 +144,7 @@ class FakeGraphApp:
         self.current_state = current_state
         self.resume_events = resume_events or []
         self.received_configs: list[dict[str, Any]] = []
+        self.astream_call_count = 0
 
     async def aget_state(
         self,
@@ -189,6 +190,7 @@ class FakeGraphApp:
                 异步事件流。
         """
 
+        self.astream_call_count += 1
         for event in self.resume_events:
             yield event
 
@@ -466,6 +468,96 @@ async def test_run_main_graph_with_result_should_return_interrupt_result(
     assert result.trace_id == "trace_002"
 
 
+def test_multi_agent_logical_wait_should_return_interrupt_result() -> None:
+    """
+    测试多 Agent 写入 State 的逻辑等待会转换成统一中断结果。
+
+    功能：
+        即使 current_state.next 为空，只要 DogState 明确表示多 Agent 正在
+        等待输入，也不能把本轮误报成 completed。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    current_state = FakeCurrentState(
+        values={
+            "current_agent": "multi_agent",
+            "waiting_user_input": True,
+            "multi_agent_pending_prompt": "请补充狗狗年龄。",
+            "multi_agent_task_result": {
+                "collaboration_id": "multi_agent_task_waiting",
+                "status": "awaiting_input",
+            },
+        }
+    )
+
+    result = graph_run.build_graph_result_from_current_state(
+        current_state=current_state,
+        thread_id="thread_multi_waiting",
+        checkpoint_ns="default",
+        trace_id="trace_multi_waiting",
+    )
+
+    assert isinstance(result, GraphInterruptResult)
+    assert result.prompt == "请补充狗狗年龄。"
+    assert (
+        result.interrupt_type
+        == GraphInterruptType.USER_CLARIFICATION
+    )
+    assert result.metadata["logical_interrupt"] is True
+    assert result.metadata["business_status"] == "awaiting_input"
+    assert result.metadata["state_waiting_user_input"] is True
+    assert result.metadata["waiting_state_consistent"] is True
+    assert (
+        result.metadata["multi_agent_task_id"]
+        == "multi_agent_task_waiting"
+    )
+
+
+def test_multi_agent_result_should_override_stale_waiting_flag() -> None:
+    """
+    测试多 Agent 标准结果可以覆盖未同步的主图等待标记。
+
+    功能：
+        当任务结果已经是 awaiting_input、但 waiting_user_input 仍为 False
+        时，仍返回中断，并通过 metadata 暴露状态不一致。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    current_state = FakeCurrentState(
+        values={
+            "current_agent": "multi_agent",
+            "waiting_user_input": False,
+            "multi_agent_pending_prompt": "请补充狗狗体重。",
+            "multi_agent_task_result": {
+                "collaboration_id": "multi_agent_task_stale_flag",
+                "status": "awaiting_input",
+            },
+        }
+    )
+
+    result = graph_run.build_graph_result_from_current_state(
+        current_state=current_state,
+        thread_id="thread_stale_waiting_flag",
+        checkpoint_ns="default",
+        trace_id="trace_stale_waiting_flag",
+    )
+
+    assert isinstance(result, GraphInterruptResult)
+    assert result.prompt == "请补充狗狗体重。"
+    assert result.metadata["state_waiting_user_input"] is False
+    assert result.metadata["waiting_state_consistent"] is False
+
+
 @pytest.mark.asyncio
 async def test_run_main_graph_with_result_should_return_tool_interrupt_metadata(
     runtime_context: FakeRuntimeContext,
@@ -568,6 +660,152 @@ async def test_run_main_graph_with_result_should_resume_to_final_result(
 
     assert isinstance(result, GraphFinalResult)
     assert result.answer == "已完成工具调用。"
+    assert result.metadata["source"] == "resume_stream_event"
+
+
+@pytest.mark.asyncio
+async def test_multi_agent_logical_resume_should_start_new_graph_turn(
+    runtime_context: FakeRuntimeContext,
+) -> None:
+    """
+    测试多 Agent 逻辑等待不会错误调用原生 Command resume。
+
+    功能：
+        模拟 Planner 等待用户补充信息后调用 API resume；用户回答应作为
+        新一轮 question 进入主图，并携带 Checkpoint 中的暂停任务结果。
+
+    参数含义：
+        runtime_context:
+            测试运行时上下文。
+
+    返回值含义：
+        None。
+    """
+
+    paused_result = MultiAgentTaskResult(
+        collaboration_id="multi_agent_task_logical_resume",
+        plan=AgentTaskPlan(
+            plan_id="logical_resume_plan",
+            objective="制定健康饮食训练方案",
+            steps=[
+                AgentTaskStep(
+                    step_id="step_plan",
+                    title="生成综合方案",
+                    assigned_agent="general_agent",
+                )
+            ],
+            status="awaiting_input",
+            requires_user_input=True,
+            clarification_prompt="请补充狗狗档案。",
+        ),
+        status="awaiting_input",
+        task_results=[],
+        final_answer="请补充狗狗档案。",
+    )
+    app = FakeGraphApp(
+        current_state=FakeCurrentState(
+            values={
+                "multi_agent_task_result": paused_result.model_dump(
+                    mode="python"
+                ),
+                "multi_agent_pending_prompt": "请补充狗狗档案。",
+                "waiting_user_input": True,
+                "final_answer": "请补充狗狗档案。",
+            }
+        )
+    )
+    received_state: dict[str, Any] = {}
+
+    async def logical_resume_stream_runner(
+        **kwargs: Any,
+    ):
+        """记录重新进入主图的 State，并模拟恢复完成。"""
+
+        received_state.update(kwargs["state"])
+        app.current_state = FakeCurrentState(
+            values={
+                "final_answer": "已根据6岁金毛档案生成方案。",
+                "multi_agent_task_result": {
+                    "status": "completed",
+                },
+            }
+        )
+        yield {
+            "multi_agent": {
+                "final_answer": "已根据6岁金毛档案生成方案。",
+            }
+        }
+
+    result = await graph_run.run_main_graph_with_result(
+        question="是一只6岁的金毛，体重30公斤。",
+        thread_id="thread_logical_resume",
+        trace_id="trace_logical_resume",
+        resume_value="是一只6岁的金毛，体重30公斤。",
+        graph_app=app,
+        runtime_context=runtime_context,
+        stream_runner=logical_resume_stream_runner,
+    )
+
+    assert isinstance(result, GraphFinalResult)
+    assert result.answer == "已根据6岁金毛档案生成方案。"
+    assert received_state["question"] == "是一只6岁的金毛，体重30公斤。"
+    assert (
+        received_state["multi_agent_task_result"]["status"]
+        == "awaiting_input"
+    )
+    assert app.astream_call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_resume_multi_agent_logical_wait_should_return_interrupt(
+    runtime_context: FakeRuntimeContext,
+) -> None:
+    """
+    测试恢复事件再次等待输入时仍返回统一中断结果。
+
+    功能：
+        防止恢复执行事件中的 final_answer 提示被提前当成正常完成答案。
+
+    参数含义：
+        runtime_context:
+            测试运行时上下文。
+
+    返回值含义：
+        None。
+    """
+
+    app = FakeGraphApp(
+        current_state=FakeCurrentState(),
+        resume_events=[
+            {
+                "current_agent": "multi_agent",
+                "waiting_user_input": True,
+                "multi_agent_pending_prompt": "还需要补充狗狗体重。",
+                "final_answer": "还需要补充狗狗体重。",
+                "multi_agent_task_result": {
+                    "collaboration_id": "multi_agent_task_resume_wait",
+                    "status": "awaiting_input",
+                },
+            }
+        ],
+    )
+
+    result = await graph_run.run_main_graph_with_result(
+        question="6岁",
+        thread_id="thread_resume_waiting",
+        trace_id="trace_resume_waiting",
+        resume_value="6岁",
+        graph_app=app,
+        runtime_context=runtime_context,
+        stream_runner=fake_stream_runner,
+    )
+
+    assert isinstance(result, GraphInterruptResult)
+    assert result.prompt == "还需要补充狗狗体重。"
+    assert (
+        result.interrupt_type
+        == GraphInterruptType.USER_CLARIFICATION
+    )
     assert result.metadata["source"] == "resume_stream_event"
 
 

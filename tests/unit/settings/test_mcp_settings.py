@@ -10,7 +10,9 @@ from __future__ import annotations
 from src.settings.mcp import McpSettings, SQLiteMcpSettings
 
 
-def test_sqlite_mcp_settings_should_use_safe_defaults() -> None:
+def test_sqlite_mcp_settings_should_use_safe_defaults(
+    monkeypatch,
+) -> None:
     """
     测试 SQLite MCP 配置默认值。
 
@@ -23,6 +25,11 @@ def test_sqlite_mcp_settings_should_use_safe_defaults() -> None:
     返回值：
         None。
     """
+
+    monkeypatch.delenv(
+        "MCP_SQLITE_ALLOWED_DATABASES",
+        raising=False,
+    )
 
     sqlite_settings = SQLiteMcpSettings()
 

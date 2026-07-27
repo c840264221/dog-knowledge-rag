@@ -9,8 +9,6 @@ Smoke Test（冒烟测试）：
 
 supervisor
     -> answer_gen
-    -> supervisor
-    -> finish
     -> END
 
 注意：
@@ -63,7 +61,6 @@ class FakeLLMProvider:
     本测试中 safe_ainvoke 会按顺序返回：
         1. answer_gen
         2. 这是最终回答
-        3. finish
     """
 
     def __init__(
@@ -207,9 +204,7 @@ async def test_general_qa_agent_should_run_minimal_answer_flow_to_finish():
     流程：
         1. supervisor 决策进入 answer_gen
         2. answer_gen 生成最终回答
-        3. answer_gen 回到 supervisor
-        4. supervisor 决策 finish
-        5. Graph 结束
+        3. answer_gen 直接进入 END
 
     参数：
         无。
@@ -223,7 +218,6 @@ async def test_general_qa_agent_should_run_minimal_answer_flow_to_finish():
         outputs=[
             "answer_gen",
             "这是最终回答",
-            "finish",
         ]
     )
 
@@ -248,13 +242,13 @@ async def test_general_qa_agent_should_run_minimal_answer_flow_to_finish():
     )
 
     assert result["answer"] == "这是最终回答"
-    assert result["next_worker"] == "finish"
+    assert result["next_worker"] == "answer_gen"
 
     assert len(
         llm_provider.calls
-    ) == 3
+    ) == 2
 
-    assert checkpoint_provider.manager.save_count == 3
+    assert checkpoint_provider.manager.save_count == 2
 
 
 @pytest.mark.asyncio
@@ -278,7 +272,6 @@ async def test_general_qa_agent_should_build_and_run_without_checkpoint_provider
         outputs=[
             "answer_gen",
             "没有 checkpoint 也能回答",
-            "finish",
         ]
     )
 
@@ -301,8 +294,8 @@ async def test_general_qa_agent_should_build_and_run_without_checkpoint_provider
     )
 
     assert result["answer"] == "没有 checkpoint 也能回答"
-    assert result["next_worker"] == "finish"
+    assert result["next_worker"] == "answer_gen"
 
     assert len(
         llm_provider.calls
-    ) == 3
+    ) == 2
