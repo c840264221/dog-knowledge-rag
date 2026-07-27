@@ -188,6 +188,7 @@ def test_sqlite_mcp_provider_should_return_tool_definitions(
 
 def test_sqlite_mcp_provider_should_accept_settings_values(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """
     测试 SQLite MCP Provider 能接收 settings 配置值。
@@ -203,6 +204,11 @@ def test_sqlite_mcp_provider_should_accept_settings_values(
     返回值：
         None。
     """
+
+    monkeypatch.delenv(
+        "MCP_SQLITE_ALLOWED_DATABASES",
+        raising=False,
+    )
 
     database_path = tmp_path / "dogs.sqlite3"
     create_test_database(
