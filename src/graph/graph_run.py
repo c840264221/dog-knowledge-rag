@@ -456,6 +456,20 @@ async def run_main_graph_with_result(
         )
     )
 
+    if (
+            resolved_resume_value is not None
+            and _has_pending_multi_agent_resume_state(state)
+    ):
+        return await _start_main_graph_with_result(
+            app=app,
+            state=state,
+            config=config,
+            stream_runner=resolved_stream_runner,
+            thread_id=thread_id,
+            checkpoint_ns=resume_checkpoint_ns,
+            trace_id=trace_id,
+        )
+
     if resolved_resume_value is not None:
         return await _resume_main_graph_with_result(
             app=app,
@@ -610,6 +624,35 @@ async def restore_pending_multi_agent_state(
         "已从当前 thread_id 的 Checkpoint 恢复暂停中的多 Agent 任务。"
     )
     return restored_state
+
+
+def _has_pending_multi_agent_resume_state(
+        state: Mapping[str, Any],
+) -> bool:
+    """
+    判断本轮是否应通过新主图输入恢复多 Agent 逻辑等待。
+
+    功能：
+        多 Agent awaiting_input 会写入 Checkpoint 后走到主图 END，不存在
+        LangGraph 原生 interrupt。只要恢复出的标准任务结果仍在等待，就让
+        用户补充内容重新经过语义路由和多 Agent 恢复适配器，而不是调用
+        只适用于原生中断的 Command(resume=...)。
+
+    参数：
+        state:
+            已合并暂停任务白名单字段的本轮主图初始 State。
+
+    返回值：
+        bool:
+            存在合法 awaiting_input 多 Agent 结果时返回 True。
+    """
+
+    raw_task_result = state.get("multi_agent_task_result")
+    return (
+        isinstance(raw_task_result, Mapping)
+        and str(raw_task_result.get("status") or "").strip()
+        == "awaiting_input"
+    )
 
 
 async def run_main_graph_with_stream(
@@ -774,17 +817,27 @@ async def _resume_main_graph_with_result(
             config,
             stream_mode="values",
     ):
+        logical_interrupt = build_multi_agent_interrupt_result_from_state(
+            state=event,
+            thread_id=thread_id,
+            checkpoint_ns=checkpoint_ns,
+            trace_id=trace_id,
+            source="resume_stream_event",
+        )
+        if logical_interrupt is not None:
+            return logical_interrupt
+
         answer = extract_answer_from_state(event)
 
         if answer:
+            metadata = build_graph_business_summary(event)
+            metadata["source"] = "resume_stream_event"
             return build_graph_final_result(
                 answer=answer,
                 thread_id=thread_id,
                 checkpoint_ns=checkpoint_ns,
                 trace_id=trace_id,
-                metadata={
-                    "source": "resume_stream_event",
-                },
+                metadata=metadata,
             )
 
     current = await app.aget_state(
@@ -919,6 +972,16 @@ def build_graph_result_from_current_state(
         current_state=current_state
     )
 
+    logical_interrupt = build_multi_agent_interrupt_result_from_state(
+        state=final_state,
+        thread_id=thread_id,
+        checkpoint_ns=checkpoint_ns,
+        trace_id=trace_id,
+        source="current_state",
+    )
+    if logical_interrupt is not None:
+        return logical_interrupt
+
     write_rag_debug_report_if_enabled(
         state=final_state,
         trace_id=trace_id,
@@ -938,10 +1001,202 @@ def build_graph_result_from_current_state(
         thread_id=thread_id,
         checkpoint_ns=checkpoint_ns,
         trace_id=trace_id,
-        metadata={
-            "source": "current_state",
-        },
+        metadata=build_graph_business_summary(final_state),
     )
+
+
+def build_multi_agent_interrupt_result_from_state(
+        *,
+        state: Mapping[str, Any],
+        thread_id: str,
+        checkpoint_ns: str,
+        trace_id: str | None,
+        source: str,
+) -> GraphInterruptResult | None:
+    """
+    把多 Agent 写入 State 的逻辑等待状态转换成主图中断结果。
+
+    功能：
+        多 Agent 节点当前会把 awaiting_input 写入 DogState 后走到 END，
+        不会产生 LangGraph 原生 interrupt。本函数识别这类逻辑等待，并
+        将它统一转换成 API 和 UI 已支持的 GraphInterruptResult。
+        多 Agent 标准结果是业务状态的权威来源；DogState 中的通用等待
+        标记只用于记录两层状态是否一致，不参与阻断判断。
+
+    参数：
+        state:
+            当前主图 State 字段值。
+        thread_id:
+            后续恢复同一主图线程使用的编号。
+        checkpoint_ns:
+            后续定位检查点使用的命名空间。
+        trace_id:
+            当前请求链路追踪编号。
+        source:
+            当前 State 来自最终快照还是恢复执行事件。
+
+    返回值：
+        GraphInterruptResult | None:
+            多 Agent 正在等待输入时返回中断结果，否则返回 None。
+    """
+
+    if not isinstance(state, Mapping):
+        return None
+
+    raw_task_result = state.get("multi_agent_task_result")
+    if (
+            not isinstance(raw_task_result, Mapping)
+            or str(raw_task_result.get("status") or "").strip()
+            != "awaiting_input"
+    ):
+        return None
+
+    state_waiting_user_input = bool(state.get("waiting_user_input"))
+    prompt = str(
+        state.get("multi_agent_pending_prompt")
+        or state.get("pending_prompt")
+        or raw_task_result.get("final_answer")
+        or "多 Agent 任务正在等待用户补充信息。"
+    ).strip()
+    metadata = build_interrupt_metadata_from_state(state)
+    metadata.update(
+        {
+            "source": source,
+            "logical_interrupt": True,
+            "business_status": "awaiting_input",
+            "state_waiting_user_input": state_waiting_user_input,
+            "waiting_state_consistent": state_waiting_user_input,
+            "multi_agent_task_id": str(
+                raw_task_result.get("collaboration_id") or ""
+            ),
+        }
+    )
+    return GraphInterruptResult(
+        prompt=prompt,
+        thread_id=thread_id,
+        checkpoint_ns=checkpoint_ns,
+        trace_id=trace_id,
+        interrupt_type=GraphInterruptType.USER_CLARIFICATION,
+        metadata=metadata,
+    )
+
+
+def build_graph_business_summary(
+        state: Mapping[str, Any],
+) -> dict[str, Any]:
+    """
+    从主图最终 State 提取可安全向 API 透传的业务结果摘要。
+
+    功能：
+        区分“主图已经执行结束”和“用户业务任务是否成功”。普通 Agent
+        默认返回 completed；多 Agent 结果会透传 completed、partial、
+        failed 或 cancelled，并为失败、取消构建精简结构化原因。
+
+    参数：
+        state:
+            主图执行结束后的最终 State。
+
+    返回值：
+        dict[str, Any]:
+            包含 source、business_status 和可选 business_error 的元数据。
+    """
+
+    summary: dict[str, Any] = {
+        "source": "current_state",
+        "business_status": "completed",
+        "business_error": None,
+    }
+    if not isinstance(state, Mapping):
+        return summary
+
+    raw_task_result = state.get("multi_agent_task_result")
+    if not isinstance(raw_task_result, Mapping) or not raw_task_result:
+        return summary
+
+    raw_status = str(raw_task_result.get("status") or "").strip()
+    if raw_status not in {
+        "completed",
+        "partial",
+        "failed",
+        "cancelled",
+    }:
+        return summary
+
+    summary["business_status"] = raw_status
+    if raw_status == "failed":
+        summary["business_error"] = _build_multi_agent_failure_summary(
+            raw_task_result
+        )
+    elif raw_status == "cancelled":
+        summary["business_error"] = {
+            "code": "MULTI_AGENT_TASK_CANCELLED",
+            "message": str(
+                raw_task_result.get("final_answer")
+                or "多 Agent 任务已取消。"
+            ),
+            "details": {},
+        }
+    return summary
+
+
+def _build_multi_agent_failure_summary(
+        task_result: Mapping[str, Any],
+) -> dict[str, Any]:
+    """
+    构建多 Agent 失败结果的公开结构化摘要。
+
+    功能：
+        扫描步骤结果中的 timed_out 元数据；存在超时步骤时返回专用错误码
+        和步骤级超时详情，否则返回通用多 Agent 任务失败错误。
+
+    参数：
+        task_result:
+            DogState 中保存的可序列化 MultiAgentTaskResult。
+
+    返回值：
+        dict[str, Any]:
+            包含 code、message 和 details 的业务错误摘要。
+    """
+
+    timed_out_steps: list[dict[str, Any]] = []
+    raw_results = task_result.get("task_results", [])
+    if isinstance(raw_results, list):
+        for raw_result in raw_results:
+            if not isinstance(raw_result, Mapping):
+                continue
+            metadata = raw_result.get("metadata", {})
+            if (
+                    not isinstance(metadata, Mapping)
+                    or not bool(metadata.get("timed_out"))
+            ):
+                continue
+            timed_out_steps.append(
+                {
+                    "step_id": str(raw_result.get("step_id") or ""),
+                    "timeout_seconds": metadata.get("timeout_seconds"),
+                    "attempt_count": int(
+                        metadata.get("scheduler_attempt_count", 0) or 0
+                    ),
+                }
+            )
+
+    message = str(
+        task_result.get("error_message")
+        or "多 Agent 任务执行失败。"
+    )
+    if timed_out_steps:
+        return {
+            "code": "MULTI_AGENT_STEP_TIMEOUT",
+            "message": message,
+            "details": {
+                "timed_out_steps": timed_out_steps,
+            },
+        }
+    return {
+        "code": "MULTI_AGENT_TASK_FAILED",
+        "message": message,
+        "details": {},
+    }
 
 
 def build_graph_final_result(
