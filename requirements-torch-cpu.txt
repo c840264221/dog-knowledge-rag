@@ -1,0 +1,4 @@
+# PyTorch CPU runtime for the production API image.
+# Keep this installation separate so the default PyPI CUDA build is not used.
+--index-url https://download.pytorch.org/whl/cpu
+torch==2.11.0

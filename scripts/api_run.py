@@ -1,5 +1,7 @@
 import uvicorn
 
+from src.settings import settings
+
 
 def main() -> None:
     """
@@ -19,9 +21,12 @@ def main() -> None:
 
     uvicorn.run(
         "src.api.app:app",
-        host="127.0.0.1",
-        port=8000,
-        reload=False,
+        host=settings.api.host,
+        port=settings.api.port,
+        workers=settings.api.workers,
+        reload=settings.api.reload,
+        log_level=settings.api.log_level,
+        access_log=settings.api.access_log,
     )
 
 

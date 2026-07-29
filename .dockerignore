@@ -1,0 +1,57 @@
+# Version control and local development metadata
+.git/
+.github/
+.agents/
+.codex/
+.codex_doc_staging/
+.idea/
+.vscode/
+
+# Python virtual environments and generated caches
+.venv/
+venv/
+env/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Secrets and machine-specific environment files
+.env
+.env.*
+!.env.example
+
+# Runtime logs, temporary files and reports
+logs/
+tmp/
+*.log
+evaluation/reports/
+
+# Local model and vector database caches
+models_cache/
+chroma_db/
+chroma_memory_db/
+
+# Runtime state must be mounted as persistent storage
+data/checkpoints_db/
+data/memory_db/
+data/user/
+*.db
+*.sqlite
+*.sqlite3
+
+# Tests, local evaluation assets and IDE helper scripts
+tests/
+test_scripts/
+evaluation/
+requirements-ci.txt
+
+# Local documentation and operating-system metadata
+AGENTS.md
+CODEX_CONTEXT.md
+.DS_Store
+Thumbs.db
