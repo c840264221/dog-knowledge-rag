@@ -1,0 +1,29 @@
+# Dog Agent Framework production API dependencies.
+# Keep direct runtime dependencies pinned for reproducible Docker builds.
+
+# FastAPI and configuration
+fastapi==0.136.1
+uvicorn[standard]==0.46.0
+pydantic==2.13.3
+pydantic-settings==2.14.0
+python-dotenv==1.2.2
+
+# Agent graph and model clients
+langchain-core==1.3.2
+langchain-openai==1.2.1
+langchain-ollama==1.1.0
+langchain-huggingface==1.2.2
+langchain-chroma==1.1.0
+langgraph==1.1.9
+langgraph-checkpoint-sqlite==3.0.3
+
+# Vector database, checkpoint and model runtime
+chromadb==1.5.8
+aiosqlite==0.22.1
+sentence-transformers==5.4.1
+transformers==5.6.2
+
+# Tool runtime and logging
+aiohttp==3.13.5
+SQLAlchemy==2.0.49
+loguru==0.7.3

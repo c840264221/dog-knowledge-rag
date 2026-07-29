@@ -13,6 +13,7 @@ from src.settings.memory import MemorySettings
 from src.settings.rag import RagSettings
 from src.settings.observability import ObservabilitySettings
 from src.settings.mcp import McpSettings
+from src.settings.api import ApiSettings
 
 
 class Settings:
@@ -45,6 +46,8 @@ class Settings:
         self.observability = ObservabilitySettings()
 
         self.mcp = McpSettings()
+
+        self.api = ApiSettings()
 
 
 settings = Settings()

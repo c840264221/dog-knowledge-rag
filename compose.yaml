@@ -1,0 +1,34 @@
+name: dog-agent
+
+services:
+  api:
+    image: dog-agent-api:v1.19.0
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      API_ENVIRONMENT: production
+      API_HOST: 0.0.0.0
+      API_PORT: "8000"
+      API_WORKERS: "1"
+      API_RELOAD: "false"
+      BASE_DIR: /app
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      OLLAMA_HOST: http://host.docker.internal:11434
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - ./chroma_db:/app/chroma_db
+      - ./chroma_memory_db:/app/chroma_memory_db
+      - ./models_cache:/app/models_cache
+      - ./logs:/app/logs
+      - ./data/checkpoints_db:/app/data/checkpoints_db
+      - ./data/memory_db:/app/data/memory_db
+      - ./data/user:/app/data/user
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
