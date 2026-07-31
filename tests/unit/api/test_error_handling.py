@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from src.api.app import create_app
 from src.core.errors.base import DogAgentError
+from src.settings.api import ApiSettings
 from tests.unit.api.test_app import (
     FakeAgentApiService,
     FakeRuntimeContainer,
@@ -26,6 +27,11 @@ def build_error_test_app() -> FastAPI:
     app = create_app(
         runtime_container=FakeRuntimeContainer(),
         agent_api_service=FakeAgentApiService(),
+        api_settings=ApiSettings(
+            auth_enabled=False,
+            cors_enabled=False,
+            rate_limit_enabled=False,
+        ),
     )
 
     @app.get("/test/recoverable-error")

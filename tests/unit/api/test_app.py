@@ -11,6 +11,7 @@ from src.api.schemas import (
     GraphRunResponse,
     TaskStatusResponse,
 )
+from src.settings.api import ApiSettings
 
 
 class FakeRuntimeContainer:
@@ -174,7 +175,10 @@ class FakeAgentApiService:
         )
 
 
-def build_test_client() -> tuple[
+def build_test_client(
+    *,
+    api_settings: ApiSettings | None = None,
+) -> tuple[
     TestClient,
     FakeRuntimeContainer,
     FakeAgentApiService,
@@ -183,7 +187,8 @@ def build_test_client() -> tuple[
     创建使用确定性替身的 FastAPI 测试客户端。
 
     参数含义：
-        无。
+        api_settings:
+            可选 API 配置，用于测试认证开启和关闭场景。
 
     返回值含义：
         tuple:
@@ -192,9 +197,15 @@ def build_test_client() -> tuple[
 
     container = FakeRuntimeContainer()
     service = FakeAgentApiService()
+    resolved_api_settings = api_settings or ApiSettings(
+        auth_enabled=False,
+        cors_enabled=False,
+        rate_limit_enabled=False,
+    )
     app = create_app(
         runtime_container=container,
         agent_api_service=service,
+        api_settings=resolved_api_settings,
     )
     return TestClient(app), container, service
 
@@ -216,6 +227,375 @@ def test_app_lifespan_and_health_endpoints() -> None:
         assert ready_response.json()["status"] == "ready"
 
     assert container.shutdown_calls == 1
+
+
+def test_health_endpoints_should_remain_public_when_auth_enabled() -> None:
+    """
+    测试 Docker 健康检查不会被 API Key 门禁阻断。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    client, _, _ = build_test_client(
+        api_settings=ApiSettings(
+            auth_enabled=True,
+            auth_key="test-api-key",
+        )
+    )
+
+    with client:
+        health_response = client.get("/health")
+        ready_response = client.get("/ready")
+
+    assert health_response.status_code == 200
+    assert ready_response.status_code == 200
+
+
+def test_v1_route_should_reject_missing_api_key_when_enabled() -> None:
+    """
+    测试认证开启后缺少 X-API-Key 的请求不能进入业务服务。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    client, _, service = build_test_client(
+        api_settings=ApiSettings(
+            auth_enabled=True,
+            auth_key="test-api-key",
+        )
+    )
+
+    with client:
+        response = client.post(
+            "/v1/chat",
+            headers={"X-Trace-ID": "trace-auth-missing"},
+            json={
+                "question": "介绍一下金毛",
+                "session_id": "session_auth",
+            },
+        )
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == (
+        "AUTHENTICATION_FAILED"
+    )
+    assert response.headers["WWW-Authenticate"] == (
+        'ApiKey header="X-API-Key"'
+    )
+    assert service.chat_calls == []
+
+
+def test_v1_route_should_reject_invalid_api_key() -> None:
+    """
+    测试错误 API Key 不能通过业务接口门禁。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    client, _, service = build_test_client(
+        api_settings=ApiSettings(
+            auth_enabled=True,
+            auth_key="test-api-key",
+        )
+    )
+
+    with client:
+        response = client.post(
+            "/v1/chat",
+            headers={"X-API-Key": "wrong-api-key"},
+            json={
+                "question": "介绍一下金毛",
+                "session_id": "session_auth",
+            },
+        )
+
+    assert response.status_code == 401
+    assert service.chat_calls == []
+
+
+def test_v1_route_should_accept_valid_api_key() -> None:
+    """
+    测试正确 API Key 可以继续进入原有 Agent API 服务。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    client, _, service = build_test_client(
+        api_settings=ApiSettings(
+            auth_enabled=True,
+            auth_key="test-api-key",
+        )
+    )
+
+    with client:
+        response = client.post(
+            "/v1/chat",
+            headers={"X-API-Key": "test-api-key"},
+            json={
+                "question": "介绍一下金毛",
+                "session_id": "session_auth",
+            },
+        )
+
+    assert response.status_code == 200
+    assert len(service.chat_calls) == 1
+
+
+def test_cors_should_allow_trusted_origin_preflight() -> None:
+    """
+    测试可信浏览器来源可以通过 OPTIONS 跨域预检。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    allowed_origin = "http://localhost:3000"
+    client, _, service = build_test_client(
+        api_settings=ApiSettings(
+            auth_enabled=True,
+            auth_key="test-api-key",
+            cors_enabled=True,
+            cors_allowed_origins=[allowed_origin],
+        )
+    )
+
+    with client:
+        response = client.options(
+            "/v1/chat",
+            headers={
+                "Origin": allowed_origin,
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": (
+                    "content-type,x-api-key,x-trace-id"
+                ),
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.headers["Access-Control-Allow-Origin"] == (
+        allowed_origin
+    )
+    assert "x-api-key" in response.headers[
+        "Access-Control-Allow-Headers"
+    ].lower()
+    assert service.chat_calls == []
+
+
+def test_cors_should_reject_untrusted_origin_preflight() -> None:
+    """
+    测试不在白名单中的浏览器来源无法通过跨域预检。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    client, _, service = build_test_client(
+        api_settings=ApiSettings(
+            cors_enabled=True,
+            cors_allowed_origins=["https://trusted.example.com"],
+        )
+    )
+
+    with client:
+        response = client.options(
+            "/v1/chat",
+            headers={
+                "Origin": "https://untrusted.example.com",
+                "Access-Control-Request-Method": "POST",
+            },
+        )
+
+    assert response.status_code == 400
+    assert "Access-Control-Allow-Origin" not in response.headers
+    assert service.chat_calls == []
+
+
+def test_cors_actual_request_should_keep_api_key_gate() -> None:
+    """
+    测试可信来源通过 CORS 后仍然必须提供正确 API Key。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    allowed_origin = "http://localhost:3000"
+    client, _, service = build_test_client(
+        api_settings=ApiSettings(
+            auth_enabled=True,
+            auth_key="test-api-key",
+            cors_enabled=True,
+            cors_allowed_origins=[allowed_origin],
+        )
+    )
+
+    with client:
+        missing_key_response = client.post(
+            "/v1/chat",
+            headers={"Origin": allowed_origin},
+            json={
+                "question": "介绍一下金毛",
+                "session_id": "session_cors",
+            },
+        )
+        valid_key_response = client.post(
+            "/v1/chat",
+            headers={
+                "Origin": allowed_origin,
+                "X-API-Key": "test-api-key",
+            },
+            json={
+                "question": "介绍一下金毛",
+                "session_id": "session_cors",
+            },
+        )
+
+    assert missing_key_response.status_code == 401
+    assert valid_key_response.status_code == 200
+    assert valid_key_response.headers[
+        "Access-Control-Allow-Origin"
+    ] == allowed_origin
+    assert len(service.chat_calls) == 1
+
+
+def test_request_body_limit_should_reject_large_declared_body() -> None:
+    """
+    测试声明长度超限的请求在进入 Pydantic 和业务服务前返回 413。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    client, _, service = build_test_client(
+        api_settings=ApiSettings(
+            auth_enabled=False,
+            cors_enabled=False,
+            max_request_body_bytes=1_024,
+        )
+    )
+
+    with client:
+        response = client.post(
+            "/v1/chat",
+            headers={"X-Trace-ID": "trace-large-body"},
+            json={
+                "question": "a" * 2_000,
+                "session_id": "session_large_body",
+            },
+        )
+
+    body = response.json()
+    assert response.status_code == 413
+    assert response.headers["X-Trace-ID"] == "trace-large-body"
+    assert body["error"]["code"] == "REQUEST_BODY_TOO_LARGE"
+    assert body["error"]["details"] == [
+        {
+            "max_body_bytes": 1_024,
+        }
+    ]
+    assert service.chat_calls == []
+
+
+def test_rate_limit_should_reject_excess_business_requests() -> None:
+    """
+    测试同一客户端超过窗口额度后收到 429，健康检查仍保持可用。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    allowed_origin = "http://localhost:3000"
+    client, _, service = build_test_client(
+        api_settings=ApiSettings(
+            auth_enabled=False,
+            cors_enabled=True,
+            cors_allowed_origins=[allowed_origin],
+            rate_limit_enabled=True,
+            rate_limit_requests=2,
+            rate_limit_window_seconds=60,
+        )
+    )
+    request_body = {
+        "question": "介绍一下金毛",
+        "session_id": "session_rate_limit",
+    }
+
+    with client:
+        preflight_response = client.options(
+            "/v1/chat",
+            headers={
+                "Origin": allowed_origin,
+                "Access-Control-Request-Method": "POST",
+            },
+        )
+        first_response = client.post(
+            "/v1/chat",
+            headers={"Origin": allowed_origin},
+            json=request_body,
+        )
+        second_response = client.post(
+            "/v1/chat",
+            headers={"Origin": allowed_origin},
+            json=request_body,
+        )
+        rejected_response = client.post(
+            "/v1/chat",
+            headers={
+                "Origin": allowed_origin,
+                "X-Trace-ID": "trace-rate-limited",
+            },
+            json=request_body,
+        )
+        health_response = client.get("/health")
+
+    assert preflight_response.status_code == 200
+    assert first_response.status_code == 200
+    assert first_response.headers["X-RateLimit-Remaining"] == "1"
+    assert second_response.status_code == 200
+    assert second_response.headers["X-RateLimit-Remaining"] == "0"
+    assert rejected_response.status_code == 429
+    assert rejected_response.headers["Retry-After"] == "60"
+    assert rejected_response.headers[
+        "Access-Control-Allow-Origin"
+    ] == allowed_origin
+    assert rejected_response.headers["X-Trace-ID"] == (
+        "trace-rate-limited"
+    )
+    assert rejected_response.json()["error"]["code"] == (
+        "RATE_LIMIT_EXCEEDED"
+    )
+    assert health_response.status_code == 200
+    assert len(service.chat_calls) == 2
 
 
 def test_chat_route_should_forward_validated_request() -> None:
