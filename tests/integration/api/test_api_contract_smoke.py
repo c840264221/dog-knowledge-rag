@@ -11,6 +11,7 @@ from src.api.schemas import (
     GraphRunResponse,
     TaskStatusResponse,
 )
+from src.settings.api import ApiSettings
 
 
 class SmokeRuntimeContainer:
@@ -181,6 +182,11 @@ def test_api_openapi_and_route_contract_smoke() -> None:
     app = create_app(
         runtime_container=container,
         agent_api_service=SmokeAgentApiService(),
+        api_settings=ApiSettings(
+            auth_enabled=False,
+            cors_enabled=False,
+            rate_limit_enabled=False,
+        ),
     )
 
     with TestClient(app) as client:
@@ -204,6 +210,12 @@ def test_api_openapi_and_route_contract_smoke() -> None:
         assert "business_status" in graph_response_schema["required"]
         assert "business_error" in graph_response_schema["properties"]
         assert "AgentBusinessError" in openapi["components"]["schemas"]
+        assert "APIKeyHeader" in openapi["components"]["securitySchemes"]
+        assert openapi["paths"]["/v1/chat"]["post"]["security"] == [
+            {
+                "APIKeyHeader": [],
+            }
+        ]
 
         chat_response = client.post(
             "/v1/chat",

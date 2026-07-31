@@ -3,6 +3,7 @@ import sys
 
 from loguru import logger as base_logger
 
+from src.common.log_redaction import redact_log_record
 from src.runtime.context import runtime_ctx
 
 from src.config import LOG_PATH
@@ -48,6 +49,8 @@ def inject_context(record):
     record["extra"]["component"] = (
         ctx.component if ctx else None
     )
+
+    redact_log_record(record)
 
 
 logger = base_logger.patch(

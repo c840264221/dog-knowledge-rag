@@ -101,6 +101,7 @@ async def _handle_http_exception(
     """
 
     error_codes = {
+        401: "AUTHENTICATION_FAILED",
         404: "RESOURCE_NOT_FOUND",
         503: "SERVICE_NOT_READY",
     }
@@ -112,6 +113,7 @@ async def _handle_http_exception(
             "HTTP_REQUEST_FAILED",
         ),
         message=str(error.detail),
+        headers=dict(error.headers or {}),
     )
 
 
@@ -184,6 +186,7 @@ def _build_error_response(
     code: str,
     message: str,
     details: list[dict[str, Any]] | None = None,
+    headers: dict[str, str] | None = None,
 ) -> JSONResponse:
     """
     构建统一 JSON 错误响应。
@@ -199,6 +202,8 @@ def _build_error_response(
             可安全展示的错误说明。
         details:
             可选字段级错误详情。
+        headers:
+            需要保留的可选业务响应头，例如 WWW-Authenticate。
 
     返回值含义：
         JSONResponse:
@@ -217,10 +222,10 @@ def _build_error_response(
         ),
         trace_id=trace_id,
     )
+    response_headers = dict(headers or {})
+    response_headers["X-Trace-ID"] = trace_id
     return JSONResponse(
         status_code=status_code,
         content=body.model_dump(mode="json"),
-        headers={
-            "X-Trace-ID": trace_id,
-        },
+        headers=response_headers,
     )

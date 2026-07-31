@@ -5,21 +5,28 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI
+from starlette.middleware.cors import CORSMiddleware
 
 from src.api.exception_handlers import register_exception_handlers
-from src.api.middleware import ApiRequestLoggingMiddleware
+from src.api.middleware import (
+    ApiRateLimitMiddleware,
+    ApiRequestBodyLimitMiddleware,
+    ApiRequestLoggingMiddleware,
+)
 from src.api.routes.chat import router as chat_router
 from src.api.routes.health import router as health_router
 from src.api.services import AgentApiService
 from src.api.task_registry import ApiTaskRegistry
 from src.runtime.container.init import container as default_container
 from src.settings import settings
+from src.settings.api import ApiSettings
 
 
 def create_app(
     *,
     runtime_container: Any = default_container,
     agent_api_service: AgentApiService | None = None,
+    api_settings: ApiSettings | None = None,
 ) -> FastAPI:
     """
     创建并装配 Dog Agent FastAPI 应用。
@@ -33,6 +40,9 @@ def create_app(
             管理 LLM、RAG、Checkpoint 和 GraphRuntimeService 的运行时容器。
         agent_api_service:
             可选 API 服务替身；未提供时使用容器中的 graph_runtime 创建真实服务。
+        api_settings:
+            可选 API 配置；未提供时使用全局 settings.api。测试可以注入开启
+            或关闭认证的确定性配置。
 
     返回值含义：
         FastAPI:
@@ -69,13 +79,55 @@ def create_app(
             app.state.ready = False
             await runtime_container.shutdown()
 
+    resolved_api_settings = api_settings or settings.api
     application = FastAPI(
         title=f"{settings.app.app_name} API",
-        version="1.18.0",
+        version="1.20.0",
         description="Dog Agent Framework 的 HTTP API 服务入口。",
         lifespan=lifespan,
     )
     application.state.ready = False
+    application.state.api_settings = resolved_api_settings
+    application.add_middleware(
+        ApiRequestBodyLimitMiddleware,
+        max_body_bytes=(
+            resolved_api_settings.max_request_body_bytes
+        ),
+    )
+    if resolved_api_settings.rate_limit_enabled:
+        application.add_middleware(
+            ApiRateLimitMiddleware,
+            request_limit=(
+                resolved_api_settings.rate_limit_requests
+            ),
+            window_seconds=(
+                resolved_api_settings.rate_limit_window_seconds
+            ),
+        )
+    if resolved_api_settings.cors_enabled:
+        application.add_middleware(
+            CORSMiddleware,
+            allow_origins=(
+                resolved_api_settings.cors_allowed_origins
+            ),
+            allow_credentials=(
+                resolved_api_settings.cors_allow_credentials
+            ),
+            allow_methods=["GET", "POST", "OPTIONS"],
+            allow_headers=[
+                "Accept",
+                "Content-Type",
+                "X-API-Key",
+                "X-Trace-ID",
+            ],
+            expose_headers=[
+                "Retry-After",
+                "X-RateLimit-Limit",
+                "X-RateLimit-Remaining",
+                "X-Trace-ID",
+            ],
+            max_age=600,
+        )
     application.add_middleware(ApiRequestLoggingMiddleware)
     register_exception_handlers(application)
     application.include_router(health_router)

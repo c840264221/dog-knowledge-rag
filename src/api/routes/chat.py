@@ -12,7 +12,10 @@ from fastapi import (
 )
 from fastapi.responses import StreamingResponse
 
-from src.api.dependencies import get_agent_api_service
+from src.api.dependencies import (
+    get_agent_api_service,
+    require_api_key,
+)
 from src.api.schemas import (
     CancellationResponse,
     ChatRequest,
@@ -26,6 +29,9 @@ from src.api.services import AgentApiService
 router = APIRouter(
     prefix="/v1",
     tags=["agent"],
+    dependencies=[
+        Depends(require_api_key),
+    ],
 )
 
 
