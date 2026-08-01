@@ -6,6 +6,14 @@ import time
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
+from ipaddress import (
+    IPv4Address,
+    IPv4Network,
+    IPv6Address,
+    IPv6Network,
+    ip_address,
+    ip_network,
+)
 from typing import Any
 from uuid import uuid4
 
@@ -18,6 +26,8 @@ from src.logger import logger
 
 
 TRACE_HEADER_NAME = "X-Trace-ID"
+IpAddress = IPv4Address | IPv6Address
+IpNetwork = IPv4Network | IPv6Network
 
 
 class _RequestBodyTooLargeError(RuntimeError):
@@ -273,6 +283,9 @@ class ApiRateLimitMiddleware:
             单个窗口内允许的请求数量。
         window_seconds:
             请求统计窗口秒数。
+        trusted_proxy_cidrs:
+            允许提供代理转发头的反向代理 IP 或 CIDR；默认空列表表示不信任
+            任何代理头，继续使用直接连接地址。
 
     返回值含义：
         ApiRateLimitMiddleware:
@@ -285,6 +298,7 @@ class ApiRateLimitMiddleware:
         *,
         request_limit: int,
         window_seconds: int,
+        trusted_proxy_cidrs: list[str] | tuple[str, ...] = (),
     ) -> None:
         self.app = app
         self.request_limit = request_limit
@@ -292,6 +306,10 @@ class ApiRateLimitMiddleware:
         self.limiter = InMemoryApiRateLimiter(
             request_limit=request_limit,
             window_seconds=window_seconds,
+        )
+        self.trusted_proxy_networks = tuple(
+            ip_network(cidr, strict=False)
+            for cidr in trusted_proxy_cidrs
         )
 
     async def __call__(
@@ -321,7 +339,10 @@ class ApiRateLimitMiddleware:
             return
 
         decision = await self.limiter.acquire(
-            _resolve_rate_limit_client_id(scope)
+            _resolve_rate_limit_client_id(
+                scope,
+                trusted_proxy_networks=self.trusted_proxy_networks,
+            )
         )
         if not decision.allowed:
             await _send_rate_limit_exceeded(
@@ -386,27 +407,111 @@ def _should_apply_rate_limit(scope: Scope) -> bool:
     return path == "/v1" or path.startswith("/v1/")
 
 
-def _resolve_rate_limit_client_id(scope: Scope) -> str:
+def _resolve_rate_limit_client_id(
+    scope: Scope,
+    *,
+    trusted_proxy_networks: tuple[IpNetwork, ...] = (),
+) -> str:
     """
-    从直接网络连接解析基础限流客户端编号。
+    从直接连接或可信代理链解析限流客户端编号。
 
     功能：
-        使用 ASGI server 看到的连接来源 IP，不信任调用方可伪造的
-        X-Forwarded-For；未来接入可信反向代理时再集中解析代理头。
+        默认使用 ASGI server 看到的连接来源 IP；只有直接来源命中可信代理
+        网络时才读取 X-Forwarded-For，并从右向左跳过可信代理，选择最靠近
+        服务的非代理地址。非法 Header 会退回直接来源，避免伪造绕过限流。
 
     参数含义：
         scope:
             当前 ASGI 请求元数据。
+        trusted_proxy_networks:
+            已完成校验的可信 IPv4 / IPv6 代理网络元组。
 
     返回值含义：
         str:
-            客户端来源 IP；缺失时使用 unknown-client。
+            安全解析后的客户端来源 IP；缺失时使用 unknown-client。
     """
 
     client = scope.get("client")
-    if isinstance(client, tuple) and client:
-        return str(client[0])
-    return "unknown-client"
+    if not isinstance(client, tuple) or not client:
+        return "unknown-client"
+
+    direct_client_id = str(client[0])
+    direct_client_ip = _parse_ip_address(direct_client_id)
+    if (
+        direct_client_ip is None
+        or not _is_trusted_proxy(
+            direct_client_ip,
+            trusted_proxy_networks,
+        )
+    ):
+        return direct_client_id
+
+    forwarded_for = Headers(scope=scope).get("x-forwarded-for")
+    if not forwarded_for:
+        return direct_client_id
+
+    forwarded_ips: list[IpAddress] = []
+    for raw_address in forwarded_for.split(","):
+        forwarded_ip = _parse_ip_address(raw_address.strip())
+        if forwarded_ip is None:
+            return direct_client_id
+        forwarded_ips.append(forwarded_ip)
+
+    for forwarded_ip in reversed(forwarded_ips):
+        if not _is_trusted_proxy(
+            forwarded_ip,
+            trusted_proxy_networks,
+        ):
+            return str(forwarded_ip)
+
+    return str(forwarded_ips[0])
+
+
+def _parse_ip_address(value: str) -> IpAddress | None:
+    """
+    把字符串解析为标准 IPv4 或 IPv6 地址。
+
+    功能：
+        使用标准库拒绝主机名、端口和格式非法的代理头片段，使调用方可以
+        在解析失败时采取保守回退策略。
+
+    参数含义：
+        value:
+            需要解析的单个地址字符串。
+
+    返回值含义：
+        IpAddress | None:
+            合法时返回标准 IP 对象，非法时返回 None。
+    """
+
+    try:
+        return ip_address(value)
+    except ValueError:
+        return None
+
+
+def _is_trusted_proxy(
+    address: IpAddress,
+    trusted_proxy_networks: tuple[IpNetwork, ...],
+) -> bool:
+    """
+    判断一个地址是否位于明确配置的可信代理网络中。
+
+    参数含义：
+        address:
+            当前准备检查的 IPv4 或 IPv6 地址。
+        trusted_proxy_networks:
+            允许运行时信任的代理网络元组。
+
+    返回值含义：
+        bool:
+            地址属于任一同版本代理网络时返回 True，否则返回 False。
+    """
+
+    return any(
+        address.version == network.version and address in network
+        for network in trusted_proxy_networks
+    )
 
 
 async def _send_rate_limit_exceeded(

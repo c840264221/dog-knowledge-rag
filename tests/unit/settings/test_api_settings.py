@@ -30,6 +30,7 @@ API_ENVIRONMENT_VARIABLES = [
     "API_RATE_LIMIT_ENABLED",
     "API_RATE_LIMIT_REQUESTS",
     "API_RATE_LIMIT_WINDOW_SECONDS",
+    "API_TRUSTED_PROXY_CIDRS",
 ]
 
 
@@ -84,6 +85,7 @@ def test_api_settings_should_keep_local_development_defaults(
     assert api_settings.rate_limit_enabled is False
     assert api_settings.rate_limit_requests == 60
     assert api_settings.rate_limit_window_seconds == 60
+    assert api_settings.trusted_proxy_cidrs == []
 
 
 def test_api_settings_should_read_prefixed_environment_variables(
@@ -117,6 +119,10 @@ def test_api_settings_should_read_prefixed_environment_variables(
     monkeypatch.setenv("API_RATE_LIMIT_ENABLED", "true")
     monkeypatch.setenv("API_RATE_LIMIT_REQUESTS", "120")
     monkeypatch.setenv("API_RATE_LIMIT_WINDOW_SECONDS", "30")
+    monkeypatch.setenv(
+        "API_TRUSTED_PROXY_CIDRS",
+        '["127.0.0.1","10.0.0.23/24","127.0.0.1/32"]',
+    )
 
     api_settings = ApiSettings()
 
@@ -139,6 +145,10 @@ def test_api_settings_should_read_prefixed_environment_variables(
     assert api_settings.rate_limit_enabled is True
     assert api_settings.rate_limit_requests == 120
     assert api_settings.rate_limit_window_seconds == 30
+    assert api_settings.trusted_proxy_cidrs == [
+        "127.0.0.1/32",
+        "10.0.0.0/24",
+    ]
 
 
 def test_api_settings_should_reject_multiple_workers() -> None:
@@ -328,3 +338,32 @@ def test_api_settings_should_reject_invalid_rate_limit(
                 field_name: invalid_value,
             }
         )
+
+
+@pytest.mark.parametrize(
+    "invalid_cidr",
+    [
+        "not-an-ip",
+        "10.0.0.1/99",
+        "example.com",
+    ],
+)
+def test_api_settings_should_reject_invalid_trusted_proxy_cidr(
+    invalid_cidr: str,
+) -> None:
+    """
+    验证可信代理列表只能包含合法 IP 或 CIDR。
+
+    参数含义：
+        invalid_cidr:
+            当前准备交给 ApiSettings 的非法代理网络字符串。
+
+    返回值含义：
+        None。
+    """
+
+    with pytest.raises(
+        ValidationError,
+        match="API_TRUSTED_PROXY_CIDRS",
+    ):
+        ApiSettings(trusted_proxy_cidrs=[invalid_cidr])

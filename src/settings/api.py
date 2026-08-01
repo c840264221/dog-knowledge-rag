@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from ipaddress import ip_network
 from typing import Literal
 from urllib.parse import urlsplit
 
@@ -77,6 +78,7 @@ class ApiSettings(BaseAppSettings):
         ge=1,
         le=3_600,
     )
+    trusted_proxy_cidrs: list[str] = Field(default_factory=list)
 
     @field_validator("cors_allowed_origins")
     @classmethod
@@ -126,6 +128,48 @@ class ApiSettings(BaseAppSettings):
             if origin not in normalized_origins:
                 normalized_origins.append(origin)
         return normalized_origins
+
+    @field_validator("trusted_proxy_cidrs")
+    @classmethod
+    def validate_trusted_proxy_cidrs(
+        cls,
+        cidrs: list[str],
+    ) -> list[str]:
+        """
+        规范并校验可信反向代理网络列表。
+
+        功能：
+            把单个 IP 或 CIDR 转换成标准网络表示，保持声明顺序去重，并在
+            服务启动前拒绝非法网络，避免错误配置导致代理头被意外信任。
+
+        参数含义：
+            cls:
+                当前 ApiSettings 类型，由 Pydantic 自动传入。
+            cidrs:
+                允许运行时提供 X-Forwarded-For 的代理 IP 或 CIDR 列表。
+
+        返回值含义：
+            list[str]:
+                已标准化且去重的 IPv4 / IPv6 网络字符串列表。
+        """
+
+        normalized_cidrs: list[str] = []
+        for raw_cidr in cidrs:
+            cidr = str(raw_cidr).strip()
+            if not cidr:
+                continue
+            try:
+                normalized_cidr = str(
+                    ip_network(cidr, strict=False)
+                )
+            except ValueError as exc:
+                raise ValueError(
+                    "API_TRUSTED_PROXY_CIDRS 包含非法 IP 或 CIDR: "
+                    f"{cidr}"
+                ) from exc
+            if normalized_cidr not in normalized_cidrs:
+                normalized_cidrs.append(normalized_cidr)
+        return normalized_cidrs
 
     @model_validator(mode="after")
     def validate_deployment_mode(self) -> ApiSettings:

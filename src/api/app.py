@@ -103,6 +103,9 @@ def create_app(
             window_seconds=(
                 resolved_api_settings.rate_limit_window_seconds
             ),
+            trusted_proxy_cidrs=(
+                resolved_api_settings.trusted_proxy_cidrs
+            ),
         )
     if resolved_api_settings.cors_enabled:
         application.add_middleware(

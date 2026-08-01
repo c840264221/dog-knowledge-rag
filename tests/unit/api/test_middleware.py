@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from ipaddress import ip_network
 
 import pytest
 from starlette.types import Message, Receive, Scope, Send
@@ -8,7 +9,168 @@ from starlette.types import Message, Receive, Scope, Send
 from src.api.middleware import (
     ApiRequestBodyLimitMiddleware,
     InMemoryApiRateLimiter,
+    _resolve_rate_limit_client_id,
 )
+
+
+def _build_http_scope(
+    *,
+    client_ip: str,
+    forwarded_for: str | None = None,
+) -> Scope:
+    """
+    构建包含直连地址和可选代理头的最小 HTTP Scope。
+
+    参数含义：
+        client_ip:
+            ASGI Server 直接看到的连接来源地址。
+        forwarded_for:
+            可选 X-Forwarded-For 原始文本。
+
+    返回值含义：
+        Scope:
+            可以交给限流客户端识别函数的测试请求元数据。
+    """
+
+    headers: list[tuple[bytes, bytes]] = []
+    if forwarded_for is not None:
+        headers.append(
+            (b"x-forwarded-for", forwarded_for.encode("ascii"))
+        )
+    return {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/v1/chat",
+        "raw_path": b"/v1/chat",
+        "query_string": b"",
+        "headers": headers,
+        "client": (client_ip, 12345),
+        "server": ("testserver", 80),
+        "state": {},
+    }
+
+
+def test_untrusted_client_should_not_control_forwarded_for() -> None:
+    """
+    验证非可信直连方伪造 X-Forwarded-For 时仍使用直连地址。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    scope = _build_http_scope(
+        client_ip="198.51.100.20",
+        forwarded_for="203.0.113.99",
+    )
+
+    client_id = _resolve_rate_limit_client_id(
+        scope,
+        trusted_proxy_networks=(ip_network("10.0.0.0/8"),),
+    )
+
+    assert client_id == "198.51.100.20"
+
+
+def test_trusted_proxy_should_forward_real_client_ip() -> None:
+    """
+    验证可信直连代理可以提供单个真实客户端地址。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    scope = _build_http_scope(
+        client_ip="10.0.0.10",
+        forwarded_for="203.0.113.25",
+    )
+
+    client_id = _resolve_rate_limit_client_id(
+        scope,
+        trusted_proxy_networks=(ip_network("10.0.0.0/8"),),
+    )
+
+    assert client_id == "203.0.113.25"
+
+
+def test_trusted_proxy_chain_should_be_resolved_from_right() -> None:
+    """
+    验证多层代理链从右向左跳过可信代理并找到真实客户端。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    scope = _build_http_scope(
+        client_ip="10.0.0.10",
+        forwarded_for="203.0.113.25, 10.0.0.20",
+    )
+
+    client_id = _resolve_rate_limit_client_id(
+        scope,
+        trusted_proxy_networks=(ip_network("10.0.0.0/8"),),
+    )
+
+    assert client_id == "203.0.113.25"
+
+
+def test_spoofed_leftmost_address_should_not_replace_nearest_client() -> None:
+    """
+    验证代理追加真实来源后不会盲目信任客户端伪造的最左地址。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    scope = _build_http_scope(
+        client_ip="10.0.0.10",
+        forwarded_for="192.0.2.99, 198.51.100.30",
+    )
+
+    client_id = _resolve_rate_limit_client_id(
+        scope,
+        trusted_proxy_networks=(ip_network("10.0.0.0/8"),),
+    )
+
+    assert client_id == "198.51.100.30"
+
+
+def test_invalid_forwarded_for_should_fall_back_to_direct_proxy() -> None:
+    """
+    验证代理头包含非法地址时保守退回直接连接地址。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    scope = _build_http_scope(
+        client_ip="10.0.0.10",
+        forwarded_for="203.0.113.25, invalid-address",
+    )
+
+    client_id = _resolve_rate_limit_client_id(
+        scope,
+        trusted_proxy_networks=(ip_network("10.0.0.0/8"),),
+    )
+
+    assert client_id == "10.0.0.10"
 
 
 @pytest.mark.asyncio
