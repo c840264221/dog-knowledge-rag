@@ -6,6 +6,7 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from src.api.app import create_app
+from src.api.middleware import ApiRateLimitMiddleware
 from src.api.schemas import (
     CancellationResponse,
     GraphRunResponse,
@@ -208,6 +209,36 @@ def build_test_client(
         api_settings=resolved_api_settings,
     )
     return TestClient(app), container, service
+
+
+def test_app_should_pass_trusted_proxies_to_rate_limit_middleware() -> None:
+    """
+    验证应用装配会把已校验的可信代理列表传给限流中间件。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    application = create_app(
+        runtime_container=FakeRuntimeContainer(),
+        agent_api_service=FakeAgentApiService(),
+        api_settings=ApiSettings(
+            rate_limit_enabled=True,
+            trusted_proxy_cidrs=["10.0.0.0/8"],
+        ),
+    )
+    rate_limit_middleware = next(
+        middleware
+        for middleware in application.user_middleware
+        if middleware.cls is ApiRateLimitMiddleware
+    )
+
+    assert rate_limit_middleware.kwargs[
+        "trusted_proxy_cidrs"
+    ] == ["10.0.0.0/8"]
 
 
 def test_app_lifespan_and_health_endpoints() -> None:

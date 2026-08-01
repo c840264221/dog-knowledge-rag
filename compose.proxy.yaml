@@ -1,0 +1,42 @@
+services:
+  api:
+    ports: !reset []
+    expose:
+      - "8000"
+    environment:
+      API_TRUSTED_PROXY_CIDRS: '["172.30.0.2/32"]'
+    networks:
+      application:
+        ipv4_address: 172.30.0.3
+
+  nginx:
+    image: nginx:1.30.4-alpine
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${NGINX_HTTP_PORT:-8080}:8080"
+    volumes:
+      - ./deployment/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      edge:
+      application:
+        ipv4_address: 172.30.0.2
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget --quiet --output-document=/dev/null http://127.0.0.1:8080/health || exit 1
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    restart: unless-stopped
+
+networks:
+  edge:
+    driver: bridge
+  application:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24

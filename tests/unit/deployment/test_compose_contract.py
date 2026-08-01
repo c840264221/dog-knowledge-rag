@@ -43,7 +43,7 @@ def test_compose_should_build_and_run_versioned_api_image() -> None:
 
     compose = _read_compose()
 
-    assert "image: dog-agent-api:v1.19.0" in compose
+    assert "image: dog-agent-api:v1.22.0-dev" in compose
     assert "dockerfile: Dockerfile" in compose
     assert "env_file:" in compose
     assert "- .env" in compose
@@ -67,6 +67,10 @@ def test_compose_should_apply_safe_container_runtime_settings() -> None:
     assert "API_HOST: 0.0.0.0" in compose
     assert 'API_WORKERS: "1"' in compose
     assert 'API_RELOAD: "false"' in compose
+    assert (
+        'API_TRUSTED_PROXY_CIDRS: "${API_TRUSTED_PROXY_CIDRS:-[]}"'
+        in compose
+    )
     assert "BASE_DIR: /app" in compose
     assert "restart: unless-stopped" in compose
 

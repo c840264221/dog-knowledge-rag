@@ -76,7 +76,28 @@ jobs:
             -f compose.yaml \
             -f compose.release.yaml \
             config --quiet
+          docker compose \
+            --env-file .env \
+            -f compose.yaml \
+            -f compose.release.yaml \
+            -f compose.proxy.yaml \
+            config --quiet
           rm .env
+
+      - name: Validate Nginx configuration
+        shell: bash
+        run: |
+          docker run --rm \
+            --add-host "api:127.0.0.1" \
+            --volume "$PWD/deployment/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" \
+            nginx:1.30.4-alpine \
+            nginx -t
+
+      - name: Validate deployment shell script
+        shell: bash
+        run: |
+          bash -n deployment/deploy-release.sh
+          bash -n deployment/rollback-release.sh
 
       - name: Build image without publishing
         uses: docker/build-push-action@v7

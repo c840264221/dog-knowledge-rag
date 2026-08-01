@@ -2,7 +2,7 @@ name: dog-agent
 
 services:
   api:
-    image: dog-agent-api:v1.19.0
+    image: dog-agent-api:v1.22.0-dev
     build:
       context: .
       dockerfile: Dockerfile
@@ -23,6 +23,7 @@ services:
       API_RATE_LIMIT_ENABLED: "${API_RATE_LIMIT_ENABLED:-false}"
       API_RATE_LIMIT_REQUESTS: "${API_RATE_LIMIT_REQUESTS:-60}"
       API_RATE_LIMIT_WINDOW_SECONDS: "${API_RATE_LIMIT_WINDOW_SECONDS:-60}"
+      API_TRUSTED_PROXY_CIDRS: "${API_TRUSTED_PROXY_CIDRS:-[]}"
       LOG_BACKTRACE: "false"
       LOG_DIAGNOSE: "false"
       BASE_DIR: /app
