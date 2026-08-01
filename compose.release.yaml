@@ -1,0 +1,5 @@
+services:
+  api:
+    image: "${DOG_AGENT_API_IMAGE:?请在 .env 中配置 DOG_AGENT_API_IMAGE}"
+    build: !reset null
+    pull_policy: always
