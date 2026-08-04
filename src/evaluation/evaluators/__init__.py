@@ -24,6 +24,9 @@ from src.evaluation.evaluators.multi_agent_behavior_evaluator import (
 from src.evaluation.evaluators.multi_agent_orchestration_evaluator import (
     MultiAgentOrchestrationEvaluator,
 )
+from src.evaluation.evaluators.skill_behavior_evaluator import (
+    SkillBehaviorEvaluator,
+)
 
 __all__ = [
     "DogKnowledgeBehaviorEvaluator",
@@ -33,5 +36,6 @@ __all__ = [
     "MultiAgentOrchestrationEvaluator",
     "RagRetrievalBehaviorEvaluator",
     "RootRouteEvaluator",
+    "SkillBehaviorEvaluator",
     "ToolAgentBehaviorEvaluator",
 ]

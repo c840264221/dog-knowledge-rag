@@ -11,6 +11,7 @@ from src.graph.routes.main_route_alias import (
     RECOMMENDATION_AGENT_ROUTE,
     TOOL_AGENT_NODE,
     TOOL_AGENT_ROUTE,
+    SKILL_PREPARE_NODE,
     build_main_route_alias_map,
 )
 
@@ -36,7 +37,7 @@ def test_recommendation_agent_route_alias_to_dog_knowledge_agent():
 
     assert (
         route_map[RECOMMENDATION_AGENT_ROUTE]
-        == DOG_KNOWLEDGE_AGENT_NODE
+        == SKILL_PREPARE_NODE
     )
 
 
@@ -61,7 +62,7 @@ def test_exact_agent_route_alias_to_dog_knowledge_agent():
 
     assert (
         route_map[EXACT_AGENT_ROUTE]
-        == DOG_KNOWLEDGE_AGENT_NODE
+        == SKILL_PREPARE_NODE
     )
 
 
@@ -86,7 +87,7 @@ def test_general_agent_route_keeps_general_agent():
 
     assert (
         route_map[GENERAL_AGENT_ROUTE]
-        == GENERAL_AGENT_NODE
+        == SKILL_PREPARE_NODE
     )
 
 

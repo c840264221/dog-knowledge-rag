@@ -7,7 +7,8 @@ from src.rag.adapters import (
     rag_context_to_documents
 )
 from src.rag.query_builders import (
-    build_rag_query_from_state
+    build_rag_query_from_state,
+    resolve_question_from_state,
 )
 from src.runtime.context import runtime_ctx
 from src.runtime.scopes.retrieval_scope import RetrievalScope
@@ -186,18 +187,8 @@ async def execute_new_rag_retrieve(
         name="retrieve_node"
     )
 
-    question = str(
-        state.get(
-            "question",
-            ""
-        )
-        or ""
-    ).strip()
-
-    if not question:
-        raise ValueError(
-            "retrieve_node 缺少 question"
-        )
+    # RAG 全链路统一读取干净检索问题；旧状态没有专用字段时兼容 question。
+    question = resolve_question_from_state(state=state)
 
     logger.info(
         f"进入新版 RAG retrieve_node，question={question}"

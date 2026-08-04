@@ -26,6 +26,7 @@ from src.graph.nodes.memory_extract_node import (
 from src.graph.nodes.router_node import (
     semantic_router_node,
 )
+from src.graph.nodes.skill_prepare_node import build_skill_prepare_node
 
 from src.agents.general_qa_agent.agent import (
     build_general_qa_agent,
@@ -41,6 +42,10 @@ from src.agents.tool_agent.graph import (
 
 from src.graph.routes.route_after_semantic import (
     route_after_semantic,
+)
+from src.graph.routes.route_after_skill_prepare import (
+    build_skill_prepare_route_map,
+    route_after_skill_prepare,
 )
 
 # 导入主图语义路由映射对应的agent名字
@@ -60,6 +65,7 @@ from src.agents.collaboration.scheduler import (
     MultiAgentTaskScheduler,
 )
 from src.agents.collaboration.workers import GraphAgentWorkerAdapter
+from src.skills.default_catalog import build_default_skill_runtime
 
 
 def _build_multi_agent_scheduler_options() -> dict[str, int | float | None]:
@@ -430,6 +436,12 @@ class GraphRuntimeService:
             semantic_router_node,
         )
 
+        # RootAgent 先确定目标 Agent，再由 Skill 节点准备该业务所需输入与说明。
+        graph.add_node(
+            "skill_prepare",
+            build_skill_prepare_node(),
+        )
+
         graph.add_node(
             "dog_knowledge_agent",
             build_integrated_dog_knowledge_entry_node(
@@ -466,6 +478,14 @@ class GraphRuntimeService:
             "semantic_router",
             route_after_semantic,
             build_main_route_alias_map(
+                end_node=END,
+            ),
+        )
+
+        graph.add_conditional_edges(
+            "skill_prepare",
+            route_after_skill_prepare,
+            build_skill_prepare_route_map(
                 end_node=END,
             ),
         )
@@ -533,15 +553,21 @@ class GraphRuntimeService:
                 ),
             },
         )
+
+        # 多个 Worker 复用同一个无会话状态的 SkillRuntime；每个步骤的数据仍
+        # 保存到各自 AgentTaskResult 中，不会写入共享的全局 skill_inputs。
+        skill_runtime = build_default_skill_runtime()
         scheduler = MultiAgentTaskScheduler(
             workers={
                 "dog_knowledge_agent": GraphAgentWorkerAdapter(
                     agent_name="dog_knowledge_agent",
                     runner=dog_knowledge_agent.ainvoke,
+                    skill_runtime=skill_runtime,
                 ),
                 "general_agent": GraphAgentWorkerAdapter(
                     agent_name="general_agent",
                     runner=general_agent.ainvoke,
+                    skill_runtime=skill_runtime,
                 ),
             },
             **_build_multi_agent_scheduler_options(),

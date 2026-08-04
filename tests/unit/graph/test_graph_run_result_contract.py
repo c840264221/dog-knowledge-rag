@@ -429,6 +429,96 @@ async def test_restore_pending_multi_agent_state_should_use_whitelist() -> None:
 
 
 @pytest.mark.asyncio
+async def test_restore_pending_skill_state_should_use_whitelist() -> None:
+    """
+    测试主图入口只恢复顶层 Skill 继续执行所需的白名单字段。
+
+    功能：
+        验证原始问题、技能编号、已有输入和目标 Agent 会恢复，同时旧答案
+        和旧 RAG 结果不会进入本轮状态。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    app = FakeGraphApp(
+        current_state=FakeCurrentState(
+            values={
+                "skill_runtime_result": {"status": "awaiting_input"},
+                "skill_selected_id": "dog-training-plan",
+                "skill_inputs": {
+                    "breed": "Golden Retriever",
+                    "age": "6岁",
+                },
+                "skill_status": "awaiting_input",
+                "skill_pending_prompt": "请补充当前行为和训练目标。",
+                "skill_original_question": "为6岁金毛制定训练计划。",
+                "skill_target_agent": "dog_knowledge_agent",
+                "final_answer": "不应恢复的旧答案",
+                "rag_context": {"chunks": ["不应恢复"]},
+            }
+        )
+    )
+
+    restored = await graph_run.restore_pending_skill_state(
+        app=app,
+        config={"configurable": {"thread_id": "skill-thread"}},
+        state={
+            "question": "它会坐下，希望学习等待和召回。",
+            "final_answer": "",
+            "rag_context": None,
+        },
+    )
+
+    assert restored["skill_status"] == "awaiting_input"
+    assert restored["skill_selected_id"] == "dog-training-plan"
+    assert restored["skill_original_question"] == "为6岁金毛制定训练计划。"
+    assert restored["skill_target_agent"] == "dog_knowledge_agent"
+    assert restored["final_answer"] == ""
+    assert restored["rag_context"] is None
+
+
+def test_skill_logical_wait_should_return_interrupt_result() -> None:
+    """
+    测试顶层 Skill 的逻辑等待会转换成统一主图中断结果。
+
+    功能：
+        即使主图已经走到 END，只要 Skill 状态仍为 awaiting_input，API 也应
+        收到 interrupted，而不是把提示文字误当成正常完成答案。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    result = graph_run.build_graph_result_from_current_state(
+        current_state=FakeCurrentState(
+            values={
+                "skill_status": "awaiting_input",
+                "skill_selected_id": "dog-training-plan",
+                "skill_pending_prompt": "请补充当前行为和训练目标。",
+                "skill_target_agent": "dog_knowledge_agent",
+                "waiting_user_input": True,
+            }
+        ),
+        thread_id="skill-thread",
+        checkpoint_ns="main_graph",
+        trace_id="skill-trace",
+    )
+
+    assert isinstance(result, GraphInterruptResult)
+    assert result.prompt == "请补充当前行为和训练目标。"
+    assert result.interrupt_type == GraphInterruptType.USER_CLARIFICATION
+    assert result.metadata["skill_selected_id"] == "dog-training-plan"
+    assert result.metadata["skill_target_agent"] == "dog_knowledge_agent"
+
+
+@pytest.mark.asyncio
 async def test_run_main_graph_with_result_should_return_interrupt_result(
     runtime_context: FakeRuntimeContext,
 ) -> None:
@@ -753,6 +843,158 @@ async def test_multi_agent_logical_resume_should_start_new_graph_turn(
         received_state["multi_agent_task_result"]["status"]
         == "awaiting_input"
     )
+    assert app.astream_call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_multi_agent_skill_state_should_survive_checkpoint_resume(
+    runtime_context: FakeRuntimeContext,
+) -> None:
+    """
+    测试多 Agent Step 内部的 Skill 状态能否经过 Checkpoint 恢复。
+
+    功能：
+        模拟训练 Step 因 Skill 缺少必要输入而暂停。下一轮用户通过 API
+        resume 补充信息时，主图应从相同 thread_id 的 Checkpoint 恢复完整
+        多 Agent 任务，其中已经提取的 Skill 编号和输入不能丢失；用户新回答
+        应作为新的 question 进入主图，而不是错误调用原生 Command resume。
+
+    参数含义：
+        runtime_context:
+            保存本次测试 trace_id、user_id 和 session_id 的运行时上下文。
+
+    返回值含义：
+        None。
+    """
+
+    # 这是上一轮写入 Checkpoint、尚未完成的训练步骤结果。
+    paused_step_result = AgentTaskResult(
+        step_id="step_training",
+        assigned_agent="dog_knowledge_agent",
+        status="awaiting_input",
+        requires_user_input=True,
+        clarification_prompt="请补充当前行为和训练目标。",
+        output={
+            "skill_status": "awaiting_input",
+            "skill_selected_id": "dog-training-plan",
+            "skill_inputs": {
+                "breed": "Golden Retriever",
+                "age": "6岁",
+            },
+            "skill_pending_prompt": "请补充当前行为和训练目标。",
+        },
+        metadata={
+            "skill_runtime": {
+                "status": "awaiting_input",
+                "selected_skill_id": "dog-training-plan",
+            }
+        },
+    )
+
+    # 这是总编排器返回并由主图整体保存的暂停任务。
+    paused_task_result = MultiAgentTaskResult(
+        collaboration_id="multi_agent_task_skill_checkpoint",
+        plan=AgentTaskPlan(
+            plan_id="skill_checkpoint_plan",
+            objective="为6岁的金毛制定训练计划",
+            steps=[
+                AgentTaskStep(
+                    step_id="step_training",
+                    title="制定训练计划",
+                    description="为6岁的金毛制定训练计划",
+                    assigned_agent="dog_knowledge_agent",
+                    status="awaiting_input",
+                )
+            ],
+            status="awaiting_input",
+            requires_user_input=True,
+            clarification_prompt="请补充当前行为和训练目标。",
+        ),
+        status="awaiting_input",
+        task_results=[paused_step_result],
+    )
+
+    # FakeGraphApp.current_state 模拟相同 thread_id 对应的最新 Checkpoint。
+    app = FakeGraphApp(
+        current_state=FakeCurrentState(
+            values={
+                "multi_agent_task_result": paused_task_result.model_dump(
+                    mode="python"
+                ),
+                "multi_agent_pending_prompt": (
+                    "请补充当前行为和训练目标。"
+                ),
+                "waiting_user_input": True,
+                "final_answer": "不应恢复成最终答案的旧提示。",
+            }
+        )
+    )
+
+    # 保存主图重新启动时真正收到的 State，用于检查 Checkpoint 恢复结果。
+    received_state: dict[str, Any] = {}
+
+    async def skill_resume_stream_runner(
+        **kwargs: Any,
+    ):
+        """
+        记录恢复后的主图输入并模拟多 Agent 最终执行完成。
+
+        参数含义：
+            kwargs:
+                safe_stream_graph 风格参数，其中 state 是重新进入主图的状态。
+
+        返回值含义：
+            AsyncIterator[dict[str, Any]]:
+                通过 yield 产生一条模拟的多 Agent 完成事件。
+        """
+
+        received_state.update(kwargs["state"])
+        app.current_state = FakeCurrentState(
+            values={
+                "final_answer": "已根据补充信息生成训练计划。",
+                "multi_agent_task_result": {
+                    "status": "completed",
+                },
+            }
+        )
+        yield {
+            "multi_agent": {
+                "final_answer": "已根据补充信息生成训练计划。",
+            }
+        }
+
+    result = await graph_run.run_main_graph_with_result(
+        question="它目前会坐下，希望学习等待和召回。",
+        thread_id="thread_skill_checkpoint",
+        trace_id="trace_skill_checkpoint_resume",
+        resume_value="它目前会坐下，希望学习等待和召回。",
+        graph_app=app,
+        runtime_context=runtime_context,
+        stream_runner=skill_resume_stream_runner,
+    )
+
+    assert isinstance(result, GraphFinalResult)
+    assert result.answer == "已根据补充信息生成训练计划。"
+
+    # 用户补充内容作为新问题重新进入路由，而不是丢失或变成旧问题。
+    assert received_state["question"] == (
+        "它目前会坐下，希望学习等待和召回。"
+    )
+
+    # Checkpoint 中 Step 已提取出的 Skill 数据完整保留，供 Worker 恢复使用。
+    restored_step_result = received_state[
+        "multi_agent_task_result"
+    ]["task_results"][0]
+    assert restored_step_result["status"] == "awaiting_input"
+    assert restored_step_result["output"]["skill_selected_id"] == (
+        "dog-training-plan"
+    )
+    assert restored_step_result["output"]["skill_inputs"] == {
+        "breed": "Golden Retriever",
+        "age": "6岁",
+    }
+
+    # 多 Agent 逻辑等待通过新一轮主图恢复，不会走工具确认使用的原生恢复流。
     assert app.astream_call_count == 0
 
 

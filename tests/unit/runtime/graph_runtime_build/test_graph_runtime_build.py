@@ -274,6 +274,12 @@ async def test_graph_runtime_should_inject_memory_extract_node_dependencies(
         "build_memory_extract_node",
         fake_build_memory_extract_node,
     )
+    injected_skill_node = object()
+    monkeypatch.setattr(
+        graph_runtime_service,
+        "build_skill_prepare_node",
+        lambda: injected_skill_node,
+    )
     monkeypatch.setattr(
         graph_runtime_service,
         "build_dog_knowledge_agent",
@@ -317,6 +323,7 @@ async def test_graph_runtime_should_inject_memory_extract_node_dependencies(
         "checkpoint_manager": checkpoint_provider.manager,
     }
     assert graph.nodes["memory_extract"] is injected_node
+    assert graph.nodes["skill_prepare"] is injected_skill_node
     assert graph.nodes["multi_agent"] == "multi_agent"
 
 

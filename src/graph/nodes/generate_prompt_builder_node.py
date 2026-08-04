@@ -72,7 +72,6 @@ def build_generation_prompt(
         )
         or ""
     ).strip()
-
     if answer_strategy.task_type == "recommendation":
         return build_recommendation_prompt(
             question=question,
