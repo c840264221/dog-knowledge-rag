@@ -20,6 +20,7 @@ from src.agents.collaboration import (
     GraphAgentWorkerAdapter,
     build_default_agent_state,
 )
+from src.skills import build_default_skill_runtime
 
 
 def test_graph_worker_adapter_should_convert_completed_state() -> None:
@@ -285,6 +286,167 @@ def test_default_state_builder_should_keep_identity_and_clear_control_fields(
     assert state["session_id"] == "session_001"
     assert state["trace_id"] == "trace_001"
     assert state["question"] == "查询金毛健康知识"
+    assert state["retrieval_question"] == "查询金毛健康知识"
     assert "intent" not in state
     assert "route_decision" not in state
     assert "answer_strategy" not in state
+
+
+def test_graph_worker_adapter_should_pause_for_missing_skill_inputs() -> None:
+    """
+    检查步骤级 Skill 缺少输入时在调用子 Agent 前暂停。
+
+    功能：
+        训练计划步骤只包含犬种和年龄时，应返回 awaiting_input，并把 Skill
+        恢复数据保存在该步骤 output，runner 不应提前执行。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    runner_call_count = 0
+
+    async def runner(state: Mapping[str, Any]) -> Mapping[str, Any]:
+        """记录不应发生的子 Agent 调用。"""
+
+        nonlocal runner_call_count
+        runner_call_count += 1
+        return state
+
+    adapter = GraphAgentWorkerAdapter(
+        agent_name="dog_knowledge_agent",
+        runner=runner,
+        skill_runtime=build_default_skill_runtime(),
+    )
+    step = AgentTaskStep(
+        step_id="build_training_plan",
+        title="制定训练计划",
+        description="为6岁的金毛制定训练计划",
+        assigned_agent="dog_knowledge_agent",
+    )
+
+    result = asyncio.run(adapter(step, {}))
+
+    assert result.status == "awaiting_input"
+    assert runner_call_count == 0
+    assert result.output["skill_selected_id"] == "dog-training-plan"
+    assert result.output["skill_inputs"] == {
+        "breed": "Golden Retriever",
+        "age": "6岁",
+    }
+    assert result.metadata["skill_runtime"]["status"] == "awaiting_input"
+
+
+def test_graph_worker_adapter_should_run_unmatched_step_normally() -> None:
+    """
+    检查启用 SkillRuntime 后未命中技能的步骤保持旧执行行为。
+
+    功能：
+        普通资料整理步骤不适用训练计划 Skill，Adapter 应继续调用 runner，
+        不能因为生产环境配置了 SkillRuntime 就拦截所有多智能体步骤。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    received_states: list[Mapping[str, Any]] = []
+
+    async def runner(state: Mapping[str, Any]) -> Mapping[str, Any]:
+        """保存普通步骤输入并返回整理结果。"""
+
+        received_states.append(state)
+        return {"final_answer": "资料整理完成。"}
+
+    adapter = GraphAgentWorkerAdapter(
+        agent_name="general_agent",
+        runner=runner,
+        skill_runtime=build_default_skill_runtime(),
+    )
+    step = AgentTaskStep(
+        step_id="organize_materials",
+        title="整理已有资料",
+        assigned_agent="general_agent",
+    )
+
+    result = asyncio.run(adapter(step, {}))
+
+    assert result.status == "completed"
+    assert result.summary == "资料整理完成。"
+    assert len(received_states) == 1
+    assert "skill_context" not in received_states[0]
+    assert "skill_runtime" not in result.metadata
+
+
+def test_graph_worker_adapter_should_resume_step_skill_before_runner() -> None:
+    """
+    检查 Scheduler 恢复步骤后由 Worker 恢复该步骤内部 Skill。
+
+    功能：
+        从 previous_worker_output 读取历史 Skill 输入，与用户补充内容合并，
+        准备完成后才调用 runner，并将 Skill 上下文放入独立状态字段。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    received_states: list[Mapping[str, Any]] = []
+
+    async def runner(state: Mapping[str, Any]) -> Mapping[str, Any]:
+        """保存恢复后的 Worker state 并返回步骤答案。"""
+
+        received_states.append(state)
+        return {
+            **state,
+            "final_answer": "已完成分阶段训练计划。",
+        }
+
+    adapter = GraphAgentWorkerAdapter(
+        agent_name="dog_knowledge_agent",
+        runner=runner,
+        skill_runtime=build_default_skill_runtime(),
+    )
+    step = AgentTaskStep(
+        step_id="build_training_plan",
+        title="制定训练计划",
+        assigned_agent="dog_knowledge_agent",
+        input_data={
+            "multi_agent_is_resuming": True,
+            "multi_agent_resume_input": (
+                "它目前会坐下，希望学习等待和召回。"
+            ),
+            "multi_agent_previous_worker_output": {
+                "skill_selected_id": "dog-training-plan",
+                "skill_status": "awaiting_input",
+                "skill_inputs": {
+                    "breed": "Golden Retriever",
+                    "age": "6岁",
+                },
+            },
+        },
+    )
+
+    result = asyncio.run(adapter(step, {}))
+
+    assert result.status == "completed"
+    assert len(received_states) == 1
+    received_state = received_states[0]
+    assert received_state["skill_status"] == "ready"
+    assert received_state["skill_inputs"] == {
+        "breed": "Golden Retriever",
+        "age": "6岁",
+        "current_behavior": "坐下",
+        "training_goal": "学习等待和召回",
+    }
+    assert "已经校验通过的 Skill 输入" in received_state["question"]
+    assert "技能：狗狗训练计划" in received_state["question"]
+    assert "技能：狗狗训练计划" in received_state["skill_context"]
+    assert received_state["retrieval_question"] == "制定训练计划"

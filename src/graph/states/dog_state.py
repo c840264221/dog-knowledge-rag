@@ -344,6 +344,38 @@ class DogState(TypedDict, total=False):
     multi_agent_pending_prompt: str
 
     # =========================
+    # 11.2 Skill 技能选择、输入准备与跨轮恢复字段
+    # 字典形式便于写入 LangGraph SQLite Checkpoint。
+    # =========================
+
+    # 最近一次 SkillRuntime 标准结果，保存选择、提取和输入检查的完整过程。
+    skill_runtime_result: Dict[str, Any]
+
+    # 当前已经选中的技能编号；恢复时直接继续该技能，不重新匹配简短回答。
+    skill_selected_id: str
+
+    # 前几轮已经提取并通过字段白名单的技能输入，供下一轮继续补全。
+    skill_inputs: Dict[str, Any]
+
+    # 当前技能准备状态，例如 no_skill、awaiting_input 或 ready。
+    skill_status: str
+
+    # Skill 缺少必需输入时展示给用户的补充信息提示。
+    skill_pending_prompt: str
+
+    # 输入齐全后生成的完整技能说明；等待输入阶段保持为空以减少 Token。
+    skill_context: str
+
+    # 首轮触发 Skill 的完整用户问题；恢复时不能只把“6岁”等补充回答交给 Agent。
+    skill_original_question: str
+
+    # RootAgent 首轮选中的目标 Agent；恢复 Skill 时继续回到同一个 Agent。
+    skill_target_agent: str
+
+    # 专门交给 RAG 的简洁业务问题，不包含 Skill 说明和运行控制信息。
+    retrieval_question: str
+
+    # =========================
     # 12. Memory 记忆上下文
     # =========================
 

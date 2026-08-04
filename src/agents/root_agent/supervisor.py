@@ -376,6 +376,44 @@ def decide_root_route(
             },
         )
 
+    # 顶层 Skill 等待用户补充时，继续使用首轮已经确定的目标 Agent。
+    skill_status = (
+        str(state.get("skill_status") or "").strip()
+        if state
+        else ""
+    )
+    skill_target_agent = (
+        str(state.get("skill_target_agent") or "").strip()
+        if state
+        else ""
+    )
+    if (
+        skill_status == "awaiting_input"
+        and skill_target_agent in {
+            "dog_knowledge_agent",
+            "general_agent",
+        }
+    ):
+        return RootRouteDecision(
+            route=skill_target_agent,
+            query_type=(
+                "dog_knowledge"
+                if skill_target_agent == "dog_knowledge_agent"
+                else "general_chat"
+            ),
+            confidence=1.0,
+            reason="当前输入用于补全暂停中的 Skill，继续进入首轮目标 Agent。",
+            requires_rag=(skill_target_agent == "dog_knowledge_agent"),
+            requires_tool=False,
+            requires_memory=True,
+            hints={
+                "skill_resume": True,
+                "skill_selected_id": str(
+                    state.get("skill_selected_id") or ""
+                ),
+            },
+        )
+
     finish_matches = find_matched_keywords(
         question=question,
         keywords=FINISH_KEYWORDS,

@@ -147,11 +147,12 @@ def resolve_question_from_state(
         state: Mapping[str, Any],
 ) -> str:
     """
-    从 state 中读取 question。
+    从 state 中读取专用检索问题或普通业务问题。
 
     功能：
-        读取用户原始问题，并做基础清洗。
-        如果 question 为空，则抛出异常。
+        优先读取 retrieval_question，让 RAG 避开 Skill 说明、恢复控制信息和
+        前置步骤原始结果；没有专用字段时继续兼容原有 question。
+        两个字段都为空时抛出异常。
 
     参数：
         state:
@@ -159,14 +160,12 @@ def resolve_question_from_state(
 
     返回值：
         str:
-            清洗后的用户问题。
+            清洗后的 RAG 检索问题。
     """
 
     question = str(
-        state.get(
-            "question",
-            ""
-        )
+        state.get("retrieval_question")
+        or state.get("question", "")
         or ""
     ).strip()
 

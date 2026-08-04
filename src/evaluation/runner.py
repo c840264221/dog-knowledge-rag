@@ -15,6 +15,7 @@ from src.evaluation.evaluators import (
     MultiAgentOrchestrationEvaluator,
     RagRetrievalBehaviorEvaluator,
     RootRouteEvaluator,
+    SkillBehaviorEvaluator,
     ToolAgentBehaviorEvaluator,
 )
 from src.evaluation.schemas import AgentEvaluationResult
@@ -138,6 +139,13 @@ CORE_EVALUATION_TARGETS = (
             "evaluation/datasets/multi_agent_orchestration_cases.json"
         ),
         evaluator_factory=MultiAgentOrchestrationEvaluator,
+    ),
+    EvaluationTarget(
+        category="skill_behavior",
+        dataset_path=Path(
+            "evaluation/datasets/skill_behavior_cases.json"
+        ),
+        evaluator_factory=SkillBehaviorEvaluator,
     ),
 )
 

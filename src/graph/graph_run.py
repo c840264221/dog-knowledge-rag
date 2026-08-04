@@ -172,6 +172,17 @@ def create_initial_state(
         "multi_agent_resume_ready": False,
         "multi_agent_pending_prompt": "",
 
+        # ========= Skill 技能准备与跨轮恢复字段 =========
+        "skill_runtime_result": {},
+        "skill_selected_id": "",
+        "skill_inputs": {},
+        "skill_status": "no_skill",
+        "skill_pending_prompt": "",
+        "skill_context": "",
+        "skill_original_question": "",
+        "skill_target_agent": "",
+        "retrieval_question": "",
+
         # ========= 工具调用字段 =========
         "tool_calls": [],
         "tool_results": [],
@@ -439,6 +450,11 @@ async def run_main_graph_with_result(
         config=config,
         state=state,
     )
+    state = await restore_pending_skill_state(
+        app=app,
+        config=config,
+        state=state,
+    )
 
     resume_request = parse_legacy_resume_message(
         message=normalized_question,
@@ -458,7 +474,10 @@ async def run_main_graph_with_result(
 
     if (
             resolved_resume_value is not None
-            and _has_pending_multi_agent_resume_state(state)
+            and (
+                _has_pending_multi_agent_resume_state(state)
+                or _has_pending_skill_resume_state(state)
+            )
     ):
         return await _start_main_graph_with_result(
             app=app,
@@ -626,6 +645,92 @@ async def restore_pending_multi_agent_state(
     return restored_state
 
 
+async def restore_pending_skill_state(
+        app: Any,
+        config: Mapping[str, Any],
+        state: Mapping[str, Any],
+) -> dict[str, Any]:
+    """
+    从当前线程检查点恢复等待输入的顶层 Skill 状态。
+
+    功能：
+        读取相同 thread_id 的最新 Checkpoint，只恢复 Skill 继续准备所需的
+        技能编号、已提取输入、原始问题和目标 Agent，不恢复旧答案或旧检索结果。
+
+    参数含义：
+        app:
+            已编译的 LangGraph 主图对象，需要提供 aget_state 方法。
+        config:
+            当前图执行配置，包含用于定位检查点的 thread_id。
+        state:
+            本轮根据用户补充回答创建的干净初始状态。
+
+    返回值含义：
+        dict[str, Any]:
+            合并 Skill 白名单字段后的状态；没有合法等待状态时返回原状态副本。
+    """
+
+    restored_state = dict(state)
+    try:
+        current_state = await app.aget_state(config)
+        checkpoint_values = get_final_state_values(
+            current_state=current_state,
+        )
+    except Exception as exc:
+        logger.debug(
+            f"读取 Skill Checkpoint 失败，按新问题继续: {exc}"
+        )
+        return restored_state
+
+    if str(checkpoint_values.get("skill_status") or "").strip() != (
+        "awaiting_input"
+    ):
+        return restored_state
+
+    selected_skill_id = str(
+        checkpoint_values.get("skill_selected_id") or ""
+    ).strip()
+    original_question = str(
+        checkpoint_values.get("skill_original_question") or ""
+    ).strip()
+    target_agent = str(
+        checkpoint_values.get("skill_target_agent") or ""
+    ).strip()
+    raw_inputs = checkpoint_values.get("skill_inputs")
+    if (
+        not selected_skill_id
+        or not original_question
+        or target_agent not in {
+            "dog_knowledge_agent",
+            "general_agent",
+        }
+        or not isinstance(raw_inputs, Mapping)
+    ):
+        return restored_state
+
+    # 这里只恢复 Skill 继续工作必需的数据，避免旧答案和旧业务结果污染本轮。
+    restored_state.update(
+        {
+            "skill_runtime_result": dict(
+                checkpoint_values.get("skill_runtime_result") or {}
+            ),
+            "skill_selected_id": selected_skill_id,
+            "skill_inputs": dict(raw_inputs),
+            "skill_status": "awaiting_input",
+            "skill_pending_prompt": str(
+                checkpoint_values.get("skill_pending_prompt") or ""
+            ),
+            "skill_context": "",
+            "skill_original_question": original_question,
+            "skill_target_agent": target_agent,
+        }
+    )
+    logger.info(
+        "已从当前 thread_id 的 Checkpoint 恢复等待输入的顶层 Skill。"
+    )
+    return restored_state
+
+
 def _has_pending_multi_agent_resume_state(
         state: Mapping[str, Any],
 ) -> bool:
@@ -652,6 +757,37 @@ def _has_pending_multi_agent_resume_state(
         isinstance(raw_task_result, Mapping)
         and str(raw_task_result.get("status") or "").strip()
         == "awaiting_input"
+    )
+
+
+def _has_pending_skill_resume_state(
+        state: Mapping[str, Any],
+) -> bool:
+    """
+    判断本轮是否应通过新主图输入恢复顶层 Skill。
+
+    功能：
+        Skill 的 awaiting_input 是写入 State 后走到 END 的逻辑等待，不是
+        LangGraph 原生 interrupt；因此需要把用户补充回答作为新问题重新入图。
+
+    参数含义：
+        state:
+            已合并检查点 Skill 白名单字段的本轮初始状态。
+
+    返回值含义：
+        bool:
+            存在合法的等待 Skill、原始问题和目标 Agent 时返回 True。
+    """
+
+    return (
+        str(state.get("skill_status") or "").strip() == "awaiting_input"
+        and bool(str(state.get("skill_selected_id") or "").strip())
+        and bool(str(state.get("skill_original_question") or "").strip())
+        and str(state.get("skill_target_agent") or "").strip()
+        in {
+            "dog_knowledge_agent",
+            "general_agent",
+        }
     )
 
 
@@ -982,6 +1118,16 @@ def build_graph_result_from_current_state(
     if logical_interrupt is not None:
         return logical_interrupt
 
+    skill_interrupt = build_skill_interrupt_result_from_state(
+        state=final_state,
+        thread_id=thread_id,
+        checkpoint_ns=checkpoint_ns,
+        trace_id=trace_id,
+        source="current_state",
+    )
+    if skill_interrupt is not None:
+        return skill_interrupt
+
     write_rag_debug_report_if_enabled(
         state=final_state,
         trace_id=trace_id,
@@ -1068,6 +1214,77 @@ def build_multi_agent_interrupt_result_from_state(
             "waiting_state_consistent": state_waiting_user_input,
             "multi_agent_task_id": str(
                 raw_task_result.get("collaboration_id") or ""
+            ),
+        }
+    )
+    return GraphInterruptResult(
+        prompt=prompt,
+        thread_id=thread_id,
+        checkpoint_ns=checkpoint_ns,
+        trace_id=trace_id,
+        interrupt_type=GraphInterruptType.USER_CLARIFICATION,
+        metadata=metadata,
+    )
+
+
+def build_skill_interrupt_result_from_state(
+        *,
+        state: Mapping[str, Any],
+        thread_id: str,
+        checkpoint_ns: str,
+        trace_id: str | None,
+        source: str,
+) -> GraphInterruptResult | None:
+    """
+    把顶层 Skill 写入 State 的逻辑等待转换成主图中断结果。
+
+    功能：
+        Skill 缺少必需输入时会保存 awaiting_input 并走到主图 END。本函数
+        将该业务等待统一转换为 API 和 UI 已支持的 GraphInterruptResult。
+
+    参数含义：
+        state:
+            当前主图最终状态。
+        thread_id:
+            后续读取同一检查点使用的主图线程编号。
+        checkpoint_ns:
+            检查点命名空间。
+        trace_id:
+            当前请求的链路追踪编号。
+        source:
+            当前状态结果的来源说明。
+
+    返回值含义：
+        GraphInterruptResult | None:
+            Skill 正在等待输入时返回统一中断结果，否则返回 None。
+    """
+
+    if (
+        not isinstance(state, Mapping)
+        or str(state.get("skill_status") or "").strip()
+        != "awaiting_input"
+    ):
+        return None
+
+    prompt = str(
+        state.get("skill_pending_prompt")
+        or state.get("pending_prompt")
+        or "当前 Skill 正在等待用户补充信息。"
+    ).strip()
+    metadata = build_interrupt_metadata_from_state(state)
+    metadata.update(
+        {
+            "source": source,
+            "logical_interrupt": True,
+            "business_status": "awaiting_input",
+            "state_waiting_user_input": bool(
+                state.get("waiting_user_input")
+            ),
+            "skill_selected_id": str(
+                state.get("skill_selected_id") or ""
+            ),
+            "skill_target_agent": str(
+                state.get("skill_target_agent") or ""
             ),
         }
     )

@@ -17,6 +17,12 @@ from src.agents.collaboration.contracts import (
     AgentTaskResult,
     AgentTaskStep,
 )
+from src.skills.runtime import SkillRuntime
+from src.skills.schemas import SkillRuntimeResult
+from src.skills.state_adapter import (
+    build_skill_enhanced_question,
+    build_skill_state_update,
+)
 
 
 AgentStateRunner = Callable[
@@ -40,6 +46,22 @@ DEFAULT_WORKER_OUTPUT_FIELDS = (
     "waiting_user_input",
     "pending_prompt",
     "tool_confirmation_prompt",
+    "skill_runtime_result",
+    "skill_selected_id",
+    "skill_inputs",
+    "skill_status",
+    "skill_pending_prompt",
+    "skill_context",
+)
+
+
+SKILL_WORKER_OUTPUT_FIELDS = (
+    "skill_runtime_result",
+    "skill_selected_id",
+    "skill_inputs",
+    "skill_status",
+    "skill_pending_prompt",
+    "skill_context",
 )
 
 
@@ -72,6 +94,8 @@ class GraphAgentWorkerAdapter:
             可选的自定义 state 构建函数；不传时使用通用默认实现。
         output_fields:
             从 Agent 最终 state 中保留到步骤 output 的字段名称。
+        skill_runtime:
+            可选的步骤级 Skill 运行器；为空时保持原有 Worker 执行行为。
 
     返回值含义：
         GraphAgentWorkerAdapter:
@@ -85,6 +109,7 @@ class GraphAgentWorkerAdapter:
         runner: AgentStateRunner,
         state_builder: AgentStateBuilder | None = None,
         output_fields: Sequence[str] = DEFAULT_WORKER_OUTPUT_FIELDS,
+        skill_runtime: SkillRuntime | None = None,
     ) -> None:
         # 归一化agent_name 祛除首位空格
         normalized_agent_name = str(agent_name or "").strip()
@@ -110,6 +135,7 @@ class GraphAgentWorkerAdapter:
         self.runner = runner
         self.state_builder = state_builder or build_default_agent_state
         self.output_fields = normalized_output_fields
+        self.skill_runtime = skill_runtime
 
     async def __call__(
         self,
@@ -145,6 +171,57 @@ class GraphAgentWorkerAdapter:
             self.state_builder(step, dependency_results)
         )
 
+        # Skill 只属于当前 step，本地结果不会写入其他并发步骤的共享状态。
+        skill_result = _prepare_step_skill(
+            skill_runtime=self.skill_runtime,
+            step=step,
+            input_state=input_state,
+        )
+        if (
+            skill_result is not None
+            and skill_result.status == "awaiting_input"
+        ):
+            clarification_prompt = str(
+                skill_result.input_check.clarification_prompt
+                if skill_result.input_check is not None
+                else ""
+            ).strip()
+            if not clarification_prompt:
+                raise ValueError(
+                    "Skill 正在等待用户输入，但没有提供等待提示"
+                )
+
+            # output 会被 Scheduler 写回等待步骤，并在恢复时放进 previous_worker_output。
+            skill_state_update = build_skill_state_update(skill_result)
+            skill_output = {
+                field_name: skill_state_update[field_name]
+                for field_name in SKILL_WORKER_OUTPUT_FIELDS
+                if field_name in skill_state_update
+            }
+            return AgentTaskResult(
+                step_id=step.step_id,
+                assigned_agent=step.assigned_agent,
+                status="awaiting_input",
+                summary="当前步骤使用的 Skill 正在等待用户输入。",
+                output=skill_output,
+                requires_user_input=True,
+                clarification_prompt=clarification_prompt,
+                metadata=_build_worker_metadata(skill_result),
+            )
+
+        if skill_result is not None and skill_result.status == "ready":
+            skill_state_update = build_skill_state_update(skill_result)
+            clean_question = str(input_state.get("question") or "").strip()
+            input_state["retrieval_question"] = str(
+                input_state.get("retrieval_question") or clean_question
+            ).strip()
+            input_state.update(skill_state_update)
+            input_state["question"] = build_skill_enhanced_question(
+                question=clean_question,
+                skill_inputs=skill_result.extraction.merged_inputs,
+                skill_context=skill_result.skill_context,
+            )
+
         # 当前步骤执行后的原始结果 也就是state  runner是子agent运行器 比如：dog_knowledge_agent.ainvoke
         raw_state = self.runner(input_state)
 
@@ -179,7 +256,7 @@ class GraphAgentWorkerAdapter:
                 requires_user_input=True,
                 clarification_prompt=clarification_prompt,
                 metadata={
-                    "worker_adapter": type(self).__name__,
+                    **_build_worker_metadata(skill_result),
                 },
             )
 
@@ -192,9 +269,116 @@ class GraphAgentWorkerAdapter:
             output=output,
             evidence_ids=_extract_evidence_ids(final_state),
             metadata={
-                "worker_adapter": type(self).__name__,
+                **_build_worker_metadata(skill_result),
             },
         )
+
+
+def _prepare_step_skill(
+    *,
+    skill_runtime: SkillRuntime | None,
+    step: AgentTaskStep,
+    input_state: Mapping[str, Any],
+) -> SkillRuntimeResult | None:
+    """
+    为当前多智能体步骤选择或恢复 Skill。
+
+    功能：
+        首次执行时使用步骤问题选择 Skill；恢复执行时从上一次 Worker output
+        中读取该步骤自己的技能编号和输入，并使用用户本轮回答继续补全。
+
+    参数含义：
+        skill_runtime:
+            当前 Worker 可选的技能运行器；为空表示不启用步骤级 Skill。
+        step:
+            Scheduler 当前交给 Worker 的步骤。
+        input_state:
+            已由 state_builder 构建、准备交给子 Agent 的状态。
+
+    返回值含义：
+        SkillRuntimeResult | None:
+            启用 Skill 时返回准备结果；未配置运行器时返回 None。
+    """
+
+    if skill_runtime is None:
+        return None
+
+    # Scheduler 恢复等待步骤时，会把上一次 output 放进这个字段。
+    raw_previous_output = step.input_data.get(
+        "multi_agent_previous_worker_output"
+    )
+    previous_output = (
+        dict(raw_previous_output)
+        if isinstance(raw_previous_output, Mapping)
+        else {}
+    )
+    is_resuming_skill = (
+        bool(step.input_data.get("multi_agent_is_resuming"))
+        and str(previous_output.get("skill_status") or "").strip()
+        == "awaiting_input"
+    )
+
+    # 恢复时使用用户新回答；首次执行使用当前步骤未经附加说明的原始任务文本。
+    user_text = (
+        str(step.input_data.get("multi_agent_resume_input") or "").strip()
+        if is_resuming_skill
+        else str(
+            step.input_data.get("question")
+            or step.description
+            or step.title
+            or input_state.get("question")
+            or ""
+        ).strip()
+    )
+    selected_skill_id = (
+        str(previous_output.get("skill_selected_id") or "").strip()
+        if is_resuming_skill
+        else ""
+    )
+    raw_existing_inputs = previous_output.get("skill_inputs")
+    existing_inputs = (
+        dict(raw_existing_inputs)
+        if is_resuming_skill
+        and isinstance(raw_existing_inputs, Mapping)
+        else {}
+    )
+    return skill_runtime.prepare(
+        user_text=user_text,
+        existing_inputs=existing_inputs,
+        selected_skill_id=selected_skill_id or None,
+    )
+
+
+def _build_worker_metadata(
+    skill_result: SkillRuntimeResult | None,
+) -> dict[str, Any]:
+    """
+    构建包含可选 Skill 轨迹的 Worker 元数据。
+
+    功能：
+        始终记录 Worker Adapter 名称；步骤命中 Skill 时额外保存完整准备结果，
+        便于调试且不会与其他 step 的 Skill 状态互相覆盖。
+
+    参数含义：
+        skill_result:
+            当前步骤的可选 Skill 准备结果。
+
+    返回值含义：
+        dict[str, Any]:
+            可以保存到 AgentTaskResult.metadata 的普通字典。
+    """
+
+    metadata: dict[str, Any] = {
+        "worker_adapter": "GraphAgentWorkerAdapter",
+    }
+    if (
+        skill_result is not None
+        and skill_result.status != "no_skill"
+    ):
+        metadata["skill_runtime"] = skill_result.model_dump(
+            mode="python"
+        )
+    return metadata
 
 
 def build_default_agent_state(
@@ -226,6 +410,11 @@ def build_default_agent_state(
         state.get("question")
         or step.description
         or step.title
+    ).strip()
+
+    # 检索问题只保留当前步骤的业务目标，不混入前置结果、恢复说明或 Skill。
+    retrieval_question = str(
+        state.get("retrieval_question") or question
     ).strip()
 
     # 根据前置依赖的结果  构建dependency_payload的数据
@@ -273,6 +462,7 @@ def build_default_agent_state(
             f"{resume_input}"
         )
     state["question"] = question
+    state["retrieval_question"] = retrieval_question
     return state
 
 

@@ -275,3 +275,32 @@ async def test_semantic_router_should_route_multi_agent_resume() -> None:
         "confirm_profile": "允许读取"
     }
     assert result["multi_agent_resume_ready"] is True
+
+
+@pytest.mark.asyncio
+async def test_semantic_router_should_keep_saved_skill_target_on_resume() -> None:
+    """
+    测试 Skill 恢复时不会用简短补充回答重新判断目标 Agent。
+
+    功能：
+        用户只补充“6岁”时，RootAgent 应读取检查点保存的目标，继续进入
+        dog_knowledge_agent，而不是把简短回答误判成 general_agent。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    result = await semantic_router_node(
+        {
+            "question": "6岁",
+            "skill_status": "awaiting_input",
+            "skill_selected_id": "dog-training-plan",
+            "skill_target_agent": "dog_knowledge_agent",
+        }
+    )
+
+    assert result["next_agent"] == "dog_knowledge_agent"
+    assert result["route_decision"]["hints"]["skill_resume"] is True

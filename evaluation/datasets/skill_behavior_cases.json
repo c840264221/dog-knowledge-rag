@@ -1,0 +1,186 @@
+[
+    {
+        "case_id": "skill_no_match_001",
+        "category": "skill_behavior",
+        "question": "帮我查询今天成都的天气。",
+        "expected": {
+            "status": "no_skill",
+            "selected_skill_id": null,
+            "selection_source": "deterministic_keyword_v1",
+            "candidate_skill_ids": [],
+            "extracted_inputs": {},
+            "merged_inputs": {},
+            "missing_input_ids": [],
+            "input_ready": false,
+            "skill_context_loaded": false
+        },
+        "tags": [
+            "skill",
+            "selection",
+            "no_match"
+        ]
+    },
+    {
+        "case_id": "skill_training_awaiting_input_001",
+        "category": "skill_behavior",
+        "question": "帮我为6岁的金毛制定训练计划。",
+        "expected": {
+            "status": "awaiting_input",
+            "selected_skill_id": "dog-training-plan",
+            "selection_source": "deterministic_keyword_v1",
+            "candidate_skill_ids": [
+                "dog-training-plan"
+            ],
+            "matched_hints": [
+                "制定训练计划",
+                "训练计划"
+            ],
+            "extracted_inputs": {
+                "breed": "Golden Retriever",
+                "age": "6岁"
+            },
+            "merged_inputs": {
+                "breed": "Golden Retriever",
+                "age": "6岁"
+            },
+            "available_input_ids": [
+                "breed",
+                "age"
+            ],
+            "missing_input_ids": [
+                "current_behavior",
+                "training_goal"
+            ],
+            "input_ready": false,
+            "skill_context_loaded": false,
+            "clarification_prompt_contains": [
+                "当前行为基础",
+                "训练目标"
+            ]
+        },
+        "tags": [
+            "skill",
+            "awaiting_input",
+            "clarification"
+        ]
+    },
+    {
+        "case_id": "skill_training_ready_001",
+        "category": "skill_behavior",
+        "question": "帮我为6岁的金毛制定训练计划，它目前会坐下，希望学习等待和召回。",
+        "expected": {
+            "status": "ready",
+            "selected_skill_id": "dog-training-plan",
+            "selection_source": "deterministic_keyword_v1",
+            "candidate_skill_ids": [
+                "dog-training-plan"
+            ],
+            "extracted_inputs": {
+                "breed": "Golden Retriever",
+                "age": "6岁",
+                "current_behavior": "坐下",
+                "training_goal": "学习等待和召回"
+            },
+            "merged_inputs": {
+                "breed": "Golden Retriever",
+                "age": "6岁",
+                "current_behavior": "坐下",
+                "training_goal": "学习等待和召回"
+            },
+            "available_input_ids": [
+                "breed",
+                "age",
+                "current_behavior",
+                "training_goal"
+            ],
+            "missing_input_ids": [],
+            "input_ready": true,
+            "skill_context_loaded": true,
+            "skill_context_contains": [
+                "技能：狗狗训练计划",
+                "执行步骤",
+                "正向强化原则"
+            ]
+        },
+        "tags": [
+            "skill",
+            "ready",
+            "context_loading"
+        ]
+    },
+    {
+        "case_id": "skill_training_resume_001",
+        "category": "skill_behavior",
+        "question": "它目前会坐下，希望学习等待和召回。",
+        "input_state": {
+            "selected_skill_id": "dog-training-plan",
+            "existing_inputs": {
+                "breed": "Golden Retriever",
+                "age": "6岁"
+            }
+        },
+        "expected": {
+            "status": "ready",
+            "selected_skill_id": "dog-training-plan",
+            "selection_source": "provided_skill_id",
+            "candidate_skill_ids": [
+                "dog-training-plan"
+            ],
+            "matched_hints": [],
+            "extracted_inputs": {
+                "current_behavior": "坐下",
+                "training_goal": "学习等待和召回"
+            },
+            "merged_inputs": {
+                "breed": "Golden Retriever",
+                "age": "6岁",
+                "current_behavior": "坐下",
+                "training_goal": "学习等待和召回"
+            },
+            "missing_input_ids": [],
+            "input_ready": true,
+            "skill_context_loaded": true
+        },
+        "tags": [
+            "skill",
+            "resume",
+            "checkpoint_inputs"
+        ]
+    },
+    {
+        "case_id": "skill_training_correct_age_001",
+        "category": "skill_behavior",
+        "question": "不是5岁，是6岁。",
+        "input_state": {
+            "selected_skill_id": "dog-training-plan",
+            "existing_inputs": {
+                "breed": "Golden Retriever",
+                "age": "5岁",
+                "current_behavior": "坐下",
+                "training_goal": "学习等待和召回"
+            }
+        },
+        "expected": {
+            "status": "ready",
+            "selected_skill_id": "dog-training-plan",
+            "selection_source": "provided_skill_id",
+            "extracted_inputs": {
+                "age": "6岁"
+            },
+            "merged_inputs": {
+                "breed": "Golden Retriever",
+                "age": "6岁",
+                "current_behavior": "坐下",
+                "training_goal": "学习等待和召回"
+            },
+            "missing_input_ids": [],
+            "input_ready": true,
+            "skill_context_loaded": true
+        },
+        "tags": [
+            "skill",
+            "resume",
+            "input_correction"
+        ]
+    }
+]

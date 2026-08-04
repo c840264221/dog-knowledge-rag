@@ -33,6 +33,8 @@ TOOL_AGENT_NODE = "tool_agent"
 
 MULTI_AGENT_NODE = "multi_agent"
 
+SKILL_PREPARE_NODE = "skill_prepare"
+
 
 def build_main_route_alias_map(
         end_node: Any,
@@ -58,6 +60,9 @@ def build_main_route_alias_map(
            - exact_agent -> dog_knowledge_agent
            - exact_search_agent -> dog_knowledge_agent
 
+        V1.23 Skill 接入后，普通 dog_knowledge_agent / general_agent 路由
+        会先映射到 skill_prepare；工具、多 Agent 和 FINISH 保持原有目标。
+
     参数：
         end_node:
             LangGraph END 节点。
@@ -78,5 +83,15 @@ def build_main_route_alias_map(
             EXACT_SEARCH_AGENT_ROUTE: DOG_KNOWLEDGE_AGENT_NODE,
         }
     )
+
+    # 普通知识与通用请求先经过 Skill 准备；工具和多 Agent 保持原链路。
+    for direct_route in (
+        DOG_KNOWLEDGE_AGENT_ROUTE,
+        GENERAL_AGENT_ROUTE,
+        RECOMMENDATION_AGENT_ROUTE,
+        EXACT_AGENT_ROUTE,
+        EXACT_SEARCH_AGENT_ROUTE,
+    ):
+        route_map[direct_route] = SKILL_PREPARE_NODE
 
     return route_map
