@@ -90,6 +90,71 @@ def test_training_extractor_should_extract_behavior_and_goal() -> None:
     }
 
 
+def test_training_extractor_should_read_planner_quoted_fields() -> None:
+    """
+    测试训练技能可以识别 Planner 使用引号改写的行为和目标。
+
+    功能：
+        覆盖真实步骤描述中的“现有‘坐下’技能”和“‘等待’、‘召回’科目”，
+        防止信息明明写在步骤中却再次向用户提问。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    extractor = build_default_skill_input_extractor()
+
+    result = extractor.extract(
+        skill_id="dog-training-plan",
+        user_text=(
+            "针对6岁金毛犬，基于其现有“坐下”技能，"
+            "为“等待”和“召回”两个科目制定分阶段训练计划。"
+        ),
+    )
+
+    assert result.extracted_inputs == {
+        "breed": "Golden Retriever",
+        "age": "6岁",
+        "current_behavior": "坐下",
+        "training_goal": "等待和召回",
+    }
+
+
+def test_training_extractor_should_read_parenthesized_labeled_fields() -> None:
+    """
+    测试训练技能可以识别括号内使用字段名标注的输入。
+
+    功能：
+        支持 Planner 或人工模板生成的“当前行为基础：...；训练目标：...”格式。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    extractor = build_default_skill_input_extractor()
+
+    result = extractor.extract(
+        skill_id="dog-training-plan",
+        user_text=(
+            "为6岁金毛制定训练计划"
+            "（当前行为基础：坐下；训练目标：等待和召回）。"
+        ),
+    )
+
+    assert result.extracted_inputs == {
+        "breed": "Golden Retriever",
+        "age": "6岁",
+        "current_behavior": "坐下",
+        "training_goal": "等待和召回",
+    }
+
+
 def test_training_extractor_should_not_treat_negative_behavior_as_mastered() -> None:
     """
     测试否定表达不会被误判为已经掌握的行为。

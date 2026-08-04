@@ -3,6 +3,9 @@ from typing import Any, Literal
 from pydantic import BaseModel
 from pydantic import Field
 
+from src.rag.query_builders.rag_query_builder import (
+    resolve_question_from_state,
+)
 from src.settings import settings
 
 
@@ -203,13 +206,8 @@ def evaluate_retrieval_quality(
         )
     )
 
-    question = str(
-        state.get(
-            "question",
-            ""
-        )
-        or ""
-    )
+    # 质量评估与召回、重排序使用同一个问题，避免 Skill 上下文干扰主题判断。
+    question = resolve_question_from_state(state=state)
 
     expected_dog_name = extract_expected_dog_name(
         state=state

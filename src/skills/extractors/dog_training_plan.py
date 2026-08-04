@@ -22,6 +22,15 @@ CURRENT_BEHAVIOR_PATTERNS = [
         r"(?:会|掌握了?|学会了)"
         r"(?P<value>[^，。；,;]{1,40})"
     ),
+    re.compile(
+        r"(?:基于|根据)(?:其|它|狗狗)?(?:现有|当前|已经掌握的?)?\s*"
+        r"[“\"「『](?P<value>[^”\"」』]{1,40})[”\"」』]\s*"
+        r"(?:技能|指令|行为基础)"
+    ),
+    re.compile(
+        r"(?:当前行为基础|当前行为|已掌握(?:的)?(?:技能|指令))"
+        r"\s*[：:]\s*(?P<value>[^，。；,;）)]{1,40})"
+    ),
 ]
 TRAINING_GOAL_PATTERNS = [
     re.compile(
@@ -31,6 +40,17 @@ TRAINING_GOAL_PATTERNS = [
     re.compile(
         r"想(?:训练|教)(?:它|狗狗)?"
         r"(?P<value>[^。；;]{1,60})"
+    ),
+    re.compile(
+        r"(?:为|围绕)\s*"
+        r"(?P<value>"
+        r"[“\"「『][^”\"」』]{1,30}[”\"」』]"
+        r"(?:(?:、|和|与)[“\"「『][^”\"」』]{1,30}[”\"」』])*"
+        r")\s*(?:两个|多个)?(?:科目|目标|训练项目)"
+    ),
+    re.compile(
+        r"(?:训练目标|目标)\s*[：:]\s*"
+        r"(?P<value>[^，。；,;）)]{1,60})"
     ),
 ]
 
@@ -197,7 +217,12 @@ def _extract_first_match(
         if match is None:
             continue
 
-        value = match.group("value").strip(" ，,：:")
+        value = match.group("value").strip(
+            " ，,：:（）()“”\"「」『』"
+        )
+        value = value.translate(
+            str.maketrans("", "", "“”\"「」『』")
+        )
         if value:
             return value
     return None

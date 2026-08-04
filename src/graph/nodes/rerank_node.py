@@ -8,6 +8,7 @@ from langchain_core.documents import Document
 
 from src.graph.states.dog_state import DogState
 from src.logger import logger
+from src.rag.query_builders import resolve_question_from_state
 from src.runtime.context import runtime_ctx
 
 
@@ -189,18 +190,8 @@ def execute_rerank(
         name="rerank_node",
     )
 
-    question = str(
-        state.get(
-            "question",
-            ""
-        )
-        or ""
-    ).strip()
-
-    if not question:
-        raise ValueError(
-            "rerank_node 缺少 question"
-        )
+    # 重排序必须使用与初次召回相同的干净问题，避免 Skill 说明改变相关性分数。
+    question = resolve_question_from_state(state=state)
 
     logger.info(
         "进入新版 rerank_node，"

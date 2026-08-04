@@ -19,6 +19,9 @@ from src.rag.schemas import (
     RagContext,
     RagRetrievedChunk,
 )
+from src.rag.query_builders.rag_query_builder import (
+    resolve_question_from_state,
+)
 
 
 
@@ -1531,13 +1534,8 @@ def build_retrieval_diagnostics(
     )
 
     diagnostics = RetrievalDiagnostics(
-        question=str(
-            state.get(
-                "question",
-                "",
-            )
-            or ""
-        ),
+        # 诊断报告展示真正参与 RAG 的问题，而不是附带 Skill 的 Agent 问题。
+        question=resolve_question_from_state(state=state),
         stage=safe_stage,
         route=resolve_route_from_state(
             state
