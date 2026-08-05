@@ -1051,6 +1051,43 @@ async def test_resume_multi_agent_logical_wait_should_return_interrupt(
     assert result.metadata["source"] == "resume_stream_event"
 
 
+def test_ambiguous_task_relation_should_return_interrupt_result() -> None:
+    """
+    测试无法区分新旧任务时返回统一澄清中断结果。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    result = graph_run.build_task_relation_interrupt_result_from_state(
+        state={
+            "task_relation_requires_confirmation": True,
+            "task_relation_pending_kind": "skill",
+            "task_relation_decision": {
+                "relation": "ambiguous",
+                "normalized_input": "成都天气",
+                "confidence": 0.5,
+                "reason": "无法确定",
+                "source": "fallback",
+            },
+            "pending_prompt": "请明确是继续旧任务还是开始新问题。",
+            "waiting_user_input": True,
+        },
+        thread_id="thread_relation",
+        checkpoint_ns="main_graph",
+        trace_id="trace_relation",
+        source="current_state",
+    )
+
+    assert isinstance(result, GraphInterruptResult)
+    assert result.prompt == "请明确是继续旧任务还是开始新问题。"
+    assert result.metadata["pending_task_kind"] == "skill"
+    assert result.metadata["task_relation"]["relation"] == "ambiguous"
+
+
 @pytest.mark.asyncio
 async def test_run_main_graph_with_result_should_resume_to_interrupt_result(
     runtime_context: FakeRuntimeContext,

@@ -164,6 +164,9 @@ def create_initial_state(
         "has_asked_user": False,
         "pending_prompt": "",
         "waiting_user_input": False,
+        "task_relation_decision": {},
+        "task_relation_pending_kind": "",
+        "task_relation_requires_confirmation": False,
 
         # ========= 多 Agent 跨轮恢复字段 =========
         "multi_agent_task_result": {},
@@ -1108,6 +1111,16 @@ def build_graph_result_from_current_state(
         current_state=current_state
     )
 
+    task_relation_interrupt = build_task_relation_interrupt_result_from_state(
+        state=final_state,
+        thread_id=thread_id,
+        checkpoint_ns=checkpoint_ns,
+        trace_id=trace_id,
+        source="current_state",
+    )
+    if task_relation_interrupt is not None:
+        return task_relation_interrupt
+
     logical_interrupt = build_multi_agent_interrupt_result_from_state(
         state=final_state,
         thread_id=thread_id,
@@ -1148,6 +1161,83 @@ def build_graph_result_from_current_state(
         checkpoint_ns=checkpoint_ns,
         trace_id=trace_id,
         metadata=build_graph_business_summary(final_state),
+    )
+
+
+def build_task_relation_interrupt_result_from_state(
+        *,
+        state: Mapping[str, Any],
+        thread_id: str,
+        checkpoint_ns: str,
+        trace_id: str | None,
+        source: str,
+) -> GraphInterruptResult | None:
+    """
+    把无法区分新旧任务的状态转换成统一主图中断结果。
+
+    功能：
+        当通用任务关系判断返回 ambiguous 时，不让 Tool、Skill 或多智能体
+        猜测用户意图，而是把确认提示转换为 API 和 UI 已支持的
+        GraphInterruptResult。
+
+    参数含义：
+        state:
+            当前主图最终状态。
+        thread_id:
+            后续继续同一会话所需的主图线程编号。
+        checkpoint_ns:
+            检查点命名空间。
+        trace_id:
+            当前请求的链路追踪编号。
+        source:
+            当前状态来自最终快照还是流式恢复事件。
+
+    返回值含义：
+        GraphInterruptResult | None:
+            需要用户明确新旧任务关系时返回中断结果，否则返回 None。
+    """
+
+    if (
+        not isinstance(state, Mapping)
+        or not bool(state.get("task_relation_requires_confirmation"))
+    ):
+        return None
+
+    raw_decision = state.get("task_relation_decision")
+    if (
+        not isinstance(raw_decision, Mapping)
+        or str(raw_decision.get("relation") or "").strip()
+        != "ambiguous"
+    ):
+        return None
+
+    prompt = str(
+        state.get("pending_prompt")
+        or state.get("final_answer")
+        or "请明确说明是继续上一条任务，还是开始一个新问题。"
+    ).strip()
+    metadata = build_interrupt_metadata_from_state(state)
+    metadata.update(
+        {
+            "source": source,
+            "logical_interrupt": True,
+            "business_status": "awaiting_input",
+            "state_waiting_user_input": bool(
+                state.get("waiting_user_input")
+            ),
+            "task_relation": dict(raw_decision),
+            "pending_task_kind": str(
+                state.get("task_relation_pending_kind") or ""
+            ),
+        }
+    )
+    return GraphInterruptResult(
+        prompt=prompt,
+        thread_id=thread_id,
+        checkpoint_ns=checkpoint_ns,
+        trace_id=trace_id,
+        interrupt_type=GraphInterruptType.USER_CLARIFICATION,
+        metadata=metadata,
     )
 
 

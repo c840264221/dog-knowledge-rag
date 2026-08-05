@@ -154,6 +154,11 @@ async def test_main_graph_evaluator_should_check_route_answer_and_traces() -> No
             },
             "next_agent": "dog_knowledge_agent",
             "final_answer": "金毛寻回犬的寿命通常为 10 到 12 年。",
+            "task_relation_decision": {
+                "relation": "new_task",
+            },
+            "task_relation_pending_kind": "multi_agent",
+            "task_relation_requires_confirmation": False,
             "dog_knowledge_answer": {},
         }
     )
@@ -172,6 +177,9 @@ async def test_main_graph_evaluator_should_check_route_answer_and_traces() -> No
             "dog_retriever_call_count": 1,
             "dog_answer_call_count": 1,
             "tool_executor_call_count": 0,
+            "task_relation": "new_task",
+            "task_relation_pending_kind": "multi_agent",
+            "task_relation_requires_confirmation": False,
             "required_state_fields": [
                 "route_decision",
                 "dog_knowledge_answer",

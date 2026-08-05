@@ -427,5 +427,135 @@
             "multi_agent",
             "needs_clarification"
         ]
+    },
+    {
+        "case_id": "main_graph_pending_task_new_request_001",
+        "category": "main_graph_behavior",
+        "question": "请使用多个智能体制定一份新的训练方案。",
+        "input_state": {
+            "user_id": "evaluation_user",
+            "evaluation_multi_agent_pending_result": {
+                "collaboration_id": "old_waiting_task",
+                "plan": {
+                    "plan_id": "old_waiting_plan",
+                    "objective": "生成旧健康方案",
+                    "steps": [
+                        {
+                            "step_id": "step_profile",
+                            "title": "补全旧档案",
+                            "assigned_agent": "profile_agent",
+                            "status": "awaiting_input"
+                        }
+                    ],
+                    "status": "awaiting_input",
+                    "requires_user_input": true,
+                    "clarification_prompt": "请补充狗狗年龄。"
+                },
+                "status": "awaiting_input",
+                "task_results": [
+                    {
+                        "step_id": "step_profile",
+                        "assigned_agent": "profile_agent",
+                        "status": "awaiting_input",
+                        "requires_user_input": true,
+                        "clarification_prompt": "请补充狗狗年龄。"
+                    }
+                ]
+            },
+            "evaluation_multi_agent_plan": {
+                "plan_id": "new_training_plan",
+                "objective": "制定新的训练方案",
+                "steps": [
+                    {
+                        "step_id": "step_training",
+                        "title": "制定新的训练方案",
+                        "assigned_agent": "training_agent"
+                    }
+                ]
+            },
+            "evaluation_multi_agent_aggregation_response": {
+                "final_answer": "新的多智能体训练方案已经完成。",
+                "used_step_ids": ["step_training"],
+                "limitations": []
+            }
+        },
+        "expected": {
+            "route": "multi_agent",
+            "query_type": "multi_agent_task",
+            "final_answer_contains": "新的多智能体训练方案",
+            "task_relation": "new_task",
+            "task_relation_pending_kind": "multi_agent",
+            "task_relation_requires_confirmation": false,
+            "multi_agent_task_status": "completed",
+            "multi_agent_plan_status": "completed",
+            "multi_agent_planner_call_count": 1,
+            "multi_agent_aggregator_call_count": 1,
+            "multi_agent_worker_call_counts": {
+                "step_training": 1
+            },
+            "waiting_user_input": false
+        },
+        "tags": [
+            "main_graph",
+            "task_relation",
+            "new_task",
+            "pending_task_isolation"
+        ]
+    },
+    {
+        "case_id": "main_graph_pending_task_ambiguous_001",
+        "category": "main_graph_behavior",
+        "question": "成都天气",
+        "input_state": {
+            "user_id": "evaluation_user",
+            "evaluation_multi_agent_pending_result": {
+                "collaboration_id": "ambiguous_waiting_task",
+                "plan": {
+                    "plan_id": "ambiguous_waiting_plan",
+                    "objective": "生成健康方案",
+                    "steps": [
+                        {
+                            "step_id": "step_profile",
+                            "title": "补全档案",
+                            "assigned_agent": "profile_agent",
+                            "status": "awaiting_input"
+                        }
+                    ],
+                    "status": "awaiting_input",
+                    "requires_user_input": true,
+                    "clarification_prompt": "请补充狗狗年龄。"
+                },
+                "status": "awaiting_input",
+                "task_results": [
+                    {
+                        "step_id": "step_profile",
+                        "assigned_agent": "profile_agent",
+                        "status": "awaiting_input",
+                        "requires_user_input": true,
+                        "clarification_prompt": "请补充狗狗年龄。"
+                    }
+                ]
+            }
+        },
+        "expected": {
+            "route": "FINISH",
+            "query_type": "finish",
+            "final_answer_contains": "继续任务",
+            "task_relation": "ambiguous",
+            "task_relation_pending_kind": "multi_agent",
+            "task_relation_requires_confirmation": true,
+            "multi_agent_task_status": "awaiting_input",
+            "multi_agent_plan_status": "awaiting_input",
+            "multi_agent_planner_call_count": 0,
+            "multi_agent_aggregator_call_count": 0,
+            "multi_agent_worker_call_counts": {},
+            "waiting_user_input": true
+        },
+        "tags": [
+            "main_graph",
+            "task_relation",
+            "ambiguous",
+            "safe_confirmation"
+        ]
     }
 ]

@@ -16,6 +16,7 @@ from src.agents.collaboration.adapters import (
 from src.graph.states.dog_state import (
     DogState,
 )
+from src.runtime.resume import resolve_pending_task_relation
 
 
 async def semantic_router_node(
@@ -51,19 +52,37 @@ async def semantic_router_node(
             向后兼容。避免旧主图节点名、checkpoint、日志链路立刻失效。
     """
 
-    clarification_resolution = resolve_tool_clarification_input(
-        state=state,
-    )
-    clarification_update = clarification_resolution.get(
+    # 先判断本轮文字是在继续旧任务还是开始新任务，避免旧任务抢走新问题。
+    task_relation_resolution = resolve_pending_task_relation(state)
+    task_relation_update = task_relation_resolution.get(
         "state_update",
         {},
     )
     resolved_state = {
         **dict(state),
-        **dict(clarification_update),
+        **dict(task_relation_update),
     }
-    multi_agent_resolution = resolve_multi_agent_resume_input(
-        resolved_state
+
+    # 只有确认继续旧任务时，才允许各业务恢复适配器解析补充内容。
+    relation_action = task_relation_resolution.get("action")
+    should_run_business_resume = relation_action in {
+        "none",
+        "resume",
+    }
+    clarification_resolution = (
+        resolve_tool_clarification_input(state=resolved_state)
+        if should_run_business_resume
+        else {"action": "none", "state_update": {}}
+    )
+    clarification_update = clarification_resolution.get(
+        "state_update",
+        {},
+    )
+    resolved_state = {**resolved_state, **dict(clarification_update)}
+    multi_agent_resolution = (
+        resolve_multi_agent_resume_input(resolved_state)
+        if should_run_business_resume
+        else {"action": "none", "state_update": {}}
     )
     multi_agent_update = multi_agent_resolution.get(
         "state_update",
@@ -78,6 +97,7 @@ async def semantic_router_node(
     )
 
     return {
+        **dict(task_relation_update),
         **dict(clarification_update),
         **dict(multi_agent_update),
         **root_update,
