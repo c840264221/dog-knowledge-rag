@@ -45,6 +45,9 @@ SUPPORTED_EXPECTED_FIELDS = {
     "multi_agent_planner_call_count",
     "multi_agent_aggregator_call_count",
     "multi_agent_worker_call_counts",
+    "task_relation",
+    "task_relation_pending_kind",
+    "task_relation_requires_confirmation",
     "required_state_fields",
 }
 
@@ -250,6 +253,15 @@ class MainGraphBehaviorEvaluator:
             if isinstance(route_hints, Mapping)
             else {}
         )
+        task_relation_decision = result_state.get(
+            "task_relation_decision",
+            {},
+        )
+        normalized_task_relation_decision = (
+            dict(task_relation_decision)
+            if isinstance(task_relation_decision, Mapping)
+            else {}
+        )
         planning_provider = getattr(
             runtime,
             "multi_agent_planning_provider",
@@ -322,6 +334,18 @@ class MainGraphBehaviorEvaluator:
                 dict(multi_agent_worker.call_counts)
                 if multi_agent_worker is not None
                 else {}
+            ),
+            "task_relation": normalized_task_relation_decision.get(
+                "relation"
+            ),
+            "task_relation_pending_kind": result_state.get(
+                "task_relation_pending_kind"
+            ),
+            "task_relation_requires_confirmation": bool(
+                result_state.get(
+                    "task_relation_requires_confirmation",
+                    False,
+                )
             ),
             "state_fields_present": sorted(result_state.keys()),
         }

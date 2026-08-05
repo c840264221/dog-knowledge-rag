@@ -304,3 +304,87 @@ async def test_semantic_router_should_keep_saved_skill_target_on_resume() -> Non
 
     assert result["next_agent"] == "dog_knowledge_agent"
     assert result["route_decision"]["hints"]["skill_resume"] is True
+
+
+@pytest.mark.asyncio
+async def test_semantic_router_should_not_resume_old_task_for_new_request() -> None:
+    """
+    测试完整新请求不会被单个等待步骤错误吸收为恢复答案。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    step = AgentTaskStep(
+        step_id="step_profile",
+        title="补全档案",
+        assigned_agent="profile_agent",
+        status="awaiting_input",
+    )
+    paused_result = MultiAgentTaskResult(
+        collaboration_id="old_task",
+        plan=AgentTaskPlan(
+            plan_id="old_plan",
+            objective="生成旧健康方案",
+            steps=[step],
+            status="awaiting_input",
+            requires_user_input=True,
+            clarification_prompt="请补充年龄。",
+        ),
+        status="awaiting_input",
+        task_results=[
+            AgentTaskResult(
+                step_id=step.step_id,
+                assigned_agent=step.assigned_agent,
+                status="awaiting_input",
+                requires_user_input=True,
+                clarification_prompt="请补充年龄。",
+            )
+        ],
+    )
+
+    result = await semantic_router_node(
+        {
+            "question": "请使用多个智能体制定一份新的训练方案。",
+            "multi_agent_task_result": paused_result.model_dump(
+                mode="python"
+            ),
+        }
+    )
+
+    assert result["next_agent"] == "multi_agent"
+    assert result["multi_agent_task_result"] == {}
+    assert result["multi_agent_resume_action"] == "new_question"
+    assert result["multi_agent_resume_ready"] is False
+    assert result["task_relation_decision"]["relation"] == "new_task"
+
+
+@pytest.mark.asyncio
+async def test_semantic_router_should_pause_on_ambiguous_task_relation() -> None:
+    """
+    测试无法判断新旧任务时不会冒险恢复等待步骤。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    result = await semantic_router_node(
+        {
+            "question": "成都天气",
+            "skill_status": "awaiting_input",
+            "skill_selected_id": "dog-training-plan",
+            "skill_target_agent": "dog_knowledge_agent",
+            "skill_pending_prompt": "请补充狗狗年龄。",
+        }
+    )
+
+    assert result["next_agent"] == "FINISH"
+    assert result["task_relation_requires_confirmation"] is True
+    assert result["waiting_user_input"] is True
+    assert result["task_relation_decision"]["relation"] == "ambiguous"

@@ -181,6 +181,15 @@ class DogState(TypedDict, total=False):
     # 当前图是否正在等待用户输入；True 表示本轮不能继续自动执行。
     waiting_user_input: bool
 
+    # 本轮输入与检查点中等待任务的统一关系判断。
+    task_relation_decision: Dict[str, Any]
+
+    # 当前等待任务所属模块，例如 tool、multi_agent、skill 或 multiple。
+    task_relation_pending_kind: str
+
+    # 无法安全区分新旧任务时为 True，主图会要求用户明确选择。
+    task_relation_requires_confirmation: bool
+
     # =========================
     # 8. 工具调用字段
     # =========================

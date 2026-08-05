@@ -317,6 +317,33 @@ def decide_root_route(
             RootAgent 路由决策对象。
     """
 
+    # 无法判断新旧任务或用户明确取消时，本轮不应进入任何业务 Agent。
+    task_relation = (
+        state.get("task_relation_decision", {})
+        if state
+        else {}
+    )
+    relation = (
+        str(task_relation.get("relation") or "").strip()
+        if isinstance(task_relation, dict)
+        else ""
+    )
+    if relation in {"ambiguous", "cancel"}:
+        return RootRouteDecision(
+            route="FINISH",
+            query_type="finish",
+            confidence=1.0,
+            reason=(
+                "当前输入无法安全区分新旧任务，需要用户明确选择。"
+                if relation == "ambiguous"
+                else "用户已明确取消上一条等待任务。"
+            ),
+            requires_rag=False,
+            requires_tool=False,
+            requires_memory=False,
+            hints={"task_relation": relation},
+        )
+
     # 澄清适配器已补全上一轮工具参数时，优先恢复 ToolAgent 调用。
     clarification_resolution = (
         state.get(
