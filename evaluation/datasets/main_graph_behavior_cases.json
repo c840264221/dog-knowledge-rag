@@ -483,6 +483,7 @@
             "route": "multi_agent",
             "query_type": "multi_agent_task",
             "final_answer_contains": "新的多智能体训练方案",
+            "memory_extract_call_count": 1,
             "task_relation": "new_task",
             "task_relation_pending_kind": "multi_agent",
             "task_relation_requires_confirmation": false,
@@ -541,6 +542,7 @@
             "route": "FINISH",
             "query_type": "finish",
             "final_answer_contains": "继续任务",
+            "memory_extract_call_count": 0,
             "task_relation": "ambiguous",
             "task_relation_pending_kind": "multi_agent",
             "task_relation_requires_confirmation": true,
@@ -556,6 +558,61 @@
             "task_relation",
             "ambiguous",
             "safe_confirmation"
+        ]
+    },
+    {
+        "case_id": "main_graph_pending_task_cancel_001",
+        "category": "main_graph_behavior",
+        "question": "取消",
+        "input_state": {
+            "user_id": "evaluation_user",
+            "evaluation_multi_agent_pending_result": {
+                "collaboration_id": "cancel_waiting_task",
+                "plan": {
+                    "plan_id": "cancel_waiting_plan",
+                    "objective": "生成等待取消的健康方案",
+                    "steps": [
+                        {
+                            "step_id": "step_profile",
+                            "title": "补全档案",
+                            "assigned_agent": "profile_agent",
+                            "status": "awaiting_input"
+                        }
+                    ],
+                    "status": "awaiting_input",
+                    "requires_user_input": true,
+                    "clarification_prompt": "请补充狗狗年龄。"
+                },
+                "status": "awaiting_input",
+                "task_results": [
+                    {
+                        "step_id": "step_profile",
+                        "assigned_agent": "profile_agent",
+                        "status": "awaiting_input",
+                        "requires_user_input": true,
+                        "clarification_prompt": "请补充狗狗年龄。"
+                    }
+                ]
+            }
+        },
+        "expected": {
+            "route": "FINISH",
+            "query_type": "finish",
+            "final_answer_contains": "已取消上一条等待中的任务",
+            "memory_extract_call_count": 0,
+            "task_relation": "cancel",
+            "task_relation_pending_kind": "multi_agent",
+            "task_relation_requires_confirmation": false,
+            "multi_agent_planner_call_count": 0,
+            "multi_agent_aggregator_call_count": 0,
+            "multi_agent_worker_call_counts": {},
+            "waiting_user_input": false
+        },
+        "tags": [
+            "main_graph",
+            "task_relation",
+            "cancel",
+            "memory_skip"
         ]
     }
 ]

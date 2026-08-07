@@ -223,6 +223,66 @@ async def test_memory_extract_node_should_skip_save_when_not_required() -> None:
 
 
 @pytest.mark.asyncio
+async def test_memory_extract_node_should_prefer_memory_source_text() -> None:
+    """
+    验证门卫准备的上下文文本优先于可变的业务 question。
+
+    参数含义：无。
+    返回值含义：None，断言失败时由 pytest 报错。
+    """
+
+    received_questions: list[str] = []
+
+    async def capture_memory_extractor(
+        llm_provider,
+        question,
+    ):
+        """
+        记录记忆抽取器收到的文本。
+
+        参数含义：
+            llm_provider:
+                测试注入的模型服务占位对象。
+            question:
+                节点最终选择的记忆抽取文本。
+
+        返回值含义：
+            dict:
+                不需要保存记忆的确定性结果。
+        """
+
+        _ = llm_provider
+        received_questions.append(question)
+        return {
+            "should_save": False,
+            "reason": "测试只检查输入来源。",
+        }
+
+    node = build_memory_extract_node(
+        llm_provider=object(),
+        memory_provider=FakeMemoryProvider(FakeMemoryManager()),
+        checkpoint_manager=None,
+        runtime_context_getter=lambda: None,
+        memory_extractor=capture_memory_extractor,
+    )
+
+    await node(
+        {
+            "user_id": "user_001",
+            "question": "6岁",
+            "memory_source_text": (
+                "旧任务正在询问：请补充狗狗年龄。\n"
+                "用户本轮补充：6岁"
+            ),
+        }
+    )
+
+    assert received_questions == [
+        "旧任务正在询问：请补充狗狗年龄。\n用户本轮补充：6岁"
+    ]
+
+
+@pytest.mark.asyncio
 async def test_memory_extract_node_should_fallback_when_save_failed() -> None:
     """
     测试记忆保存异常时不阻断节点返回。

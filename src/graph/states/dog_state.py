@@ -38,8 +38,14 @@ class DogState(TypedDict, total=False):
     # 1. 用户输入 / 对话历史
     # =========================
 
-    # 用户当前这一轮输入的问题，是路由、检索、工具解析和答案生成的主要输入。
+    # 用户真正发送的原始文本；后续规范化、澄清恢复和 Skill 增强都不能覆盖它。
+    raw_user_input: str
+
+    # 用户当前这一轮经过控制前缀清理后的业务问题，是路由和业务节点的主要输入。
     question: str
+
+    # 专门交给长期记忆抽取器的文本；恢复任务时可以包含旧问题和本轮补充上下文。
+    memory_source_text: str
 
     # 当前对话累计的消息历史；add_messages 会把节点返回的新消息追加到旧消息中。
     messages: Annotated[List[BaseMessage], add_messages]
@@ -189,6 +195,9 @@ class DogState(TypedDict, total=False):
 
     # 无法安全区分新旧任务时为 True，主图会要求用户明确选择。
     task_relation_requires_confirmation: bool
+
+    # 独立任务关系门卫已经执行时为 True，避免语义路由兼容入口重复分类。
+    task_relation_guard_processed: bool
 
     # =========================
     # 8. 工具调用字段

@@ -16,6 +16,7 @@ semantic_router Adapter 单元测试。
 
 import pytest
 
+import src.graph.nodes.router_node as router_module
 from src.agents.collaboration import (
     AgentTaskPlan,
     AgentTaskResult,
@@ -25,6 +26,54 @@ from src.agents.collaboration import (
 from src.graph.nodes.router_node import (
     semantic_router_node,
 )
+
+
+@pytest.mark.asyncio
+async def test_semantic_router_should_not_repeat_processed_task_relation(
+        monkeypatch,
+) -> None:
+    """
+    验证独立门卫执行后语义路由不再重复判断新旧任务关系。
+
+    参数含义：
+        monkeypatch:
+            pytest 提供的临时替换工具，用于让重复调用立即失败。
+
+    返回值含义：
+        None，断言失败时由 pytest 报错。
+    """
+
+    def fail_if_called(_state):
+        """
+        在任务关系分类器被错误重复调用时抛出异常。
+
+        参数含义：
+            _state:
+                语义路由错误传入的主图状态，本测试不使用。
+
+        返回值含义：
+            无；函数始终抛出 AssertionError。
+        """
+
+        raise AssertionError("任务关系门卫不应重复执行")
+
+    monkeypatch.setattr(
+        router_module,
+        "resolve_pending_task_relation",
+        fail_if_called,
+    )
+
+    result = await semantic_router_node(
+        {
+            "question": "帮我查询成都天气。",
+            "task_relation_guard_processed": True,
+            "task_relation_decision": {
+                "relation": "new_task",
+            },
+        }
+    )
+
+    assert result["route_decision"]["route"] == "tool_agent"
 
 
 @pytest.mark.asyncio

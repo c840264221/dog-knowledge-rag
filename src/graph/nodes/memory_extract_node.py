@@ -140,12 +140,12 @@ def build_memory_extract_node(
             f"开始执行{node_name}"
         )
 
+        # 优先使用门卫准备的记忆专用文本；旧 State 没有该字段时兼容 question。
         question = str(
-            state.get(
-                "question",
-                ""
-            )
-        )
+            state.get("memory_source_text")
+            or state.get("question")
+            or ""
+        ).strip()
 
         user_id = str(
             state.get("user_id")
