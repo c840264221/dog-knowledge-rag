@@ -47,6 +47,9 @@ class DogState(TypedDict, total=False):
     # 专门交给长期记忆抽取器的文本；恢复任务时可以包含旧问题和本轮补充上下文。
     memory_source_text: str
 
+    # 专门交给长期记忆召回器的简洁业务文本，不包含 Skill 说明等执行控制内容。
+    memory_retrieval_text: str
+
     # 当前对话累计的消息历史；add_messages 会把节点返回的新消息追加到旧消息中。
     messages: Annotated[List[BaseMessage], add_messages]
 

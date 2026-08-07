@@ -5,6 +5,33 @@ from src.logger import logger
 from src.runtime.context import runtime_ctx
 
 
+def _resolve_memory_retrieval_text(
+    state: dict[str, Any],
+) -> str:
+    """
+    选择记忆召回真正使用的业务文本。
+
+    功能：
+        优先使用记忆召回专用字段；尚未接入该字段的旧调用方可以继续使用
+        RAG 的干净检索问题，最后才回退到完整 question。
+
+    参数含义：
+        state:
+            当前图状态，可能包含新旧不同版本的问题字段。
+
+    返回值含义：
+        str:
+            不包含 Skill 执行说明的记忆召回查询；没有输入时返回空字符串。
+    """
+
+    return str(
+        state.get("memory_retrieval_text")
+        or state.get("retrieval_question")
+        or state.get("question")
+        or ""
+    ).strip()
+
+
 def build_memory_retrieve_node(
     semantic_recall: Any,
     checkpoint_manager: Any = None,
@@ -69,7 +96,7 @@ def build_memory_retrieve_node(
             3. 从 state 中读取 user_id
             4. 如果没有 user_id，则使用 session_id
             5. 如果 user_id 和 session_id 都没有，则使用 default_user
-            6. 从 state 中读取用户问题 question
+            6. 从 state 中选择记忆召回专用业务文本
             7. 调用 MemorySemanticRecallService 召回相关长期记忆
             8. 将召回结果写入 memory_context 字段
             9. 保存 checkpoint 检查点
@@ -126,12 +153,7 @@ def build_memory_retrieve_node(
                 or "default_user"
             )
 
-            question = str(
-                state.get(
-                    "question"
-                )
-                or ""
-            )
+            question = _resolve_memory_retrieval_text(state)
 
             logger.info(
                 f"Memory Retrieve 输入: user_id={user_id}, question={question}"

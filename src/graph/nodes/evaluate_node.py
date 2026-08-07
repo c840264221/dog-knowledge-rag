@@ -6,6 +6,7 @@ from src.logger import logger
 from src.rag.evaluators import (
     evaluate_retrieval_quality
 )
+from src.rag.query_builders import resolve_question_from_state
 from src.runtime.context import runtime_ctx
 
 # 导入rag诊断工具
@@ -66,9 +67,11 @@ def evaluate_retrieval_node(
         name="evaluate_retrieval_node"
     )
 
+    # 日志与质量评估使用同一个问题解析入口，避免打印包含 Skill 说明的完整问题。
+    retrieval_question = resolve_question_from_state(state=state)
     logger.info(
         "进入 evaluate_retrieval_node 节点，"
-        f"question={state.get('question')}, "
+        f"retrieval_question={retrieval_question}, "
         f"dog_name={state.get('dog_name')}, "
         f"filters={state.get('filters')}"
     )

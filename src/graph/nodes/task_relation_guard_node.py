@@ -169,4 +169,5 @@ async def task_relation_guard_node(
             or ""
         ).strip(),
         "memory_source_text": memory_source_text,
+        "memory_retrieval_text": memory_source_text,
     }

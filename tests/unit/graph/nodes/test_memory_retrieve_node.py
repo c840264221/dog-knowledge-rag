@@ -949,6 +949,76 @@ async def test_memory_retrieve_node_should_work_without_runtime_context():
 
 
 @pytest.mark.asyncio
+async def test_memory_retrieve_node_should_prefer_clean_memory_text():
+    """
+    验证记忆召回不会读取包含 Skill 说明的完整 Agent 问题。
+
+    功能：
+        同时提供多类问题字段，确认节点优先使用 memory_retrieval_text。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None，断言失败时由 pytest 报错。
+    """
+
+    (
+        node,
+        _fake_ctx,
+        fake_semantic_recall,
+        _fake_checkpoint_manager,
+    ) = build_test_node(recall_result="用户喜欢金毛")
+
+    await node(
+        {
+            "user_id": "user_001",
+            "memory_retrieval_text": "为6岁的金毛制定训练计划",
+            "retrieval_question": "RAG 使用的问题",
+            "question": "完整问题以及大量 Skill 执行说明",
+        }
+    )
+
+    assert fake_semantic_recall.calls[0]["question"] == (
+        "为6岁的金毛制定训练计划"
+    )
+
+
+@pytest.mark.asyncio
+async def test_memory_retrieve_node_should_fallback_to_retrieval_question():
+    """
+    验证旧调用方可以使用已有的干净 RAG 问题完成记忆召回。
+
+    功能：
+        memory_retrieval_text 缺失时优先读取 retrieval_question，避免直接
+        回退到可能包含 Skill 说明的 question。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None，断言失败时由 pytest 报错。
+    """
+
+    (
+        node,
+        _fake_ctx,
+        fake_semantic_recall,
+        _fake_checkpoint_manager,
+    ) = build_test_node(recall_result="用户喜欢金毛")
+
+    await node(
+        {
+            "user_id": "user_001",
+            "retrieval_question": "干净的业务问题",
+            "question": "完整问题以及 Skill 执行说明",
+        }
+    )
+
+    assert fake_semantic_recall.calls[0]["question"] == "干净的业务问题"
+
+
+@pytest.mark.asyncio
 async def test_memory_retrieve_node_should_write_structured_recall_result():
     """
     测试新版结构化记忆召回结果写入 state update。

@@ -92,6 +92,8 @@ def test_skill_prepare_node_should_resume_saved_skill() -> None:
     assert "技能：狗狗训练计划" in update["question"]
     assert "技能：狗狗训练计划" not in update["retrieval_question"]
     assert "用户原始任务" in update["retrieval_question"]
+    assert update["memory_retrieval_text"] == update["retrieval_question"]
+    assert "技能：狗狗训练计划" not in update["memory_retrieval_text"]
     assert "技能：狗狗训练计划" in update["skill_context"]
 
 

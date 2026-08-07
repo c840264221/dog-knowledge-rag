@@ -463,6 +463,7 @@ def build_default_agent_state(
         )
     state["question"] = question
     state["retrieval_question"] = retrieval_question
+    state["memory_retrieval_text"] = retrieval_question
     return state
 
 
