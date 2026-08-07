@@ -22,6 +22,9 @@ from src.settings import settings
 from src.graph.nodes.memory_extract_node import (
     build_memory_extract_node,
 )
+from src.graph.nodes.task_relation_guard_node import (
+    task_relation_guard_node,
+)
 
 from src.graph.nodes.router_node import (
     semantic_router_node,
@@ -46,6 +49,10 @@ from src.graph.routes.route_after_semantic import (
 from src.graph.routes.route_after_skill_prepare import (
     build_skill_prepare_route_map,
     route_after_skill_prepare,
+)
+from src.graph.routes.route_after_task_relation_guard import (
+    build_task_relation_guard_route_map,
+    route_after_task_relation_guard,
 )
 
 # 导入主图语义路由映射对应的agent名字
@@ -427,6 +434,11 @@ class GraphRuntimeService:
         )
 
         graph.add_node(
+            "task_relation_guard",
+            task_relation_guard_node,
+        )
+
+        graph.add_node(
             "memory_extract",
             memory_extract_node,
         )
@@ -466,7 +478,15 @@ class GraphRuntimeService:
         )
 
         graph.set_entry_point(
-            "memory_extract"
+            "task_relation_guard"
+        )
+
+        graph.add_conditional_edges(
+            "task_relation_guard",
+            route_after_task_relation_guard,
+            build_task_relation_guard_route_map(
+                end_node=END,
+            ),
         )
 
         graph.add_edge(

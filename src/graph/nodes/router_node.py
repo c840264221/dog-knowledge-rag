@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import (
     Any,
 )
@@ -52,19 +53,29 @@ async def semantic_router_node(
             向后兼容。避免旧主图节点名、checkpoint、日志链路立刻失效。
     """
 
-    # 先判断本轮文字是在继续旧任务还是开始新任务，避免旧任务抢走新问题。
-    task_relation_resolution = resolve_pending_task_relation(state)
-    task_relation_update = task_relation_resolution.get(
-        "state_update",
-        {},
-    )
+    # 新主图已经在独立门卫节点完成分类；旧调用方直接调用本节点时保留兼容。
+    if bool(state.get("task_relation_guard_processed")):
+        task_relation_update: dict[str, Any] = {}
+        raw_decision = state.get("task_relation_decision")
+        relation_action = (
+            str(raw_decision.get("relation") or "none").strip()
+            if isinstance(raw_decision, Mapping)
+            else "none"
+        )
+    else:
+        task_relation_resolution = resolve_pending_task_relation(state)
+        task_relation_update = dict(
+            task_relation_resolution.get("state_update") or {}
+        )
+        relation_action = str(
+            task_relation_resolution.get("action") or "none"
+        ).strip()
     resolved_state = {
         **dict(state),
         **dict(task_relation_update),
     }
 
     # 只有确认继续旧任务时，才允许各业务恢复适配器解析补充内容。
-    relation_action = task_relation_resolution.get("action")
     should_run_business_resume = relation_action in {
         "none",
         "resume",

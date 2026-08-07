@@ -118,7 +118,9 @@ def create_initial_state(
 
     return {
         # ========= 用户输入 =========
+        "raw_user_input": clean_question,
         "question": clean_question,
+        "memory_source_text": clean_question,
         "messages": [],
 
         # ========= 身份与追踪 =========
@@ -167,6 +169,7 @@ def create_initial_state(
         "task_relation_decision": {},
         "task_relation_pending_kind": "",
         "task_relation_requires_confirmation": False,
+        "task_relation_guard_processed": False,
 
         # ========= 多 Agent 跨轮恢复字段 =========
         "multi_agent_task_result": {},

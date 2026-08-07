@@ -323,6 +323,10 @@ async def test_graph_runtime_should_inject_memory_extract_node_dependencies(
         "checkpoint_manager": checkpoint_provider.manager,
     }
     assert graph.nodes["memory_extract"] is injected_node
+    assert graph.nodes["task_relation_guard"] is (
+        graph_runtime_service.task_relation_guard_node
+    )
+    assert graph.entry_point == "task_relation_guard"
     assert graph.nodes["skill_prepare"] is injected_skill_node
     assert graph.nodes["multi_agent"] == "multi_agent"
 
