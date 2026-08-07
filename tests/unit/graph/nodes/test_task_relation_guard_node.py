@@ -27,6 +27,7 @@ async def test_guard_should_keep_raw_input_for_regular_question() -> None:
 
     assert result["raw_user_input"] == "我喜欢金毛。"
     assert result["memory_source_text"] == "我喜欢金毛。"
+    assert result["memory_retrieval_text"] == "我喜欢金毛。"
     assert result["task_relation_guard_processed"] is True
 
 
@@ -52,6 +53,7 @@ async def test_guard_should_normalize_new_task_before_memory() -> None:
     assert result["raw_user_input"] == "新问题：帮我查成都天气。"
     assert result["question"] == "帮我查成都天气。"
     assert result["memory_source_text"] == "帮我查成都天气。"
+    assert result["memory_retrieval_text"] == "帮我查成都天气。"
     assert result["task_relation_decision"]["relation"] == "new_task"
     assert result["multi_agent_task_result"] == {}
 
@@ -79,6 +81,7 @@ async def test_guard_should_add_pending_context_for_skill_resume() -> None:
         "旧任务正在询问：请补充狗狗年龄。\n"
         "用户本轮补充：6岁"
     )
+    assert result["memory_retrieval_text"] == result["memory_source_text"]
     assert result["task_relation_decision"]["relation"] == "resume"
 
 
@@ -109,6 +112,7 @@ async def test_guard_should_skip_memory_for_control_or_ambiguous_input(
     )
 
     assert result["memory_source_text"] == ""
+    assert result["memory_retrieval_text"] == ""
     assert result["task_relation_decision"]["relation"] in {
         "cancel",
         "ambiguous",

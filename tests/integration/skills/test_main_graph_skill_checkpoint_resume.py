@@ -98,6 +98,9 @@ async def fake_dog_agent_node(state: DogState) -> dict[str, Any]:
 
     question = str(state.get("question") or "")
     retrieval_question = str(state.get("retrieval_question") or "")
+    memory_retrieval_text = str(
+        state.get("memory_retrieval_text") or ""
+    )
     assert "帮我为6岁的金毛制定训练计划" in question
     assert "它目前会坐下，希望学习等待和召回" in question
     assert "已经校验通过的 Skill 输入" in question
@@ -105,6 +108,8 @@ async def fake_dog_agent_node(state: DogState) -> dict[str, Any]:
     assert "帮我为6岁的金毛制定训练计划" in retrieval_question
     assert "它目前会坐下，希望学习等待和召回" in retrieval_question
     assert "技能：狗狗训练计划" not in retrieval_question
+    assert memory_retrieval_text == retrieval_question
+    assert "技能：狗狗训练计划" not in memory_retrieval_text
     assert "技能：狗狗训练计划" in str(state.get("skill_context") or "")
     return {"final_answer": "已根据补充资料和 Skill 生成训练计划。"}
 

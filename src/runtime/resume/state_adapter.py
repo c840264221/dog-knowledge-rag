@@ -266,6 +266,7 @@ def _build_all_pending_cleanup_update(
         "skill_original_question": "",
         "skill_target_agent": "",
         "retrieval_question": "",
+        "memory_retrieval_text": "",
         "pending_prompt": "",
         "waiting_user_input": False,
     }

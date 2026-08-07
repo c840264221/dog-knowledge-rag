@@ -175,6 +175,7 @@ def build_skill_prepare_node(
                 current_user_text=user_text,
             )
             update["retrieval_question"] = task_question
+            update["memory_retrieval_text"] = task_question
             update["question"] = build_skill_enhanced_question(
                 question=task_question,
                 skill_inputs=result.extraction.merged_inputs,

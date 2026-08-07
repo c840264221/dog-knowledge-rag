@@ -121,6 +121,7 @@ def create_initial_state(
         "raw_user_input": clean_question,
         "question": clean_question,
         "memory_source_text": clean_question,
+        "memory_retrieval_text": clean_question,
         "messages": [],
 
         # ========= 身份与追踪 =========
