@@ -55,7 +55,7 @@
             "parser_call_count": 1,
             "retriever_call_count": 1,
             "reranker_call_count": 1,
-            "llm_call_count": 1
+            "llm_call_count": 2
         },
         "tags": ["dog_knowledge_agent", "exact_lookup", "lifespan"]
     },
@@ -137,7 +137,7 @@
             "parser_call_count": 1,
             "retriever_call_count": 1,
             "reranker_call_count": 1,
-            "llm_call_count": 1
+            "llm_call_count": 2
         },
         "tags": ["dog_knowledge_agent", "recommendation", "beginner"]
     },
@@ -177,7 +177,7 @@
             "parser_call_count": 1,
             "retriever_call_count": 1,
             "reranker_call_count": 0,
-            "llm_call_count": 1
+            "llm_call_count": 2
         },
         "tags": ["dog_knowledge_agent", "fallback", "empty_retrieval"]
     }

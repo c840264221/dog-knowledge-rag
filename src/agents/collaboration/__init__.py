@@ -14,6 +14,11 @@ from src.agents.collaboration.contracts import (
     AgentTaskResultStatus,
     AgentTaskStep,
     AgentTaskStepStatus,
+    MultiAgentClarificationBundle,
+    MultiAgentClarificationExtractionResult,
+    MultiAgentClarificationField,
+    MultiAgentStepClarification,
+    MultiAgentStepResumeDecision,
     MultiAgentTaskResult,
 )
 from src.agents.collaboration.aggregator import (
@@ -60,6 +65,11 @@ __all__ = [
     "AgentTaskResultStatus",
     "AgentTaskStep",
     "AgentTaskStepStatus",
+    "MultiAgentClarificationBundle",
+    "MultiAgentClarificationExtractionResult",
+    "MultiAgentClarificationField",
+    "MultiAgentStepClarification",
+    "MultiAgentStepResumeDecision",
     "MultiAgentTaskResult",
     "ResultAggregationDraft",
     "ResultAggregationError",

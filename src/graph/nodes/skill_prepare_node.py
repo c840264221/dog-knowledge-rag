@@ -6,6 +6,9 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from src.skills.default_catalog import build_default_skill_runtime
+from src.skills.pet_profile_prefill import (
+    prepare_skill_pet_profile_prefill,
+)
 from src.skills.runtime import SkillRuntime
 from src.skills.state_adapter import (
     build_skill_enhanced_question,
@@ -87,6 +90,7 @@ def _build_skill_task_question(
 
 def build_skill_prepare_node(
     skill_runtime: SkillRuntime | None = None,
+    pet_profile_service: Any = None,
 ) -> SkillPrepareNode:
     """
     构建主图使用的 Skill 准备节点。
@@ -98,6 +102,9 @@ def build_skill_prepare_node(
     参数含义：
         skill_runtime:
             可选的技能运行器；为空时构建项目默认运行器。
+        pet_profile_service:
+            可选的 PetProfileService（宠物档案服务）；命中 Skill 后用于
+            召回当前宠物档案，补全 Skill 已声明的外部输入来源。
 
     返回值含义：
         SkillPrepareNode:
@@ -147,6 +154,20 @@ def build_skill_prepare_node(
             else {}
         )
 
+        # 简化模式及忽略字段由任务关系门卫根据上一轮检查结果写入。
+        execution_mode = str(
+            state.get("skill_execution_mode") or "standard"
+        ).strip()
+        if execution_mode not in {"standard", "degraded"}:
+            execution_mode = "standard"
+        raw_ignored_input_ids = state.get("skill_ignored_input_ids")
+        ignored_input_ids = (
+            [str(input_id).strip() for input_id in raw_ignored_input_ids]
+            if execution_mode == "degraded"
+            and isinstance(raw_ignored_input_ids, list)
+            else []
+        )
+
         # 首轮保存完整问题；恢复轮沿用检查点中的原始任务，避免只执行“6岁”。
         saved_original_question = str(
             state.get("skill_original_question") or ""
@@ -160,19 +181,67 @@ def build_skill_prepare_node(
         # 记住 RootAgent 首轮选择的目标，下一轮恢复时仍回到同一个 Agent。
         target_agent = _resolve_skill_target_agent(state)
 
-        result = resolved_runtime.prepare(
+        # 先确定技能，再决定是否查询宠物档案，普通问题不会产生额外数据库查询。
+        selection = resolved_runtime.select(
             user_text=user_text,
-            existing_inputs=existing_inputs,
             selected_skill_id=selected_skill_id or None,
         )
+
+        # 先从本轮输入和历史输入中提取数据，避免用户已经明确提供后仍查询数据库。
+        initial_skill_inputs: dict[str, Any] = dict(existing_inputs)
+        if selection.selected_skill_id is not None:
+            initial_extraction = resolved_runtime.extract_inputs(
+                skill_id=selection.selected_skill_id,
+                user_text=user_text,
+                existing_inputs=existing_inputs,
+            )
+            initial_skill_inputs = dict(initial_extraction.merged_inputs)
+
+        # 普通 Agent 和多智能体 Worker 共用同一套档案预填与权限逻辑。
+        profile_prefill = prepare_skill_pet_profile_prefill(
+            skill_runtime=resolved_runtime,
+            selected_skill_id=selection.selected_skill_id,
+            provided_inputs=initial_skill_inputs,
+            ignored_input_ids=ignored_input_ids,
+            agent_name=target_agent,
+            pet_profile_service=pet_profile_service,
+            user_id=str(
+                state.get("user_id")
+                or state.get("session_id")
+                or "default_user"
+            ),
+            active_pet_key=state.get("active_pet_key"),
+            active_pet_name=state.get("active_pet_name"),
+        )
+
+        result = resolved_runtime.prepare(
+            user_text=user_text,
+            existing_inputs=initial_skill_inputs,
+            selection=selection,
+            available_input_sources=(
+                profile_prefill.available_input_sources
+            ),
+            ignored_input_ids=ignored_input_ids,
+        )
         update = build_skill_state_update(result)
+        update.update(profile_prefill.state_update)
         update["skill_original_question"] = original_question
         update["skill_target_agent"] = target_agent
+        update["skill_execution_mode"] = execution_mode
+        update["skill_ignored_input_ids"] = ignored_input_ids
+        update["skill_degradation_reason"] = str(
+            state.get("skill_degradation_reason") or ""
+        ).strip()
+        update["skill_degradation_user_input"] = str(
+            state.get("skill_degradation_user_input") or ""
+        ).strip()
         if result.status == "ready":
             # 先保存干净检索问题，再恢复原有的 Skill 增强 question。
             task_question = _build_skill_task_question(
                 original_question=original_question,
-                current_user_text=user_text,
+                current_user_text=(
+                    "" if execution_mode == "degraded" else user_text
+                ),
             )
             update["retrieval_question"] = task_question
             update["memory_retrieval_text"] = task_question
@@ -180,6 +249,8 @@ def build_skill_prepare_node(
                 question=task_question,
                 skill_inputs=result.extraction.merged_inputs,
                 skill_context=result.skill_context,
+                execution_mode=execution_mode,
+                ignored_input_ids=ignored_input_ids,
             )
         return update
 

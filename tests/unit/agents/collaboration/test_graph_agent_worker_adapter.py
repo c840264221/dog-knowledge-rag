@@ -20,7 +20,40 @@ from src.agents.collaboration import (
     GraphAgentWorkerAdapter,
     build_default_agent_state,
 )
+from src.memory.memory_schema import PetProfileRecallResult
 from src.skills import build_default_skill_runtime
+
+
+class FakeWorkerPetProfileService:
+    """为 Worker Preflight 返回固定档案并记录查询参数。"""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    def recall_profile(self, **kwargs: Any) -> PetProfileRecallResult:
+        """
+        返回包含犬种和年龄的单宠物档案。
+
+        参数含义：
+            **kwargs：Worker 传入的用户、宠物和允许读取字段。
+
+        返回值含义：
+            PetProfileRecallResult：测试使用的成功召回结果。
+        """
+
+        self.calls.append(dict(kwargs))
+        return PetProfileRecallResult(
+            status="applied",
+            pet_key="pet_doudou",
+            pet_name="豆豆",
+            selection_source="active_pet",
+            facts={
+                "breed": "金毛",
+                "age_years": "6岁",
+            },
+            selected_attributes=["breed", "age_years"],
+            reason="Worker 测试档案召回成功。",
+        )
 
 
 def test_graph_worker_adapter_should_convert_completed_state() -> None:
@@ -341,6 +374,90 @@ def test_graph_worker_adapter_should_pause_for_missing_skill_inputs() -> None:
     assert result.metadata["skill_runtime"]["status"] == "awaiting_input"
 
 
+def test_graph_worker_preflight_should_not_call_agent_runner() -> None:
+    """验证执行前检查发现 Skill 缺字段时不会启动子 Agent。"""
+
+    runner_call_count = 0
+
+    async def runner(state: Mapping[str, Any]) -> Mapping[str, Any]:
+        """记录不应发生的子 Agent 调用。"""
+
+        nonlocal runner_call_count
+        runner_call_count += 1
+        return state
+
+    adapter = GraphAgentWorkerAdapter(
+        agent_name="dog_knowledge_agent",
+        runner=runner,
+        skill_runtime=build_default_skill_runtime(),
+    )
+    step = AgentTaskStep(
+        step_id="training_preflight",
+        title="制定训练计划",
+        description="为6岁的金毛制定训练计划",
+        assigned_agent="dog_knowledge_agent",
+    )
+
+    result = adapter.preflight(step, {})
+
+    assert result is not None
+    assert result.status == "awaiting_input"
+    assert runner_call_count == 0
+
+
+def test_graph_worker_preflight_should_prefill_skill_from_pet_profile() -> None:
+    """验证多智能体 Worker 会在澄清前先使用宠物档案补全 Skill。"""
+
+    async def runner(state: Mapping[str, Any]) -> Mapping[str, Any]:
+        """本用例只检查 Preflight，不应调用该执行函数。"""
+
+        return state
+
+    profile_service = FakeWorkerPetProfileService()
+    adapter = GraphAgentWorkerAdapter(
+        agent_name="dog_knowledge_agent",
+        runner=runner,
+        skill_runtime=build_default_skill_runtime(),
+        pet_profile_service=profile_service,
+    )
+    step = AgentTaskStep(
+        step_id="training_profile_prefill",
+        title="制定训练计划",
+        description="帮我家狗狗安排训练计划",
+        assigned_agent="dog_knowledge_agent",
+        input_data={
+            "user_id": "user_001",
+            "active_pet_key": "pet_doudou",
+            "active_pet_name": "豆豆",
+        },
+    )
+
+    result = adapter.preflight(step, {})
+
+    assert result is not None
+    assert result.status == "awaiting_input"
+    assert result.output["skill_inputs"] == {
+        "breed": "金毛",
+        "age": "6岁",
+    }
+    assert result.output["active_pet_key"] == "pet_doudou"
+    assert result.output["skill_profile_recall_result"]["status"] == (
+        "applied"
+    )
+    assert profile_service.calls == [
+        {
+            "user_id": "user_001",
+            "active_pet_key": "pet_doudou",
+            "active_pet_name": "豆豆",
+            "selected_attributes": ["breed", "age_years"],
+        }
+    ]
+    assert "犬种" not in result.clarification_prompt
+    assert "年龄" not in result.clarification_prompt
+    assert "当前行为基础" in result.clarification_prompt
+    assert "训练目标" in result.clarification_prompt
+
+
 def test_graph_worker_adapter_should_run_unmatched_step_normally() -> None:
     """
     检查启用 SkillRuntime 后未命中技能的步骤保持旧执行行为。
@@ -451,3 +568,51 @@ def test_graph_worker_adapter_should_resume_step_skill_before_runner() -> None:
     assert "技能：狗狗训练计划" in received_state["question"]
     assert "技能：狗狗训练计划" in received_state["skill_context"]
     assert received_state["retrieval_question"] == "制定训练计划"
+
+
+def test_graph_worker_adapter_should_merge_structured_resume_fields() -> None:
+    """验证 Worker 会直接合并调度器分配的结构化恢复字段。"""
+
+    received_states: list[Mapping[str, Any]] = []
+
+    async def runner(state: Mapping[str, Any]) -> Mapping[str, Any]:
+        """记录准备完成的状态并返回固定答案。"""
+
+        received_states.append(state)
+        return {**state, "final_answer": "训练计划已生成。"}
+
+    adapter = GraphAgentWorkerAdapter(
+        agent_name="dog_knowledge_agent",
+        runner=runner,
+        skill_runtime=build_default_skill_runtime(),
+    )
+    step = AgentTaskStep(
+        step_id="build_training_plan",
+        title="制定训练计划",
+        assigned_agent="dog_knowledge_agent",
+        input_data={
+            "multi_agent_is_resuming": True,
+            "multi_agent_resume_input": {
+                "current_behavior": "会坐下",
+                "training_goal": "学习等待和召回",
+            },
+            "multi_agent_previous_worker_output": {
+                "skill_selected_id": "dog-training-plan",
+                "skill_status": "awaiting_input",
+                "skill_inputs": {
+                    "breed": "Golden Retriever",
+                    "age": "6岁",
+                },
+            },
+        },
+    )
+
+    result = asyncio.run(adapter(step, {}))
+
+    assert result.status == "completed"
+    assert received_states[0]["skill_inputs"] == {
+        "breed": "Golden Retriever",
+        "age": "6岁",
+        "current_behavior": "会坐下",
+        "training_goal": "学习等待和召回",
+    }

@@ -12,6 +12,7 @@ from src.agents.tool_agent.adapters.clarification_resume_adapter import (
     resolve_tool_clarification_input,
 )
 from src.agents.collaboration.adapters import (
+    MultiAgentClarificationFieldResolver,
     resolve_multi_agent_resume_input,
 )
 from src.graph.states.dog_state import (
@@ -22,6 +23,10 @@ from src.runtime.resume import resolve_pending_task_relation
 
 async def semantic_router_node(
         state: DogState,
+        *,
+        multi_agent_field_resolver: (
+            MultiAgentClarificationFieldResolver | None
+        ) = None,
 ) -> dict[str, Any]:
     """
     Main Graph 语义路由兼容节点。
@@ -91,7 +96,10 @@ async def semantic_router_node(
     )
     resolved_state = {**resolved_state, **dict(clarification_update)}
     multi_agent_resolution = (
-        resolve_multi_agent_resume_input(resolved_state)
+        await resolve_multi_agent_resume_input(
+            resolved_state,
+            field_resolver=multi_agent_field_resolver,
+        )
         if should_run_business_resume
         else {"action": "none", "state_update": {}}
     )
@@ -113,3 +121,34 @@ async def semantic_router_node(
         **dict(multi_agent_update),
         **root_update,
     }
+
+
+def build_semantic_router_node(
+    *,
+    multi_agent_field_resolver: (
+        MultiAgentClarificationFieldResolver | None
+    ) = None,
+):
+    """
+    构建注入多智能体字段解析器的语义路由节点。
+
+    功能：
+        生产主图可以注入带 LLM 兜底的字段解析器；旧测试和兼容调用仍可
+        直接使用 semantic_router_node，并自动退化为确定性规则解析。
+
+    参数含义：
+        multi_agent_field_resolver:
+            可选的多智能体澄清字段解析器。
+
+    返回值含义：
+        Callable:
+            可注册到 LangGraph 的异步语义路由节点。
+    """
+
+    async def _semantic_router_node(state: DogState) -> dict[str, Any]:
+        return await semantic_router_node(
+            state,
+            multi_agent_field_resolver=multi_agent_field_resolver,
+        )
+
+    return _semantic_router_node

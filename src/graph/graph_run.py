@@ -176,7 +176,9 @@ def create_initial_state(
         "multi_agent_task_result": {},
         "multi_agent_resume_action": "none",
         "multi_agent_resume_inputs": {},
+        "multi_agent_step_resume_decisions": {},
         "multi_agent_resume_ready": False,
+        "multi_agent_clarification_extraction": {},
         "multi_agent_pending_prompt": "",
 
         # ========= Skill 技能准备与跨轮恢复字段 =========
@@ -188,6 +190,10 @@ def create_initial_state(
         "skill_context": "",
         "skill_original_question": "",
         "skill_target_agent": "",
+        "skill_execution_mode": "standard",
+        "skill_ignored_input_ids": [],
+        "skill_degradation_reason": "",
+        "skill_degradation_user_input": "",
         "retrieval_question": "",
 
         # ========= 工具调用字段 =========
@@ -204,7 +210,19 @@ def create_initial_state(
         "memory_recall_result": {},
         "memory_saved": False,
         "memory_extract_result": {},
+        "memory_retention_result": {},
         "memory_save_result": None,
+        "pet_profile_extraction_result": {},
+        "pet_profile_save_result": {},
+        "active_pet_key": "",
+        "active_pet_name": "",
+        "pet_profile_recall_result": {},
+        "skill_profile_recall_result": {},
+        "pet_profile_suggested_attributes": [],
+        "skill_required_pet_profile_attributes": [],
+        "skill_profile_access_decision": {},
+        "answer_profile_access_decision": {},
+        "dog_query_understanding_result": {},
 
         # ========= 错误字段 =========
         "error": "",
@@ -446,7 +464,12 @@ async def run_main_graph_with_result(
         "checkpoint_ns"
     )
 
-    # 新一轮问题启动前，只恢复参数澄清所需字段，避免完整旧 state 污染本轮输入。
+    # 新一轮问题启动前，只恢复当前宠物和各业务等待状态的白名单字段。
+    state = await restore_active_pet_state(
+        app=app,
+        config=config,
+        state=state,
+    )
     state = await restore_pending_tool_clarification_state(
         app=app,
         config=config,
@@ -515,6 +538,78 @@ async def run_main_graph_with_result(
         checkpoint_ns=resume_checkpoint_ns,
         trace_id=trace_id,
     )
+
+
+async def restore_active_pet_state(
+        app: Any,
+        config: Mapping[str, Any],
+        state: Mapping[str, Any],
+) -> dict[str, Any]:
+    """
+    从当前线程检查点恢复上一轮明确选中的宠物身份。
+
+    功能：
+        读取相同 thread_id（检查点线程标识）的最新 Checkpoint（检查点），
+        确认检查点与本轮属于同一用户后，只恢复 active_pet_key（当前宠物
+        稳定标识）和 active_pet_name（当前宠物名称）。旧答案、路由、工具
+        结果和检索结果都不会恢复。
+
+    参数含义：
+        app：
+            已编译的 LangGraph 主图对象，需要提供 aget_state 方法。
+        config：
+            当前图执行配置，包含用于定位检查点的 thread_id。
+        state：
+            本轮根据新用户输入创建的干净初始状态。
+
+    返回值含义：
+        dict[str, Any]：
+            合并当前宠物身份白名单后的新状态；检查点无效时返回原状态副本。
+    """
+
+    restored_state = dict(state)
+    try:
+        current_state = await app.aget_state(config)
+        checkpoint_values = get_final_state_values(
+            current_state=current_state,
+        )
+    except Exception as exc:
+        logger.debug(
+            f"读取当前宠物 Checkpoint 失败，按无选中宠物继续: {exc}"
+        )
+        return restored_state
+
+    # thread_id 只能定位会话，仍需校验 user_id，避免错误会话标识造成数据串用。
+    current_user_id = str(state.get("user_id") or "").strip()
+    checkpoint_user_id = str(
+        checkpoint_values.get("user_id") or ""
+    ).strip()
+    if (
+        not current_user_id
+        or checkpoint_user_id != current_user_id
+    ):
+        return restored_state
+
+    active_pet_key = str(
+        checkpoint_values.get("active_pet_key") or ""
+    ).strip()
+    active_pet_name = str(
+        checkpoint_values.get("active_pet_name") or ""
+    ).strip()
+    if (
+        not active_pet_key
+        or len(active_pet_key) > 200
+        or len(active_pet_name) > 100
+    ):
+        return restored_state
+
+    restored_state["active_pet_key"] = active_pet_key
+    restored_state["active_pet_name"] = active_pet_name
+    logger.info(
+        "已从当前 thread_id 的 Checkpoint 恢复当前宠物身份: "
+        f"pet_key={active_pet_key}"
+    )
+    return restored_state
 
 
 async def restore_pending_tool_clarification_state(
@@ -641,6 +736,25 @@ async def restore_pending_multi_agent_state(
     restored_state["multi_agent_task_result"] = task_result.model_dump(
         mode="python"
     )
+    raw_resume_inputs = checkpoint_values.get("multi_agent_resume_inputs")
+    if isinstance(raw_resume_inputs, Mapping):
+        restored_state["multi_agent_resume_inputs"] = dict(
+            raw_resume_inputs
+        )
+    raw_resume_decisions = checkpoint_values.get(
+        "multi_agent_step_resume_decisions"
+    )
+    if isinstance(raw_resume_decisions, Mapping):
+        restored_state["multi_agent_step_resume_decisions"] = dict(
+            raw_resume_decisions
+        )
+    raw_extraction = checkpoint_values.get(
+        "multi_agent_clarification_extraction"
+    )
+    if isinstance(raw_extraction, Mapping):
+        restored_state["multi_agent_clarification_extraction"] = dict(
+            raw_extraction
+        )
     restored_state["multi_agent_pending_prompt"] = str(
         checkpoint_values.get("multi_agent_pending_prompt")
         or task_result.plan.clarification_prompt
@@ -730,6 +844,19 @@ async def restore_pending_skill_state(
             "skill_context": "",
             "skill_original_question": original_question,
             "skill_target_agent": target_agent,
+            "skill_execution_mode": str(
+                checkpoint_values.get("skill_execution_mode")
+                or "standard"
+            ),
+            "skill_ignored_input_ids": list(
+                checkpoint_values.get("skill_ignored_input_ids") or []
+            ),
+            "skill_degradation_reason": str(
+                checkpoint_values.get("skill_degradation_reason") or ""
+            ),
+            "skill_degradation_user_input": str(
+                checkpoint_values.get("skill_degradation_user_input") or ""
+            ),
         }
     )
     logger.info(

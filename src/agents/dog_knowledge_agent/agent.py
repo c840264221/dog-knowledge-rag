@@ -66,6 +66,12 @@ from src.agents.dog_knowledge_agent.nodes.query_layer_output_node import (
 from src.agents.dog_knowledge_agent.nodes.retrieval_layer_output_node import (
     build_dog_knowledge_retrieval_layer_output_node,
 )
+from src.agents.dog_knowledge_agent.nodes.query_understanding_node import (
+    build_dog_query_understanding_node,
+)
+from src.agents.dog_knowledge_agent.nodes.answer_profile_access_plan_node import (
+    build_answer_profile_access_plan_node,
+)
 
 
 def build_dog_knowledge_agent(
@@ -89,9 +95,11 @@ def build_dog_knowledge_agent(
         1. extract_model
         2. recommendation_model
 
-        两个内部 model 分支共享同一套 RAG 执行链路：
-        retrieve -> query_layer_output -> evaluate -> retrieval_layer_output -> rerank
-        -> memory_retrieve -> generate
+        查询理解节点先执行确定性规则和 LLM 补充解析，再选择内部 model 分支。
+        两个分支共享同一套 RAG 执行链路：
+        query_understanding -> retrieve -> query_layer_output -> evaluate ->
+        retrieval_layer_output -> rerank -> answer_profile_access_plan ->
+        memory_retrieve -> generate
         evaluate 的 retry / ask_user / generate 分支保持不变。
         generate 之后会进入 V1.7.4 分层契约收敛链路：
         generation_layer_output -> fallback_layer_output ->
@@ -99,6 +107,8 @@ def build_dog_knowledge_agent(
 
     当前主流程：
         dog_knowledge_router
+            ↓
+        query_understanding
             ↓
         extract_model / recommendation_model
             ↓
@@ -111,6 +121,8 @@ def build_dog_knowledge_agent(
         retrieval_layer_output
             ↓
         rerank
+            ↓
+        answer_profile_access_plan
             ↓
         memory_retrieve
             ↓
@@ -248,6 +260,13 @@ def build_dog_knowledge_agent(
         checkpoint_provider=checkpoint_provider,
     )
 
+    query_understanding_node = build_dog_query_understanding_node(
+        llm_provider=llm_provider,
+        query_filter_parser=(
+            retriever_provider.dog_query_filter_parser
+        ),
+    )
+
     memory_retrieve_node = None
 
     if memory_provider is not None:
@@ -258,10 +277,21 @@ def build_dog_knowledge_agent(
         )
         memory_retrieve_node = build_memory_retrieve_node(
             semantic_recall=memory_provider.semantic_recall,
+            pet_profile_service=getattr(
+                memory_provider,
+                "pet_profile_service",
+                None,
+            ),
             checkpoint_manager=checkpoint_manager,
         )
 
-    generation_entry_node = (
+    answer_profile_access_plan_node = (
+        build_answer_profile_access_plan_node(
+            agent_name="dog_knowledge_agent"
+        )
+    )
+    generation_entry_node = "answer_profile_access_plan"
+    after_profile_plan_node = (
         "memory_retrieve"
         if memory_retrieve_node is not None
         else "generate"
@@ -294,6 +324,11 @@ def build_dog_knowledge_agent(
     # =========================
     # 1. 内部 model 分支
     # =========================
+
+    builder.add_node(
+        "query_understanding",
+        query_understanding_node,
+    )
 
     builder.add_node(
         "extract_model",
@@ -342,6 +377,11 @@ def build_dog_knowledge_agent(
     builder.add_node(
         "generate",
         generate_node,
+    )
+
+    builder.add_node(
+        "answer_profile_access_plan",
+        answer_profile_access_plan_node,
     )
 
     if memory_retrieve_node is not None:
@@ -393,7 +433,12 @@ def build_dog_knowledge_agent(
     # 4. 入口路由
     # =========================
 
-    builder.set_conditional_entry_point(
+    builder.set_entry_point(
+        "query_understanding",
+    )
+
+    builder.add_conditional_edges(
+        "query_understanding",
         route_dog_knowledge_model,
         {
             "extract_model": "extract_model",
@@ -479,6 +524,11 @@ def build_dog_knowledge_agent(
             "memory_retrieve",
             "generate",
         )
+
+    builder.add_edge(
+        "answer_profile_access_plan",
+        after_profile_plan_node,
+    )
 
     # =========================
     # 8. V1.7.4 分层契约收敛链路

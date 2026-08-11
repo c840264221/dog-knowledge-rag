@@ -76,7 +76,8 @@ class FakeRetrieverProvider:
             提供者。用于统一管理和注入服务能力。
     """
 
-    pass
+    # 查询理解节点通过检索 Provider 取得与生产环境相同的过滤解析器依赖。
+    dog_query_filter_parser = object()
 
 
 class FakeRerankerProvider:
@@ -150,6 +151,7 @@ class FakeStateGraph:
         self.nodes = {}
         self.edges = []
         self.conditional_entry_point = None
+        self.entry_point = None
         self.conditional_edges = []
         self.compile_called = False
         FakeStateGraph.latest_instance = self
@@ -256,6 +258,11 @@ class FakeStateGraph:
             "path_map": path_map,
         }
 
+    def set_entry_point(self, name):
+        """记录普通入口节点名称。"""
+
+        self.entry_point = name
+
     def compile(self):
         """
         模拟 LangGraph compile。
@@ -356,13 +363,25 @@ def test_build_dog_knowledge_agent_should_register_layer_contract_nodes(
     graph = compiled_graph.graph
 
     assert graph.compile_called is True
+    assert graph.entry_point == "query_understanding"
     assert "query_layer_output" in graph.nodes
+    assert "query_understanding" in graph.nodes
+    assert "answer_profile_access_plan" in graph.nodes
     assert "retrieval_layer_output" in graph.nodes
     assert "memory_retrieve" in graph.nodes
     assert "generation_layer_output" in graph.nodes
     assert "fallback_layer_output" in graph.nodes
     assert "legacy_state_to_layer_outputs" in graph.nodes
     assert "aggregate_layer_outputs" in graph.nodes
+    query_understanding_edges = [
+        item
+        for item in graph.conditional_edges
+        if item["source"] == "query_understanding"
+    ]
+    assert query_understanding_edges[0]["path_map"] == {
+        "extract_model": "extract_model",
+        "recommendation_model": "recommendation_model",
+    }
     assert {
         "start": "retrieve",
         "end": "query_layer_output",
@@ -379,13 +398,19 @@ def test_build_dog_knowledge_agent_should_register_layer_contract_nodes(
     assert evaluate_edges[0]["path_map"]["rerank"] == "retrieval_layer_output"
     assert evaluate_edges[0]["path_map"]["retry"] == "retry"
     assert evaluate_edges[0]["path_map"]["ask_user"] == "ask_user"
-    assert evaluate_edges[0]["path_map"]["generate"] == "memory_retrieve"
+    assert evaluate_edges[0]["path_map"]["generate"] == (
+        "answer_profile_access_plan"
+    )
     assert {
         "start": "retrieval_layer_output",
         "end": "rerank",
     } in graph.edges
     assert {
         "start": "rerank",
+        "end": "answer_profile_access_plan",
+    } in graph.edges
+    assert {
+        "start": "answer_profile_access_plan",
         "end": "memory_retrieve",
     } in graph.edges
     assert {
@@ -397,7 +422,9 @@ def test_build_dog_knowledge_agent_should_register_layer_contract_nodes(
         for item in graph.conditional_edges
         if item["source"] == "ask_user"
     ]
-    assert ask_user_edges[0]["path_map"]["generate"] == "memory_retrieve"
+    assert ask_user_edges[0]["path_map"]["generate"] == (
+        "answer_profile_access_plan"
+    )
     assert {
         "start": "generate",
         "end": "generation_layer_output",

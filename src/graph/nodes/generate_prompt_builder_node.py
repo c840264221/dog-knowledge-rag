@@ -6,6 +6,7 @@ from typing import Mapping
 from src.graph.schemas.answer_strategy import (
     AnswerStrategy,
 )
+from src.memory.pet_profile_context import format_pet_profile_context
 
 
 MEMORY_USAGE_RULES = """记忆使用边界：
@@ -72,12 +73,17 @@ def build_generation_prompt(
         )
         or ""
     ).strip()
+    # 将结构化档案统一转成受控文本，模板不直接解析任意 state 数据。
+    pet_profile_text = format_pet_profile_context(
+        state.get("pet_profile_recall_result")
+    )
     if answer_strategy.task_type == "recommendation":
         return build_recommendation_prompt(
             question=question,
             context=context,
             context_source=context_source,
             memory_text=memory_text,
+            pet_profile_text=pet_profile_text,
             history_text=history_text,
             answer_strategy=answer_strategy,
         )
@@ -88,6 +94,7 @@ def build_generation_prompt(
             context=context,
             context_source=context_source,
             memory_text=memory_text,
+            pet_profile_text=pet_profile_text,
             history_text=history_text,
             answer_strategy=answer_strategy,
         )
@@ -98,6 +105,7 @@ def build_generation_prompt(
             context=context,
             context_source=context_source,
             memory_text=memory_text,
+            pet_profile_text=pet_profile_text,
             history_text=history_text,
             answer_strategy=answer_strategy,
         )
@@ -108,6 +116,7 @@ def build_generation_prompt(
             context=context,
             context_source=context_source,
             memory_text=memory_text,
+            pet_profile_text=pet_profile_text,
             history_text=history_text,
             answer_strategy=answer_strategy,
         )
@@ -117,6 +126,7 @@ def build_generation_prompt(
         context=context,
         context_source=context_source,
         memory_text=memory_text,
+        pet_profile_text=pet_profile_text,
         history_text=history_text,
         answer_strategy=answer_strategy,
     )
@@ -129,6 +139,7 @@ def build_exact_info_prompt(
         memory_text: str,
         history_text: str,
         answer_strategy: AnswerStrategy,
+        pet_profile_text: str = "",
 ) -> str:
     """
     构建精确信息问答 Prompt。
@@ -200,6 +211,12 @@ context_source: {context_source}
 
 {memory_text or "无"}
 
+# 当前宠物档案
+
+以下资料来自当前用户已确认的结构化宠物档案。只在与本轮问题相关时使用；不要补造缺失字段。
+
+{pet_profile_text or "无"}
+
 # 历史对话
 
 {history_text or "无"}
@@ -221,6 +238,7 @@ def build_recommendation_prompt(
         memory_text: str,
         history_text: str,
         answer_strategy: AnswerStrategy,
+        pet_profile_text: str = "",
 ) -> str:
     """
     构建推荐类 Prompt。
@@ -300,6 +318,12 @@ context_source: {context_source}
 
 {memory_text or "无"}
 
+# 当前宠物档案
+
+以下资料来自当前用户已确认的结构化宠物档案。只在与本轮问题相关时使用；不要补造缺失字段。
+
+{pet_profile_text or "无"}
+
 # 历史对话
 
 {history_text or "无"}
@@ -321,6 +345,7 @@ def build_comparison_prompt(
         memory_text: str,
         history_text: str,
         answer_strategy: AnswerStrategy,
+        pet_profile_text: str = "",
 ) -> str:
     """
     构建对比类 Prompt。
@@ -396,6 +421,12 @@ context_source: {context_source}
 
 {memory_text or "无"}
 
+# 当前宠物档案
+
+以下资料来自当前用户已确认的结构化宠物档案。只在与本轮问题相关时使用；不要补造缺失字段。
+
+{pet_profile_text or "无"}
+
 # 历史对话
 
 {history_text or "无"}
@@ -417,6 +448,7 @@ def build_care_advice_prompt(
         memory_text: str,
         history_text: str,
         answer_strategy: AnswerStrategy,
+        pet_profile_text: str = "",
 ) -> str:
     """
     构建护理 / 训练 / 饲养建议 Prompt。
@@ -491,6 +523,12 @@ context_source: {context_source}
 
 {memory_text or "无"}
 
+# 当前宠物档案
+
+以下资料来自当前用户已确认的结构化宠物档案。只在与本轮问题相关时使用；不要补造缺失字段。
+
+{pet_profile_text or "无"}
+
 # 历史对话
 
 {history_text or "无"}
@@ -512,6 +550,7 @@ def build_general_dog_qa_prompt(
         memory_text: str,
         history_text: str,
         answer_strategy: AnswerStrategy,
+        pet_profile_text: str = "",
 ) -> str:
     """
     构建普通狗狗知识问答 Prompt。
@@ -576,6 +615,12 @@ context_source: {context_source}
 {MEMORY_USAGE_RULES}
 
 {memory_text or "无"}
+
+# 当前宠物档案
+
+以下资料来自当前用户已确认的结构化宠物档案。只在与本轮问题相关时使用；不要补造缺失字段。
+
+{pet_profile_text or "无"}
 
 # 历史对话
 

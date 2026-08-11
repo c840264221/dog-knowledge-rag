@@ -24,6 +24,7 @@ from src.skills.schemas import (
     SkillInputCheckResult,
     SkillInputExtractionResult,
     SkillInputRequirement,
+    SkillInputRequirementLevel,
     SkillRuntimeResult,
     SkillSelectionResult,
 )
@@ -42,6 +43,7 @@ __all__ = [
     "SkillInputExtractionResult",
     "SkillInputExtractor",
     "SkillInputRequirement",
+    "SkillInputRequirementLevel",
     "SkillLoader",
     "SkillNotFoundError",
     "SkillRegistry",

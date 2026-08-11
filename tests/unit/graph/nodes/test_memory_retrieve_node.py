@@ -29,6 +29,7 @@ from src.graph.nodes.memory_retrieve_node import (
     build_memory_retrieve_node,
     _format_memory_context,
 )
+from src.memory.memory_schema import PetProfileRecallResult
 
 
 class FakeStateScope:
@@ -381,6 +382,48 @@ class FakeStructuredSemanticRecall:
         }
 
 
+class FakePetProfileService:
+    """记录宠物档案召回参数并返回预设结果的测试服务。"""
+
+    def __init__(self, result=None, error=None) -> None:
+        self.result = result
+        self.error = error
+        self.calls: list[dict] = []
+
+    def recall_profile(
+        self,
+        *,
+        user_id,
+        active_pet_key=None,
+        active_pet_name=None,
+        selected_attributes=None,
+    ):
+        """
+        模拟宠物档案召回。
+
+        参数含义：
+            user_id：节点传入的用户标识。
+            active_pet_key：节点传入的当前宠物稳定标识。
+            active_pet_name：节点传入的当前宠物名称。
+            selected_attributes：节点经过访问策略允许读取的字段。
+
+        返回值含义：
+            PetProfileRecallResult：预设的结构化召回结果。
+        """
+
+        self.calls.append(
+            {
+                "user_id": user_id,
+                "active_pet_key": active_pet_key,
+                "active_pet_name": active_pet_name,
+                "selected_attributes": selected_attributes,
+            }
+        )
+        if self.error is not None:
+            raise self.error
+        return self.result
+
+
 def build_test_node(
     recall_result=None,
     recall_error=None,
@@ -388,6 +431,7 @@ def build_test_node(
     checkpoint_error=None,
     with_runtime_context=True,
     semantic_recall=None,
+    pet_profile_service=None,
 ):
     """
     构建测试用 memory_retrieve_node。
@@ -459,6 +503,7 @@ def build_test_node(
 
     node = build_memory_retrieve_node(
         semantic_recall=fake_semantic_recall,
+        pet_profile_service=pet_profile_service,
         checkpoint_manager=fake_checkpoint_manager,
         runtime_context_getter=runtime_context_getter,
     )
@@ -469,6 +514,127 @@ def build_test_node(
         fake_semantic_recall,
         fake_checkpoint_manager,
     )
+
+
+@pytest.mark.asyncio
+async def test_memory_retrieve_node_should_recall_pet_profile() -> None:
+    """验证节点会使用当前宠物标识召回独立的结构化档案。"""
+
+    profile_service = FakePetProfileService(
+        result=PetProfileRecallResult(
+            status="applied",
+            pet_key="pet_doudou",
+            pet_name="豆豆",
+            selection_source="active_pet",
+            facts={"breed": "金毛", "age_years": "6"},
+            selected_attributes=["breed", "age_years"],
+            reason="测试召回成功。",
+        )
+    )
+    node, _, _, _ = build_test_node(
+        recall_result="用户喜欢简洁回答。",
+        pet_profile_service=profile_service,
+    )
+
+    result = await node(
+        {
+            "user_id": "user_001",
+            "question": "给它制定训练计划",
+            "active_pet_key": "pet_doudou",
+            "active_pet_name": "豆豆",
+            "current_agent": "dog_knowledge_agent",
+            "pet_profile_suggested_attributes": ["breed", "age_years"],
+            "answer_profile_access_decision": {
+                "purpose": "answer_context",
+                "allowed_attributes": ["breed", "age_years"],
+            },
+        }
+    )
+
+    assert result["memory_context"] == "用户喜欢简洁回答。"
+    assert result["pet_profile_recall_result"]["status"] == "applied"
+    assert result["pet_profile_recall_result"]["facts"] == {
+        "breed": "金毛",
+        "age_years": "6",
+    }
+    assert result["active_pet_key"] == "pet_doudou"
+    assert result["active_pet_name"] == "豆豆"
+    assert profile_service.calls == [
+        {
+                "user_id": "user_001",
+                "active_pet_key": "pet_doudou",
+                "active_pet_name": "豆豆",
+                "selected_attributes": ["breed", "age_years"],
+            }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_pet_profile_failure_should_not_clear_semantic_memory() -> None:
+    """验证宠物档案异常只降级自身，不会清空普通长期记忆。"""
+
+    node, _, _, _ = build_test_node(
+        recall_result="用户喜欢简洁回答。",
+        pet_profile_service=FakePetProfileService(
+            error=RuntimeError("测试档案异常")
+        ),
+    )
+
+    result = await node(
+        {
+            "user_id": "user_001",
+            "question": "你好",
+            "current_agent": "dog_knowledge_agent",
+            "pet_profile_suggested_attributes": ["breed"],
+            "answer_profile_access_decision": {
+                "purpose": "answer_context",
+                "allowed_attributes": ["breed"],
+            },
+        }
+    )
+
+    assert result["memory_context"] == "用户喜欢简洁回答。"
+    assert result["pet_profile_recall_result"]["status"] == "failed"
+    assert "测试档案异常" in result["pet_profile_recall_result"]["reason"]
+
+
+@pytest.mark.asyncio
+async def test_memory_retrieve_should_reuse_answer_profile_result() -> None:
+    """验证回答阶段已召回相同字段时不会再次查询数据库。"""
+
+    profile_service = FakePetProfileService(
+        error=AssertionError("不应该重复查询宠物档案")
+    )
+    node, _, _, _ = build_test_node(
+        recall_result="暂无用户记忆",
+        pet_profile_service=profile_service,
+    )
+    cached_result = {
+        "status": "applied",
+        "pet_key": "pet_doudou",
+        "pet_name": "豆豆",
+        "selection_source": "single_pet_fallback",
+        "facts": {"breed": "金毛"},
+        "selected_attributes": ["breed"],
+        "reason": "Skill 阶段已经召回。",
+    }
+
+    result = await node(
+        {
+            "user_id": "user_001",
+            "question": "制定训练计划",
+            "active_pet_key": "pet_doudou",
+            "pet_profile_recall_result": cached_result,
+            "current_agent": "dog_knowledge_agent",
+            "answer_profile_access_decision": {
+                "purpose": "answer_context",
+                "allowed_attributes": ["breed"],
+            },
+        }
+    )
+
+    assert result["pet_profile_recall_result"] == cached_result
+    assert profile_service.calls == []
 
 
 def test_format_memory_context_should_return_default_when_none():

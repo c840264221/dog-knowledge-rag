@@ -4,6 +4,7 @@ from langchain_core.messages import HumanMessage
 
 from src.graph.states.state import DogState
 from src.logger import logger
+from src.memory.pet_profile_context import format_pet_profile_context
 from src.runtime.context import runtime_ctx
 
 
@@ -115,6 +116,11 @@ def build_answer_gen_node(
             or "暂无用户记忆"
         )
 
+        # 结构化档案单独格式化，不能与用户偏好类长期记忆混为同一来源。
+        pet_profile_context = format_pet_profile_context(
+            state.get("pet_profile_recall_result")
+        )
+
         logger.info(
             f"answer_gen_node 接收到 memory_context: {memory_context}"
         )
@@ -138,6 +144,7 @@ def build_answer_gen_node(
         base_prompt = build_answer_prompt(
             question=question,
             memory_context=memory_context,
+            pet_profile_context=pet_profile_context,
             history_text=history_text,
             tool_results_text=tool_results_text,
         )
@@ -375,6 +382,7 @@ def build_answer_prompt(
     question: str,
     memory_context: str,
     history_text: str,
+    pet_profile_context: str = "",
     tool_results_text: str = "",
 ) -> str:
     """
@@ -394,6 +402,9 @@ def build_answer_prompt(
         history_text：
             对话历史文本。
 
+        pet_profile_context：
+            当前宠物已经确认的结构化档案文本；没有时为空字符串。
+
         tool_results_text：
             工具结果文本。
             没有工具结果时为空字符串。
@@ -410,6 +421,10 @@ def build_answer_prompt(
 
 【用户长期记忆】
 {memory_context}
+
+【当前宠物档案】
+以下内容来自已经确认的结构化档案。只在与问题相关时使用，不要补造缺失字段。
+{pet_profile_context or "无"}
 
 【对话历史】
 {history_text}

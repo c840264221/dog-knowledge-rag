@@ -1,7 +1,9 @@
 import sqlite3
 from src.config import MEMORY_DB_PATH, BASE_DIR
 import os
-from datetime import datetime
+from datetime import datetime, timezone
+
+from src.memory.memory_schema import PetProfileFact
 
 
 
@@ -110,6 +112,10 @@ class SQLiteMemoryStore:
             cursor
         )
 
+        self._create_pet_profile_table(
+            cursor
+        )
+
         self.conn.commit()
 
     def _ensure_contract_columns(
@@ -168,6 +174,46 @@ class SQLiteMemoryStore:
                 CURRENT_TIMESTAMP
             )
             WHERE updated_at IS NULL
+            """
+        )
+
+    def _create_pet_profile_table(
+            self,
+            cursor: sqlite3.Cursor,
+    ) -> None:
+        """
+        创建结构化宠物档案事实表。
+
+        功能：
+        - 为旧数据库补充 pet_profile_fact 新表
+        - 使用用户、宠物标识和属性组成唯一键
+        - 不修改 user_memory 旧表和其中已有的数据
+
+        参数含义：
+        - cursor: sqlite3.Cursor
+          当前数据库游标，用于执行建表语句。
+
+        返回值含义：
+        - None
+          该方法只创建缺失的数据表，不返回业务数据。
+        """
+
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS pet_profile_fact (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                pet_key TEXT NOT NULL,
+                pet_name TEXT DEFAULT '',
+                attribute TEXT NOT NULL,
+                value TEXT NOT NULL,
+                confidence REAL DEFAULT 0,
+                source TEXT DEFAULT 'conversation',
+                observed_at TIMESTAMP NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(user_id, pet_key, attribute)
+            )
             """
         )
 
@@ -271,6 +317,258 @@ class SQLiteMemoryStore:
             return None
 
         return int(memory_id)
+
+    def upsert_pet_profile_fact(
+            self,
+            fact: PetProfileFact,
+    ) -> dict:
+        """
+        创建或更新一条宠物档案事实。
+
+        功能：
+        - 使用 user_id、pet_key 和 attribute 定位同一个当前事实
+        - 新事实不存在时创建记录
+        - 新观测时间不早于数据库记录时更新当前值
+        - 迟到的旧事实不会覆盖较新的档案
+
+        参数含义：
+        - fact: PetProfileFact
+          已经过契约校验的宠物档案事实。
+
+        返回值含义：
+        - dict
+          包含 action、fact_id、pet_key、attribute、value 和 observed_at；
+          action 可以是 created、updated 或 ignored_stale。
+        """
+
+        observed_at = self._normalize_fact_time(fact.observed_at)
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, value, observed_at
+            FROM pet_profile_fact
+            WHERE user_id = ?
+              AND pet_key = ?
+              AND attribute = ?
+            LIMIT 1
+            """,
+            (
+                fact.user_id,
+                fact.pet_key,
+                fact.attribute,
+            ),
+        )
+        existing = cursor.fetchone()
+
+        if existing is not None:
+            existing_observed_at = self._normalize_fact_time(
+                str(existing["observed_at"])
+            )
+            if observed_at < existing_observed_at:
+                return {
+                    "action": "ignored_stale",
+                    "fact_id": int(existing["id"]),
+                    "pet_key": fact.pet_key,
+                    "attribute": fact.attribute,
+                    "value": str(existing["value"]),
+                    "observed_at": existing_observed_at,
+                }
+
+            now = datetime.now(timezone.utc).isoformat()
+            cursor.execute(
+                """
+                UPDATE pet_profile_fact
+                SET pet_name = ?,
+                    value = ?,
+                    confidence = ?,
+                    source = ?,
+                    observed_at = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    fact.pet_name,
+                    fact.value,
+                    fact.confidence,
+                    fact.source,
+                    observed_at,
+                    now,
+                    int(existing["id"]),
+                ),
+            )
+            self.conn.commit()
+            return {
+                "action": "updated",
+                "fact_id": int(existing["id"]),
+                "pet_key": fact.pet_key,
+                "attribute": fact.attribute,
+                "value": fact.value,
+                "observed_at": observed_at,
+            }
+
+        now = datetime.now(timezone.utc).isoformat()
+        cursor.execute(
+            """
+            INSERT INTO pet_profile_fact (
+                user_id,
+                pet_key,
+                pet_name,
+                attribute,
+                value,
+                confidence,
+                source,
+                observed_at,
+                created_at,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                fact.user_id,
+                fact.pet_key,
+                fact.pet_name,
+                fact.attribute,
+                fact.value,
+                fact.confidence,
+                fact.source,
+                observed_at,
+                now,
+                now,
+            ),
+        )
+        self.conn.commit()
+        fact_id = int(cursor.lastrowid)
+        return {
+            "action": "created",
+            "fact_id": fact_id,
+            "pet_key": fact.pet_key,
+            "attribute": fact.attribute,
+            "value": fact.value,
+            "observed_at": observed_at,
+        }
+
+    def get_pet_profile_facts(
+            self,
+            user_id: str,
+            pet_key: str | None = None,
+            attributes: list[str] | None = None,
+    ) -> list[dict]:
+        """
+        查询用户的当前宠物档案事实。
+
+        功能：
+        - pet_key 为空时返回该用户全部宠物的档案
+        - pet_key 有值时只返回指定宠物的档案
+        - attributes 有值时只返回允许读取的属性
+        - 结果按宠物标识和属性排序，便于稳定展示和测试
+
+        参数含义：
+        - user_id: str
+          需要查询的用户编号。
+        - pet_key: str | None
+          可选的宠物稳定标识。
+        - attributes: list[str] | None
+          可选的允许读取属性列表。
+
+        返回值含义：
+        - list[dict]
+          当前有效的结构化宠物档案事实列表。
+        """
+
+        sql = """
+            SELECT
+                id,
+                user_id,
+                pet_key,
+                pet_name,
+                attribute,
+                value,
+                confidence,
+                source,
+                observed_at,
+                created_at,
+                updated_at
+            FROM pet_profile_fact
+            WHERE user_id = ?
+        """
+        values: list[str] = [user_id]
+        if pet_key is not None:
+            sql += " AND pet_key = ?"
+            values.append(pet_key)
+        if attributes is not None:
+            if not attributes:
+                return []
+            placeholders = ", ".join("?" for _ in attributes)
+            sql += f" AND attribute IN ({placeholders})"
+            values.extend(attributes)
+        sql += " ORDER BY pet_key ASC, attribute ASC"
+
+        rows = self.conn.execute(sql, values).fetchall()
+        return [dict(row) for row in rows]
+
+    def list_pet_profile_identities(
+            self,
+            user_id: str,
+    ) -> list[dict[str, str]]:
+        """
+        查询一个用户已经建立档案的宠物身份。
+
+        功能：
+        - 只读取 pet_key（宠物稳定标识）和 pet_name（宠物名称）
+        - 每只宠物只返回一次
+        - 为“用户只有一只宠物时自动选择”提供低成本查询
+
+        参数含义：
+        - user_id: str
+          需要查询的用户标识。
+
+        返回值含义：
+        - list[dict[str, str]]
+          按宠物稳定标识排序的宠物身份列表。
+        """
+
+        rows = self.conn.execute(
+            """
+            SELECT
+                pet_key,
+                MAX(COALESCE(pet_name, '')) AS pet_name
+            FROM pet_profile_fact
+            WHERE user_id = ?
+            GROUP BY pet_key
+            ORDER BY pet_key ASC
+            """,
+            (user_id,),
+        ).fetchall()
+        return [
+            {
+                "pet_key": str(row["pet_key"] or ""),
+                "pet_name": str(row["pet_name"] or ""),
+            }
+            for row in rows
+        ]
+
+    @staticmethod
+    def _normalize_fact_time(value: datetime | str) -> str:
+        """
+        把宠物事实的观测时间统一为 UTC ISO 文本。
+
+        参数含义：
+        - value: datetime | str
+          契约对象或数据库读取出的时间值。
+
+        返回值含义：
+        - str
+          带 UTC 时区的 ISO 8601 时间文本，可安全比较新旧顺序。
+        """
+
+        parsed = (
+            value
+            if isinstance(value, datetime)
+            else datetime.fromisoformat(str(value))
+        )
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc).isoformat()
 
     def get_memories(
             self,

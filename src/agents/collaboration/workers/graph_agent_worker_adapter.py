@@ -11,6 +11,7 @@ from __future__ import annotations
 import inspect
 import json
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from src.agents.collaboration.contracts import (
@@ -19,6 +20,10 @@ from src.agents.collaboration.contracts import (
 )
 from src.skills.runtime import SkillRuntime
 from src.skills.schemas import SkillRuntimeResult
+from src.skills.pet_profile_prefill import (
+    PetProfileRecallService,
+    prepare_skill_pet_profile_prefill,
+)
 from src.skills.state_adapter import (
     build_skill_enhanced_question,
     build_skill_state_update,
@@ -52,6 +57,15 @@ DEFAULT_WORKER_OUTPUT_FIELDS = (
     "skill_status",
     "skill_pending_prompt",
     "skill_context",
+    "skill_execution_mode",
+    "skill_ignored_input_ids",
+    "skill_degradation_reason",
+    "skill_degradation_user_input",
+    "skill_required_pet_profile_attributes",
+    "skill_profile_access_decision",
+    "skill_profile_recall_result",
+    "active_pet_key",
+    "active_pet_name",
 )
 
 
@@ -62,6 +76,15 @@ SKILL_WORKER_OUTPUT_FIELDS = (
     "skill_status",
     "skill_pending_prompt",
     "skill_context",
+    "skill_execution_mode",
+    "skill_ignored_input_ids",
+    "skill_degradation_reason",
+    "skill_degradation_user_input",
+    "skill_required_pet_profile_attributes",
+    "skill_profile_access_decision",
+    "skill_profile_recall_result",
+    "active_pet_key",
+    "active_pet_name",
 )
 
 
@@ -75,6 +98,17 @@ WORKER_INTERNAL_CONTROL_FIELDS = (
     "route_decision",
     "strategy",
 )
+
+
+@dataclass(frozen=True)
+class _PreparedStepSkill:
+    """保存 Worker 当前步骤的 Skill 结果和档案预填状态。"""
+
+    # SkillRuntime 的最终准备结果；未配置 Skill 时为空。
+    skill_result: SkillRuntimeResult | None
+
+    # 档案权限、召回结果和当前宠物标识，供步骤状态与检查点保存。
+    profile_state_update: dict[str, Any]
 
 
 class GraphAgentWorkerAdapter:
@@ -96,6 +130,9 @@ class GraphAgentWorkerAdapter:
             从 Agent 最终 state 中保留到步骤 output 的字段名称。
         skill_runtime:
             可选的步骤级 Skill 运行器；为空时保持原有 Worker 执行行为。
+        pet_profile_service:
+            可选的宠物档案服务；提供后会在 Preflight 阶段按权限补全
+            当前步骤 Skill 缺少的档案字段。
 
     返回值含义：
         GraphAgentWorkerAdapter:
@@ -110,6 +147,7 @@ class GraphAgentWorkerAdapter:
         state_builder: AgentStateBuilder | None = None,
         output_fields: Sequence[str] = DEFAULT_WORKER_OUTPUT_FIELDS,
         skill_runtime: SkillRuntime | None = None,
+        pet_profile_service: PetProfileRecallService | None = None,
     ) -> None:
         # 归一化agent_name 祛除首位空格
         normalized_agent_name = str(agent_name or "").strip()
@@ -136,6 +174,53 @@ class GraphAgentWorkerAdapter:
         self.state_builder = state_builder or build_default_agent_state
         self.output_fields = normalized_output_fields
         self.skill_runtime = skill_runtime
+        self.pet_profile_service = pet_profile_service
+
+    def preflight(
+        self,
+        step: AgentTaskStep,
+        dependency_results: Mapping[str, AgentTaskResult],
+    ) -> AgentTaskResult | None:
+        """
+        在真正调用子 Agent 前检查当前步骤是否具备执行条件。
+
+        功能：
+            构建当前步骤的独立输入状态并准备 Skill。Skill 缺少阻塞输入时
+            返回 awaiting_input 结果；输入齐全或没有命中 Skill 时返回 None。
+            本方法不会调用 runner，因此不会产生子 Agent、RAG 或 LLM 成本。
+
+        参数含义：
+            step:
+                Scheduler 当前准备放入同一执行批次的任务步骤。
+            dependency_results:
+                当前步骤已经完成的前置步骤结果。
+
+        返回值含义：
+            AgentTaskResult | None:
+                需要等待用户输入时返回标准步骤结果；可以执行时返回 None。
+        """
+
+        self._validate_assigned_agent(step)
+        input_state = dict(self.state_builder(step, dependency_results))
+        prepared_skill = _prepare_step_skill(
+            skill_runtime=self.skill_runtime,
+            pet_profile_service=self.pet_profile_service,
+            step=step,
+            input_state=input_state,
+        )
+        skill_result = prepared_skill.skill_result
+        if (
+            skill_result is not None
+            and skill_result.status == "awaiting_input"
+        ):
+            return _build_skill_awaiting_result(
+                step=step,
+                skill_result=skill_result,
+                profile_state_update=(
+                    prepared_skill.profile_state_update
+                ),
+            )
+        return None
 
     async def __call__(
         self,
@@ -160,11 +245,7 @@ class GraphAgentWorkerAdapter:
                 包含回答摘要和关键 state 字段的标准 Worker 结果。
         """
 
-        if step.assigned_agent != self.agent_name:
-            raise ValueError(
-                f"步骤要求 {step.assigned_agent}，"
-                f"当前适配器只负责 {self.agent_name}"
-            )
+        self._validate_assigned_agent(step)
 
         # 根据前置步骤的结果和当前步骤 构建出当前步骤执行时需要的state数据
         input_state = dict(
@@ -172,41 +253,24 @@ class GraphAgentWorkerAdapter:
         )
 
         # Skill 只属于当前 step，本地结果不会写入其他并发步骤的共享状态。
-        skill_result = _prepare_step_skill(
+        prepared_skill = _prepare_step_skill(
             skill_runtime=self.skill_runtime,
+            pet_profile_service=self.pet_profile_service,
             step=step,
             input_state=input_state,
         )
+        skill_result = prepared_skill.skill_result
+        input_state.update(prepared_skill.profile_state_update)
         if (
             skill_result is not None
             and skill_result.status == "awaiting_input"
         ):
-            clarification_prompt = str(
-                skill_result.input_check.clarification_prompt
-                if skill_result.input_check is not None
-                else ""
-            ).strip()
-            if not clarification_prompt:
-                raise ValueError(
-                    "Skill 正在等待用户输入，但没有提供等待提示"
-                )
-
-            # output 会被 Scheduler 写回等待步骤，并在恢复时放进 previous_worker_output。
-            skill_state_update = build_skill_state_update(skill_result)
-            skill_output = {
-                field_name: skill_state_update[field_name]
-                for field_name in SKILL_WORKER_OUTPUT_FIELDS
-                if field_name in skill_state_update
-            }
-            return AgentTaskResult(
-                step_id=step.step_id,
-                assigned_agent=step.assigned_agent,
-                status="awaiting_input",
-                summary="当前步骤使用的 Skill 正在等待用户输入。",
-                output=skill_output,
-                requires_user_input=True,
-                clarification_prompt=clarification_prompt,
-                metadata=_build_worker_metadata(skill_result),
+            return _build_skill_awaiting_result(
+                step=step,
+                skill_result=skill_result,
+                profile_state_update=(
+                    prepared_skill.profile_state_update
+                ),
             )
 
         if skill_result is not None and skill_result.status == "ready":
@@ -216,10 +280,31 @@ class GraphAgentWorkerAdapter:
                 input_state.get("retrieval_question") or clean_question
             ).strip()
             input_state.update(skill_state_update)
+            execution_mode = str(
+                step.input_data.get("multi_agent_skill_execution_mode")
+                or "standard"
+            ).strip()
+            ignored_input_ids = _load_step_ignored_input_ids(step)
+            input_state["skill_execution_mode"] = execution_mode
+            input_state["skill_ignored_input_ids"] = ignored_input_ids
+            input_state["skill_degradation_reason"] = str(
+                step.input_data.get(
+                    "multi_agent_skill_degradation_reason"
+                )
+                or ""
+            )
+            input_state["skill_degradation_user_input"] = str(
+                step.input_data.get(
+                    "multi_agent_skill_degradation_user_input"
+                )
+                or ""
+            )
             input_state["question"] = build_skill_enhanced_question(
                 question=clean_question,
                 skill_inputs=skill_result.extraction.merged_inputs,
                 skill_context=skill_result.skill_context,
+                execution_mode=execution_mode,
+                ignored_input_ids=ignored_input_ids,
             )
 
         # 当前步骤执行后的原始结果 也就是state  runner是子agent运行器 比如：dog_knowledge_agent.ainvoke
@@ -273,13 +358,33 @@ class GraphAgentWorkerAdapter:
             },
         )
 
+    def _validate_assigned_agent(self, step: AgentTaskStep) -> None:
+        """
+        检查当前步骤是否确实交给了本适配器负责的 Agent。
+
+        参数含义：
+            step:
+                Scheduler 准备检查或执行的任务步骤。
+
+        返回值含义：
+            None:
+                Agent 名称匹配时正常结束；不匹配时抛出 ValueError。
+        """
+
+        if step.assigned_agent != self.agent_name:
+            raise ValueError(
+                f"步骤要求 {step.assigned_agent}，"
+                f"当前适配器只负责 {self.agent_name}"
+            )
+
 
 def _prepare_step_skill(
     *,
     skill_runtime: SkillRuntime | None,
+    pet_profile_service: PetProfileRecallService | None,
     step: AgentTaskStep,
     input_state: Mapping[str, Any],
-) -> SkillRuntimeResult | None:
+) -> _PreparedStepSkill:
     """
     为当前多智能体步骤选择或恢复 Skill。
 
@@ -290,18 +395,23 @@ def _prepare_step_skill(
     参数含义：
         skill_runtime:
             当前 Worker 可选的技能运行器；为空表示不启用步骤级 Skill。
+        pet_profile_service:
+            可选宠物档案服务；提供后会补全经过权限校验的 Skill 输入。
         step:
             Scheduler 当前交给 Worker 的步骤。
         input_state:
             已由 state_builder 构建、准备交给子 Agent 的状态。
 
     返回值含义：
-        SkillRuntimeResult | None:
-            启用 Skill 时返回准备结果；未配置运行器时返回 None。
+        _PreparedStepSkill:
+            Skill 准备结果以及需要保存到步骤状态的档案预填记录。
     """
 
     if skill_runtime is None:
-        return None
+        return _PreparedStepSkill(
+            skill_result=None,
+            profile_state_update={},
+        )
 
     # Scheduler 恢复等待步骤时，会把上一次 output 放进这个字段。
     raw_previous_output = step.input_data.get(
@@ -318,17 +428,11 @@ def _prepare_step_skill(
         == "awaiting_input"
     )
 
-    # 恢复时使用用户新回答；首次执行使用当前步骤未经附加说明的原始任务文本。
-    user_text = (
-        str(step.input_data.get("multi_agent_resume_input") or "").strip()
-        if is_resuming_skill
-        else str(
-            step.input_data.get("question")
-            or step.description
-            or step.title
-            or input_state.get("question")
-            or ""
-        ).strip()
+    raw_resume_input = step.input_data.get("multi_agent_resume_input")
+    structured_resume_inputs = (
+        dict(raw_resume_input)
+        if is_resuming_skill and isinstance(raw_resume_input, Mapping)
+        else {}
     )
     selected_skill_id = (
         str(previous_output.get("skill_selected_id") or "").strip()
@@ -342,10 +446,153 @@ def _prepare_step_skill(
         and isinstance(raw_existing_inputs, Mapping)
         else {}
     )
-    return skill_runtime.prepare(
+    if structured_resume_inputs:
+        existing_inputs.update(structured_resume_inputs)
+
+    # 结构化字段已经确认后直接检查完整性，不再把旧步骤描述重复交给正则。
+    if is_resuming_skill:
+        user_text = (
+            ""
+            if structured_resume_inputs
+            else str(raw_resume_input or "").strip()
+        )
+    else:
+        user_text = str(
+            step.input_data.get("question")
+            or step.description
+            or step.title
+            or input_state.get("question")
+            or ""
+        ).strip()
+    ignored_input_ids = _load_step_ignored_input_ids(step)
+    selection = skill_runtime.select(
         user_text=user_text,
-        existing_inputs=existing_inputs,
         selected_skill_id=selected_skill_id or None,
+    )
+
+    # 先使用当前步骤文本和恢复数据提取输入，已提供的字段不再重复查数据库。
+    initial_skill_inputs = dict(existing_inputs)
+    if selection.selected_skill_id is not None:
+        initial_extraction = skill_runtime.extract_inputs(
+            skill_id=selection.selected_skill_id,
+            user_text=user_text,
+            existing_inputs=existing_inputs,
+        )
+        initial_skill_inputs = dict(initial_extraction.merged_inputs)
+
+    profile_state_update: dict[str, Any] = {}
+    available_input_sources: dict[str, Mapping[str, Any]] = {}
+    if selection.selected_skill_id is not None:
+        profile_prefill = prepare_skill_pet_profile_prefill(
+            skill_runtime=skill_runtime,
+            selected_skill_id=selection.selected_skill_id,
+            provided_inputs=initial_skill_inputs,
+            ignored_input_ids=ignored_input_ids,
+            agent_name=step.assigned_agent,
+            pet_profile_service=pet_profile_service,
+            user_id=str(
+                input_state.get("user_id")
+                or input_state.get("session_id")
+                or "default_user"
+            ),
+            active_pet_key=input_state.get("active_pet_key"),
+            active_pet_name=input_state.get("active_pet_name"),
+        )
+        profile_state_update = dict(profile_prefill.state_update)
+        available_input_sources = dict(
+            profile_prefill.available_input_sources
+        )
+
+    skill_result = skill_runtime.prepare(
+        user_text=user_text,
+        existing_inputs=initial_skill_inputs,
+        selection=selection,
+        available_input_sources=available_input_sources,
+        ignored_input_ids=ignored_input_ids,
+    )
+    return _PreparedStepSkill(
+        skill_result=skill_result,
+        profile_state_update=profile_state_update,
+    )
+
+
+def _load_step_ignored_input_ids(step: AgentTaskStep) -> list[str]:
+    """
+    读取当前步骤在简化执行时允许忽略的 Skill 输入编号。
+
+    参数含义：
+        step:
+            Scheduler 当前交给 Worker 的任务步骤。
+
+    返回值含义：
+        list[str]:
+            去除空值和重复值后的输入编号列表；标准执行时为空列表。
+    """
+
+    raw_input_ids = step.input_data.get(
+        "multi_agent_skill_ignored_input_ids",
+        [],
+    )
+    if not isinstance(raw_input_ids, Sequence) or isinstance(
+        raw_input_ids,
+        (str, bytes),
+    ):
+        return []
+    normalized_input_ids: list[str] = []
+    for raw_input_id in raw_input_ids:
+        input_id = str(raw_input_id or "").strip()
+        if input_id and input_id not in normalized_input_ids:
+            normalized_input_ids.append(input_id)
+    return normalized_input_ids
+
+
+def _build_skill_awaiting_result(
+    *,
+    step: AgentTaskStep,
+    skill_result: SkillRuntimeResult,
+    profile_state_update: Mapping[str, Any] | None = None,
+) -> AgentTaskResult:
+    """
+    把步骤级 Skill 的缺失输入结果转换成 Scheduler 标准等待结果。
+
+    参数含义：
+        step:
+            当前缺少 Skill 输入的任务步骤。
+        skill_result:
+            SkillRuntime 返回的 awaiting_input 准备结果。
+        profile_state_update:
+            本步骤档案预填产生的权限、召回结果和当前宠物标识。
+
+    返回值含义：
+        AgentTaskResult:
+            包含缺失字段、澄清提示和 Skill 恢复状态的标准步骤结果。
+    """
+
+    clarification_prompt = str(
+        skill_result.input_check.clarification_prompt
+        if skill_result.input_check is not None
+        else ""
+    ).strip()
+    if not clarification_prompt:
+        raise ValueError("Skill 正在等待用户输入，但没有提供等待提示")
+
+    # output 会被 Scheduler 写回等待步骤，并在恢复时放进 previous_worker_output。
+    skill_state_update = build_skill_state_update(skill_result)
+    skill_output = {
+        field_name: skill_state_update[field_name]
+        for field_name in SKILL_WORKER_OUTPUT_FIELDS
+        if field_name in skill_state_update
+    }
+    skill_output.update(dict(profile_state_update or {}))
+    return AgentTaskResult(
+        step_id=step.step_id,
+        assigned_agent=step.assigned_agent,
+        status="awaiting_input",
+        summary="当前步骤使用的 Skill 正在等待用户输入。",
+        output=skill_output,
+        requires_user_input=True,
+        clarification_prompt=clarification_prompt,
+        metadata=_build_worker_metadata(skill_result),
     )
 
 

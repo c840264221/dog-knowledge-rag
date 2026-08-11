@@ -1,4 +1,5 @@
 import inspect
+from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
 
 from src.graph.states.dog_state import (
@@ -10,6 +11,16 @@ from src.logger import logger
 from src.memory.memory_extract import (
     extract_memory
 )
+from src.memory.memory_retention_policy import MemoryRetentionPolicy
+from src.memory.memory_schema import (
+    PetProfileExtractionResult,
+    PetProfileSaveResult,
+)
+from src.memory.pet_profile_extract import (
+    default_pet_profile_extraction_result,
+    extract_pet_profile_facts,
+)
+from src.memory.pet_profile_service import PetProfileService
 
 from src.runtime.context import (
     runtime_ctx
@@ -71,6 +82,9 @@ def build_memory_extract_node(
         checkpoint_manager: Any = None,
         runtime_context_getter: Callable[[], Any] | None = None,
         memory_extractor: Callable[..., Any] = extract_memory,
+        retention_policy: MemoryRetentionPolicy | None = None,
+        pet_profile_extractor: Callable[..., Any] = extract_pet_profile_facts,
+        pet_profile_service: PetProfileService | None = None,
 ) -> Callable[[DogState], Awaitable[dict[str, Any]]]:
     """
     构建 Memory（记忆）抽取节点。
@@ -94,6 +108,12 @@ def build_memory_extract_node(
         memory_extractor：
             可选的记忆抽取函数，默认使用 extract_memory。
             保留该参数便于单元测试注入 Fake（测试假对象）。
+        retention_policy：
+            可选的长期保存资格审查策略；不传时使用项目默认门槛。
+        pet_profile_extractor：
+            可选的宠物档案批量抽取函数，默认使用 LLM 结构化抽取器。
+        pet_profile_service：
+            可选的宠物档案服务，由 MemoryProvider 统一创建并注入。
 
     返回值：
         Callable[[DogState], Awaitable[dict[str, Any]]]：
@@ -102,6 +122,9 @@ def build_memory_extract_node(
 
     if runtime_context_getter is None:
         runtime_context_getter = runtime_ctx.get
+
+    if retention_policy is None:
+        retention_policy = MemoryRetentionPolicy()
 
     async def memory_extract_node(
             state: DogState
@@ -119,7 +142,8 @@ def build_memory_extract_node(
 
         返回值：
             dict[str, Any]：包含 memory_saved、memory_extract_result 和
-            memory_save_result 的 state update（状态更新）。
+            memory_save_result、pet_profile_extraction_result 和
+            pet_profile_save_result 的 state update（状态更新）。
         """
 
         node_name = "memory_extract_node"
@@ -140,12 +164,14 @@ def build_memory_extract_node(
             f"开始执行{node_name}"
         )
 
-        # 优先使用门卫准备的记忆专用文本；旧 State 没有该字段时兼容 question。
-        question = str(
+        # 字段存在但为空表示门卫明确要求跳过；只有旧 State 完全没有该字段
+        # 时才回退到 question，不能用 or 把“明确跳过”误当成“没有提供”。
+        raw_memory_source = (
             state.get("memory_source_text")
-            or state.get("question")
-            or ""
-        ).strip()
+            if "memory_source_text" in state
+            else state.get("question")
+        )
+        question = str(raw_memory_source or "").strip()
 
         user_id = str(
             state.get("user_id")
@@ -165,6 +191,15 @@ def build_memory_extract_node(
         }
 
         save_result: dict[str, Any] | None = None
+        retention_result: dict[str, Any] = {}
+
+        # 宠物档案支线使用独立结果，失败时不能覆盖普通长期记忆的结果。
+        profile_extraction = default_pet_profile_extraction_result(
+            "未执行宠物档案抽取"
+        )
+        profile_save_result: PetProfileSaveResult | None = None
+        active_pet_key = str(state.get("active_pet_key") or "").strip()
+        active_pet_name = str(state.get("active_pet_name") or "").strip()
 
         if not question:
             logger.warning(
@@ -174,7 +209,14 @@ def build_memory_extract_node(
             return {
                 "memory_saved": memory_saved,
                 "memory_extract_result": memory_extract_result,
+                "memory_retention_result": retention_result,
                 "memory_save_result": save_result,
+                "pet_profile_extraction_result": (
+                    profile_extraction.model_dump(mode="json")
+                ),
+                "pet_profile_save_result": {},
+                "active_pet_key": active_pet_key,
+                "active_pet_name": active_pet_name,
             }
 
         if user_id == "default_user":
@@ -204,10 +246,16 @@ def build_memory_extract_node(
                 f"Memory 抽取结果: {memory_extract_result}"
             )
 
-            if memory_extract_result.get(
-                "should_save",
-                False
-            ):
+            retention_decision = retention_policy.evaluate(
+                memory_extract_result
+            )
+            retention_result = retention_decision.model_dump(mode="python")
+
+            logger.info(
+                f"Memory 长期保存审查结果: {retention_result}"
+            )
+
+            if retention_decision.is_accepted:
 
                 save_result = memory_provider.manager.save_memory(
                 user_id=user_id,
@@ -248,27 +296,83 @@ def build_memory_extract_node(
 
             else:
                 logger.info(
-                    f"当前输入不需要保存为 Memory: {memory_extract_result.get('reason')}"
+                    f"当前候选未通过 Memory 长期保存审查: "
+                    f"{retention_decision.reason}"
                 )
-
-            if checkpoint_manager is not None:
-                try:
-                    checkpoint_manager.save_checkpoint()
-
-                except Exception as checkpoint_error:
-                    logger.warning(
-                        f"memory_extract_node 保存 checkpoint 失败: {checkpoint_error}"
-                    )
 
         except Exception as e:
             logger.warning(
                 f"memory_extract_node 执行失败，已跳过 Memory 保存: {e}"
             )
 
+        if pet_profile_service is not None:
+            try:
+                extracted_profile = pet_profile_extractor(
+                    llm_provider=llm_provider,
+                    user_text=question,
+                )
+                if inspect.isawaitable(extracted_profile):
+                    extracted_profile = await extracted_profile
+
+                if isinstance(extracted_profile, PetProfileExtractionResult):
+                    profile_extraction = extracted_profile
+                else:
+                    profile_extraction = PetProfileExtractionResult.model_validate(
+                        extracted_profile or {}
+                    )
+
+                saved_profile = pet_profile_service.save_extraction_result(
+                    user_id=user_id,
+                    extraction_result=profile_extraction,
+                    observed_at=datetime.now(timezone.utc),
+                    selected_pet_key=active_pet_key or None,
+                    selected_pet_name=active_pet_name or None,
+                    source="conversation",
+                )
+                if inspect.isawaitable(saved_profile):
+                    saved_profile = await saved_profile
+                profile_save_result = PetProfileSaveResult.model_validate(
+                    saved_profile
+                )
+
+                # 一轮只明确指向一只宠物时，才更新当前会话关注的宠物。
+                resolved_identities = {
+                    fact.pet_key: fact.pet_name
+                    for fact in profile_save_result.resolution.facts
+                }
+                if len(resolved_identities) == 1:
+                    active_pet_key, active_pet_name = next(
+                        iter(resolved_identities.items())
+                    )
+            except Exception as profile_error:
+                logger.warning(
+                    "memory_extract_node 宠物档案处理失败，已保留普通记忆结果: "
+                    f"{profile_error}"
+                )
+
+        if checkpoint_manager is not None:
+            try:
+                checkpoint_manager.save_checkpoint()
+            except Exception as checkpoint_error:
+                logger.warning(
+                    f"memory_extract_node 保存 checkpoint 失败: {checkpoint_error}"
+                )
+
         return {
             "memory_saved": memory_saved,
             "memory_extract_result": memory_extract_result,
+            "memory_retention_result": retention_result,
             "memory_save_result": save_result,
+            "pet_profile_extraction_result": (
+                profile_extraction.model_dump(mode="json")
+            ),
+            "pet_profile_save_result": (
+                profile_save_result.model_dump(mode="json")
+                if profile_save_result is not None
+                else {}
+            ),
+            "active_pet_key": active_pet_key,
+            "active_pet_name": active_pet_name,
         }
 
     return memory_extract_node

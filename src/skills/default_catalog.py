@@ -29,16 +29,20 @@ DOG_TRAINING_PLAN_SKILL = SkillDefinition(
             input_id="breed",
             name="犬种",
             description="狗狗的犬种或混血情况。",
+            requirement_level="degradable",
+            source_mappings={"pet_profile": "breed"},
         ),
         SkillInputRequirement(
             input_id="age",
             name="年龄",
             description="狗狗当前年龄或年龄阶段。",
+            source_mappings={"pet_profile": "age_years"},
         ),
         SkillInputRequirement(
             input_id="current_behavior",
             name="当前行为基础",
             description="已经掌握的指令和当前存在的行为问题。",
+            requirement_level="degradable",
         ),
         SkillInputRequirement(
             input_id="training_goal",

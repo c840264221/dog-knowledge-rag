@@ -94,6 +94,13 @@ def build_general_qa_agent(
                 semantic_recall=(
                     memory_provider.semantic_recall
                 ),
+                pet_profile_service=(
+                    getattr(
+                        memory_provider,
+                        "pet_profile_service",
+                        None,
+                    )
+                ),
                 checkpoint_manager=(
                     checkpoint_provider.manager
                 )

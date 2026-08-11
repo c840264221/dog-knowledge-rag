@@ -23,11 +23,11 @@ from src.graph.nodes.memory_extract_node import (
     build_memory_extract_node,
 )
 from src.graph.nodes.task_relation_guard_node import (
-    task_relation_guard_node,
+    build_task_relation_guard_node,
 )
 
 from src.graph.nodes.router_node import (
-    semantic_router_node,
+    build_semantic_router_node,
 )
 from src.graph.nodes.skill_prepare_node import build_skill_prepare_node
 
@@ -72,6 +72,9 @@ from src.agents.collaboration.scheduler import (
     MultiAgentTaskScheduler,
 )
 from src.agents.collaboration.workers import GraphAgentWorkerAdapter
+from src.agents.collaboration.adapters import (
+    build_default_multi_agent_clarification_field_resolver,
+)
 from src.skills.default_catalog import build_default_skill_runtime
 
 
@@ -422,6 +425,11 @@ class GraphRuntimeService:
         memory_extract_node = build_memory_extract_node(
             llm_provider=self.llm_provider,
             memory_provider=self.memory_provider,
+            pet_profile_service=(
+                self.memory_provider.pet_profile_service
+                if self.memory_provider is not None
+                else None
+            ),
             checkpoint_manager=(
                 self.checkpoint_provider.manager
                 if self.checkpoint_provider is not None
@@ -429,13 +437,18 @@ class GraphRuntimeService:
             ),
         )
 
+        # 顶层 Skill 准备节点和任务关系门卫复用同一份无会话状态的运行器。
+        skill_runtime = build_default_skill_runtime()
+
         graph = StateGraph(
             DogState
         )
 
         graph.add_node(
             "task_relation_guard",
-            task_relation_guard_node,
+            build_task_relation_guard_node(
+                skill_runtime=skill_runtime,
+            ),
         )
 
         graph.add_node(
@@ -445,13 +458,26 @@ class GraphRuntimeService:
 
         graph.add_node(
             "semantic_router",
-            semantic_router_node,
+            build_semantic_router_node(
+                multi_agent_field_resolver=(
+                    build_default_multi_agent_clarification_field_resolver(
+                        llm_provider=self.llm_provider,
+                    )
+                ),
+            ),
         )
 
         # RootAgent 先确定目标 Agent，再由 Skill 节点准备该业务所需输入与说明。
         graph.add_node(
             "skill_prepare",
-            build_skill_prepare_node(),
+            build_skill_prepare_node(
+                skill_runtime=skill_runtime,
+                pet_profile_service=(
+                    self.memory_provider.pet_profile_service
+                    if self.memory_provider is not None
+                    else None
+                )
+            ),
         )
 
         graph.add_node(
@@ -577,17 +603,24 @@ class GraphRuntimeService:
         # 多个 Worker 复用同一个无会话状态的 SkillRuntime；每个步骤的数据仍
         # 保存到各自 AgentTaskResult 中，不会写入共享的全局 skill_inputs。
         skill_runtime = build_default_skill_runtime()
+        pet_profile_service = (
+            self.memory_provider.pet_profile_service
+            if self.memory_provider is not None
+            else None
+        )
         scheduler = MultiAgentTaskScheduler(
             workers={
                 "dog_knowledge_agent": GraphAgentWorkerAdapter(
                     agent_name="dog_knowledge_agent",
                     runner=dog_knowledge_agent.ainvoke,
                     skill_runtime=skill_runtime,
+                    pet_profile_service=pet_profile_service,
                 ),
                 "general_agent": GraphAgentWorkerAdapter(
                     agent_name="general_agent",
                     runner=general_agent.ainvoke,
                     skill_runtime=skill_runtime,
+                    pet_profile_service=pet_profile_service,
                 ),
             },
             **_build_multi_agent_scheduler_options(),

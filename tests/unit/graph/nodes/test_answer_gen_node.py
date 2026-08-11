@@ -686,6 +686,22 @@ def test_build_answer_prompt_should_not_include_tool_results_when_empty():
     assert "你好" in prompt
 
 
+def test_build_answer_prompt_should_keep_pet_profile_separate() -> None:
+    """验证通用回答 Prompt 会把宠物档案和偏好记忆分区展示。"""
+
+    prompt = build_answer_prompt(
+        question="给它制定饮食计划",
+        memory_context="用户偏好简洁回答",
+        pet_profile_context="- 宠物名称：豆豆\n- 体重：30",
+        history_text="",
+    )
+
+    assert "【用户长期记忆】\n用户偏好简洁回答" in prompt
+    assert "【当前宠物档案】" in prompt
+    assert "- 宠物名称：豆豆" in prompt
+    assert "- 体重：30" in prompt
+
+
 @pytest.mark.asyncio
 async def test_answer_gen_node_should_generate_answer_with_tool_results():
     """

@@ -67,6 +67,71 @@ def test_skill_definition_should_keep_structured_required_inputs() -> None:
     assert skill.required_inputs[0].name == "犬种"
 
 
+def test_skill_input_requirement_should_keep_source_mapping() -> None:
+    """验证技能输入可以声明宠物档案等外部数据来源。"""
+
+    requirement = SkillInputRequirement(
+        input_id="age",
+        name="年龄",
+        source_mappings={"pet_profile": "age_years"},
+    )
+
+    assert requirement.source_mappings == {
+        "pet_profile": "age_years"
+    }
+
+
+def test_skill_input_requirement_should_default_to_hard_required() -> None:
+    """验证旧 Skill 未声明输入级别时仍按强制必填处理。"""
+
+    requirement = SkillInputRequirement(
+        input_id="age",
+        name="年龄",
+    )
+
+    assert requirement.requirement_level == "hard_required"
+
+
+@pytest.mark.parametrize(
+    "requirement_level",
+    ["hard_required", "degradable", "optional"],
+)
+def test_skill_input_requirement_should_accept_supported_levels(
+    requirement_level: str,
+) -> None:
+    """验证技能输入契约只接受系统支持的三种缺失影响级别。"""
+
+    requirement = SkillInputRequirement(
+        input_id="age",
+        name="年龄",
+        requirement_level=requirement_level,
+    )
+
+    assert requirement.requirement_level == requirement_level
+
+
+def test_skill_input_requirement_should_reject_unknown_level() -> None:
+    """验证未知输入级别不能进入技能契约。"""
+
+    with pytest.raises(ValidationError, match="requirement_level"):
+        SkillInputRequirement(
+            input_id="age",
+            name="年龄",
+            requirement_level="sometimes_required",
+        )
+
+
+def test_skill_input_requirement_should_reject_blank_source_mapping() -> None:
+    """验证空的数据源名称或字段名称不能进入技能契约。"""
+
+    with pytest.raises(ValidationError, match="不能为空"):
+        SkillInputRequirement(
+            input_id="age",
+            name="年龄",
+            source_mappings={"pet_profile": "   "},
+        )
+
+
 @pytest.mark.parametrize(
     "skill_id",
     ["DogTraining", "dog_training", "dog--training", "dog training"],

@@ -89,6 +89,7 @@ def build_multi_agent_entry_node(
         if action == "resume":
             task_result = _load_pending_task_result(state)
             user_inputs = _load_resume_inputs(state)
+            step_resume_decisions = _load_step_resume_decisions(state)
             result = await _run_with_registered_cancellation(
                 cancellation_registry=cancellation_registry,
                 multi_agent_task_id=task_result.collaboration_id,
@@ -96,6 +97,15 @@ def build_multi_agent_entry_node(
                     task_result,
                     user_inputs=user_inputs,
                     cancellation_token=token,
+                    **(
+                        {
+                            "step_resume_decisions": (
+                                step_resume_decisions
+                            )
+                        }
+                        if step_resume_decisions
+                        else {}
+                    ),
                 ),
             )
         elif action == "replan":
@@ -121,6 +131,9 @@ def build_multi_agent_entry_node(
                         "session_id": state.get("session_id", ""),
                         "trace_id": state.get("trace_id", ""),
                     },
+                    worker_runtime_context=(
+                        _build_worker_runtime_context(state)
+                    ),
                 ),
             )
         else:
@@ -140,12 +153,44 @@ def build_multi_agent_entry_node(
                         "session_id": state.get("session_id", ""),
                         "trace_id": state.get("trace_id", ""),
                     },
+                    worker_runtime_context=(
+                        _build_worker_runtime_context(state)
+                    ),
                 ),
             )
 
         return build_multi_agent_state_update(result)
 
     return multi_agent_entry_node
+
+
+def _build_worker_runtime_context(
+    state: Mapping[str, Any],
+) -> dict[str, Any]:
+    """
+    从主图状态提取只允许程序传给 Worker 的可信运行数据。
+
+    功能：
+        将用户、会话、追踪和当前宠物标识从 Planner 提示上下文中分离，
+        供总编排器在计划校验完成后写入每个步骤。
+
+    参数含义：
+        state：当前主图状态。
+
+    返回值含义：
+        dict[str, Any]：可以安全写入 Worker input_data 的运行字段。
+    """
+
+    return {
+        field_name: state.get(field_name, "")
+        for field_name in (
+            "user_id",
+            "session_id",
+            "trace_id",
+            "active_pet_key",
+            "active_pet_name",
+        )
+    }
 
 
 async def _run_with_registered_cancellation(
@@ -229,6 +274,27 @@ def _load_resume_inputs(
     return dict(raw_inputs)
 
 
+def _load_step_resume_decisions(
+    state: Mapping[str, Any],
+) -> dict[str, Any]:
+    """
+    从主图状态读取每个等待步骤已经确定的恢复方式。
+
+    参数含义：
+        state:
+            包含 multi_agent_step_resume_decisions 的当前主图状态。
+
+    返回值含义：
+        dict[str, Any]:
+            步骤编号到正常恢复、简化执行或继续等待决定的映射。
+    """
+
+    raw_decisions = state.get("multi_agent_step_resume_decisions")
+    if not isinstance(raw_decisions, Mapping):
+        return {}
+    return dict(raw_decisions)
+
+
 def build_multi_agent_state_update(
     task_result: MultiAgentTaskResult,
 ) -> dict[str, Any]:
@@ -255,7 +321,9 @@ def build_multi_agent_state_update(
             "multi_agent_task_result": result_data,
             "multi_agent_resume_action": "none",
             "multi_agent_resume_inputs": {},
+            "multi_agent_step_resume_decisions": {},
             "multi_agent_resume_ready": False,
+            "multi_agent_clarification_extraction": {},
             "multi_agent_pending_prompt": prompt,
             "pending_prompt": prompt,
             "waiting_user_input": True,
@@ -272,7 +340,9 @@ def build_multi_agent_state_update(
         "multi_agent_task_result": result_data,
         "multi_agent_resume_action": "none",
         "multi_agent_resume_inputs": {},
+        "multi_agent_step_resume_decisions": {},
         "multi_agent_resume_ready": False,
+        "multi_agent_clarification_extraction": {},
         "multi_agent_pending_prompt": "",
         "pending_prompt": "",
         "waiting_user_input": False,
@@ -293,14 +363,21 @@ def _extract_waiting_prompt(
 
     返回值含义：
         str:
-            Worker、metadata 或 Planner 提供的第一个非空等待提示。
+            优先返回调度器生成的整批提示；旧任务没有整批数据时，再返回
+            metadata、Planner 或 Worker 提供的第一个非空等待提示。
     """
 
-    for result in task_result.task_results:
-        if result.status == "awaiting_input":
-            prompt = str(result.clarification_prompt or "").strip()
-            if prompt:
-                return prompt
+    # 新版调度器会把同批次全部等待步骤整理成一个澄清包。
+    clarification_bundle = task_result.metadata.get(
+        "clarification_bundle"
+    )
+    if isinstance(clarification_bundle, Mapping):
+        bundle_prompt = str(
+            clarification_bundle.get("display_prompt") or ""
+        ).strip()
+        if bundle_prompt:
+            return bundle_prompt
+
     metadata_prompt = str(
         task_result.metadata.get("clarification_prompt") or ""
     ).strip()
@@ -309,4 +386,11 @@ def _extract_waiting_prompt(
     plan_prompt = str(task_result.plan.clarification_prompt or "").strip()
     if plan_prompt:
         return plan_prompt
+
+    # 兼容尚未保存整批澄清数据的旧 Checkpoint。
+    for result in task_result.task_results:
+        if result.status == "awaiting_input":
+            prompt = str(result.clarification_prompt or "").strip()
+            if prompt:
+                return prompt
     raise ValueError("awaiting_input 多 Agent 任务缺少等待提示")

@@ -14,6 +14,7 @@ from src.settings.rag import RagSettings
 from src.settings.observability import ObservabilitySettings
 from src.settings.mcp import McpSettings
 from src.settings.api import ApiSettings
+from src.settings.pet_profile_access import PetProfileAccessSettings
 
 
 class Settings:
@@ -48,6 +49,8 @@ class Settings:
         self.mcp = McpSettings()
 
         self.api = ApiSettings()
+
+        self.pet_profile_access = PetProfileAccessSettings()
 
 
 settings = Settings()

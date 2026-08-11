@@ -9,10 +9,14 @@ from src.agents.tool_agent.adapters.clarification_resume_adapter import (
     build_clarification_cleanup_update,
     match_clarification_candidate,
 )
+from src.agents.collaboration.adapters.resume_input_adapter import (
+    MULTI_AGENT_DEGRADED_INPUTS,
+)
 from src.runtime.resume.task_relation import (
     TaskRelationDecision,
     classify_pending_task_relation,
 )
+from src.skills import SkillRuntime, build_default_skill_runtime
 
 
 PendingTaskKind = Literal[
@@ -23,8 +27,18 @@ PendingTaskKind = Literal[
 ]
 
 
+_SKILL_DEGRADED_EXECUTION_INPUTS = {
+    "简化执行",
+    "简化运行",
+    "按现有信息继续",
+    "使用现有信息继续",
+}
+
+
 def resolve_pending_task_relation(
     state: Mapping[str, Any],
+    *,
+    skill_runtime: SkillRuntime | None = None,
 ) -> dict[str, Any]:
     """
     在各业务恢复适配器运行前判断本轮输入和等待任务的关系。
@@ -37,6 +51,8 @@ def resolve_pending_task_relation(
     参数含义：
         state:
             已恢复等待任务白名单字段的本轮主图状态。
+        skill_runtime:
+            可选的 Skill 运行器，用于判断本轮输入是否补充了等待技能所缺字段。
 
     返回值含义：
         dict[str, Any]:
@@ -74,6 +90,7 @@ def resolve_pending_task_relation(
             state=state,
             pending_kind=pending_kind,
             initial_decision=initial_decision,
+            skill_runtime=skill_runtime,
         )
 
     common_update = {
@@ -82,6 +99,14 @@ def resolve_pending_task_relation(
         "task_relation_pending_kind": pending_kind,
         "task_relation_requires_confirmation": False,
     }
+    if pending_kind == "skill" and decision.relation == "resume":
+        common_update.update(
+            _build_skill_degraded_execution_update(
+                state=state,
+                normalized_input=decision.normalized_input,
+                raw_user_input=user_input,
+            )
+        )
 
     if decision.relation == "resume":
         return {
@@ -129,13 +154,15 @@ def _resolve_contextual_relation(
     state: Mapping[str, Any],
     pending_kind: PendingTaskKind,
     initial_decision: TaskRelationDecision,
+    skill_runtime: SkillRuntime | None,
 ) -> TaskRelationDecision:
     """
     使用等待任务已有的结构化信息补充通用关系判断。
 
     功能：
-        通用规则无法判断时，检查 Tool 澄清请求里的候选参数。用户输入
-        唯一命中候选值时，可以确定它是在继续工具任务。
+        通用规则无法判断时，优先读取对应业务已经保存的结构化信息。
+        Tool 输入唯一命中候选值，或 Skill 输入补齐至少一个当前缺失字段时，
+        都可以确定本轮是在继续旧任务。
 
     参数含义：
         state:
@@ -144,32 +171,216 @@ def _resolve_contextual_relation(
             当前等待任务所属模块。
         initial_decision:
             不考虑业务上下文时得到的第一轮判断。
+        skill_runtime:
+            用来提取并检查等待 Skill 输入的运行器；为空时按需构建默认实例。
 
     返回值含义：
         TaskRelationDecision:
             加入确定性业务证据后的任务关系判断。
     """
 
-    if initial_decision.relation != "ambiguous" or pending_kind != "tool":
+    if initial_decision.relation != "ambiguous":
         return initial_decision
 
-    clarification = state.get("tool_agent_clarification_request")
+    if pending_kind == "tool":
+        clarification = state.get("tool_agent_clarification_request")
+        if (
+            isinstance(clarification, Mapping)
+            and match_clarification_candidate(
+                user_input=initial_decision.normalized_input,
+                clarification_request=clarification,
+            )
+            is not None
+        ):
+            return TaskRelationDecision(
+                relation="resume",
+                normalized_input=initial_decision.normalized_input,
+                confidence=1.0,
+                reason="用户输入唯一命中待补全工具参数的候选值。",
+                source="rule",
+            )
+
     if (
-        isinstance(clarification, Mapping)
-        and match_clarification_candidate(
-            user_input=initial_decision.normalized_input,
-            clarification_request=clarification,
+        pending_kind == "multi_agent"
+        and any(
+            keyword in initial_decision.normalized_input
+            for keyword in MULTI_AGENT_DEGRADED_INPUTS
         )
-        is not None
     ):
         return TaskRelationDecision(
             relation="resume",
             normalized_input=initial_decision.normalized_input,
             confidence=1.0,
-            reason="用户输入唯一命中待补全工具参数的候选值。",
-            source="rule",
+            reason=(
+                "用户明确提交了等待中多智能体任务的简化执行控制指令。"
+            ),
+            source="explicit",
+        )
+
+    if pending_kind == "skill":
+        return _resolve_pending_skill_relation(
+            state=state,
+            initial_decision=initial_decision,
+            skill_runtime=skill_runtime,
         )
     return initial_decision
+
+
+def _resolve_pending_skill_relation(
+    *,
+    state: Mapping[str, Any],
+    initial_decision: TaskRelationDecision,
+    skill_runtime: SkillRuntime | None,
+) -> TaskRelationDecision:
+    """
+    判断模糊输入是否实际补充了等待 Skill 的必需字段。
+
+    功能：
+        使用检查点保存的技能编号和历史输入计算补充前的缺失字段，再从本轮
+        用户文本提取技能输入并重新检查。只要缺失字段至少减少一个，就把
+        本轮输入确定为继续旧任务；无法提取有效进展时维持模糊判断。
+
+    参数含义：
+        state:
+            包含 skill_selected_id 和 skill_inputs 的当前主图状态。
+        initial_decision:
+            通用任务关系规则生成的模糊判断。
+        skill_runtime:
+            可复用的技能运行器；为空时创建项目默认技能运行器。
+
+    返回值含义：
+        TaskRelationDecision:
+            有结构化补充证据时返回 resume，否则返回原始模糊判断。
+    """
+
+    selected_skill_id = str(
+        state.get("skill_selected_id") or ""
+    ).strip()
+    if not selected_skill_id:
+        return initial_decision
+
+    if (
+        initial_decision.normalized_input.casefold()
+        in _SKILL_DEGRADED_EXECUTION_INPUTS
+    ):
+        return TaskRelationDecision(
+            relation="resume",
+            normalized_input=initial_decision.normalized_input,
+            confidence=1.0,
+            reason="用户明确选择按现有信息简化执行等待中的 Skill。",
+            source="explicit",
+        )
+
+    raw_existing_inputs = state.get("skill_inputs")
+    existing_inputs = (
+        dict(raw_existing_inputs)
+        if isinstance(raw_existing_inputs, Mapping)
+        else {}
+    )
+    resolved_runtime = skill_runtime or build_default_skill_runtime()
+
+    try:
+        before_check = resolved_runtime.check_inputs(
+            skill_id=selected_skill_id,
+            provided_inputs=existing_inputs,
+        )
+        extraction = resolved_runtime.extract_inputs(
+            skill_id=selected_skill_id,
+            user_text=initial_decision.normalized_input,
+            existing_inputs=existing_inputs,
+        )
+        after_check = resolved_runtime.check_inputs(
+            skill_id=selected_skill_id,
+            provided_inputs=extraction.merged_inputs,
+        )
+    except (LookupError, TypeError, ValueError):
+        # 检查点中的技能编号或输入损坏时保持谨慎，不让门卫错误恢复旧任务。
+        return initial_decision
+
+    newly_supplied_input_ids = [
+        input_id
+        for input_id in before_check.missing_input_ids
+        if input_id not in after_check.missing_input_ids
+    ]
+    if not newly_supplied_input_ids:
+        return initial_decision
+
+    return TaskRelationDecision(
+        relation="resume",
+        normalized_input=initial_decision.normalized_input,
+        confidence=1.0,
+        reason=(
+            "用户本轮补充了等待 Skill 当前缺失的必需字段: "
+            f"{newly_supplied_input_ids}。"
+        ),
+        source="rule",
+    )
+
+
+def _build_skill_degraded_execution_update(
+    *,
+    state: Mapping[str, Any],
+    normalized_input: str,
+    raw_user_input: str,
+) -> dict[str, Any]:
+    """
+    根据等待中的技能检查结果构建简化执行状态。
+
+    功能：
+        只在用户明确选择简化执行，并且上一轮检查结果确认不存在强制缺失
+        字段时，保存简化模式和允许忽略的字段。忽略范围完全来自系统生成的
+        检查结果，不接受用户自行指定内部字段名。
+
+    参数含义：
+        state:
+            包含上一轮 SkillRuntime 检查结果的主图状态。
+        normalized_input:
+            去除任务关系前缀后的本轮输入。
+        raw_user_input:
+            用户本轮未经任务关系处理的原始输入。
+
+    返回值含义：
+        dict[str, Any]:
+            可以合并进 DogState 的简化执行字段；条件不满足时返回空字典。
+    """
+
+    if (
+        normalized_input.casefold()
+        not in _SKILL_DEGRADED_EXECUTION_INPUTS
+    ):
+        return {}
+
+    raw_runtime_result = state.get("skill_runtime_result")
+    if not isinstance(raw_runtime_result, Mapping):
+        return {}
+    raw_input_check = raw_runtime_result.get("input_check")
+    if not isinstance(raw_input_check, Mapping):
+        return {}
+    if not bool(raw_input_check.get("can_run_degraded")):
+        return {}
+
+    raw_missing_ids = raw_input_check.get(
+        "missing_degradable_input_ids"
+    )
+    if not isinstance(raw_missing_ids, list):
+        return {}
+    ignored_input_ids = [
+        str(input_id).strip()
+        for input_id in raw_missing_ids
+        if str(input_id).strip()
+    ]
+    if not ignored_input_ids:
+        return {}
+
+    return {
+        "skill_execution_mode": "degraded",
+        "skill_ignored_input_ids": ignored_input_ids,
+        "skill_degradation_reason": (
+            "user_selected_degraded_execution"
+        ),
+        "skill_degradation_user_input": raw_user_input,
+    }
+
 
 def _find_pending_task_kinds(
     state: Mapping[str, Any],
@@ -255,7 +466,9 @@ def _build_all_pending_cleanup_update(
         "multi_agent_task_result": {},
         "multi_agent_resume_action": action,
         "multi_agent_resume_inputs": {},
+        "multi_agent_step_resume_decisions": {},
         "multi_agent_resume_ready": False,
+        "multi_agent_clarification_extraction": {},
         "multi_agent_pending_prompt": "",
         "skill_runtime_result": {},
         "skill_selected_id": "",
@@ -265,8 +478,19 @@ def _build_all_pending_cleanup_update(
         "skill_context": "",
         "skill_original_question": "",
         "skill_target_agent": "",
+        "skill_execution_mode": "standard",
+        "skill_ignored_input_ids": [],
+        "skill_degradation_reason": "",
+        "skill_degradation_user_input": "",
         "retrieval_question": "",
         "memory_retrieval_text": "",
+        "pet_profile_recall_result": {},
+        "pet_profile_suggested_attributes": [],
+        "skill_required_pet_profile_attributes": [],
+        "skill_profile_recall_result": {},
+        "skill_profile_access_decision": {},
+        "answer_profile_access_decision": {},
+        "dog_query_understanding_result": {},
         "pending_prompt": "",
         "waiting_user_input": False,
     }

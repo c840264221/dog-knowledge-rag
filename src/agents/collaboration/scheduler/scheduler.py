@@ -22,6 +22,10 @@ from src.agents.collaboration.contracts import (
     AgentTaskPlanStatus,
     AgentTaskResult,
     AgentTaskStep,
+    MultiAgentClarificationBundle,
+    MultiAgentClarificationField,
+    MultiAgentStepClarification,
+    MultiAgentStepResumeDecision,
     MultiAgentTaskResult,
 )
 from src.logger import logger
@@ -504,6 +508,7 @@ class MultiAgentTaskScheduler:
         task_result: MultiAgentTaskResult,
         *,
         user_inputs: Mapping[str, Any],
+        step_resume_decisions: Mapping[str, Any] | None = None,
         cancellation_token: MultiAgentTaskCancellationToken | None = None,
     ) -> MultiAgentTaskResult:
         """
@@ -518,6 +523,9 @@ class MultiAgentTaskScheduler:
                 Scheduler 之前返回的 awaiting_input 暂停结果。
             user_inputs:
                 等待步骤编号到用户回答的映射。键必须覆盖全部等待步骤。
+            step_resume_decisions:
+                可选的逐步骤恢复决定；用于把简化执行模式和允许忽略字段
+                写入对应步骤，不会与其他并发步骤共享。
             cancellation_token:
                 可选任务取消令牌；收到取消请求后停止未完成步骤。
 
@@ -530,11 +538,17 @@ class MultiAgentTaskScheduler:
         awaiting_results = _validate_resume_request(
             task_result=task_result,
             user_inputs=user_inputs,
+            step_resume_decisions=step_resume_decisions,
+        )
+        normalized_resume_decisions = _validate_step_resume_decisions(
+            awaiting_step_ids=set(awaiting_results),
+            raw_decisions=step_resume_decisions,
         )
         resumable_plan = _build_resumable_plan(
             task_result=task_result,
             user_inputs=user_inputs,
             awaiting_results=awaiting_results,
+            step_resume_decisions=normalized_resume_decisions,
         )
         results_by_step_id = {
             result.step_id: result
@@ -617,6 +631,16 @@ class MultiAgentTaskScheduler:
             for step in plan.steps
             if step.step_id not in results_by_step_id
         }
+        preflight_batches = [
+            list(batch)
+            for batch in base_metadata.get("preflight_batches", [])
+            if isinstance(batch, list)
+        ]
+        base_metadata = {
+            **base_metadata,
+            "preflight_batches": preflight_batches,
+            "batch_execution_policy": "strict_preflight",
+        }
 
         while pending_step_ids:
             if (
@@ -661,6 +685,44 @@ class MultiAgentTaskScheduler:
                 step.step_id
                 for step in current_batch
             ]
+
+            # 先检查整批步骤是否具备运行条件。只要一个步骤需要澄清，
+            # 本批次所有真正的 Worker 都不启动，避免用户随后取消造成浪费。
+            preflight_results = await self._preflight_batch(
+                steps=current_batch,
+                results_by_step_id=results_by_step_id,
+            )
+            preflight_batches.append(current_batch_ids)
+            awaiting_preflight_results = [
+                result
+                for result in preflight_results
+                if result.status == "awaiting_input"
+            ]
+            if awaiting_preflight_results:
+                for result in awaiting_preflight_results:
+                    results_by_step_id[result.step_id] = result
+                _log_scheduler_event(
+                    level="info",
+                    event="multi_agent_batch_blocked_by_preflight",
+                    payload={
+                        "multi_agent_task_id": multi_agent_task_id,
+                        "plan_id": plan.plan_id,
+                        "step_ids": current_batch_ids,
+                        "awaiting_step_ids": [
+                            result.step_id
+                            for result in awaiting_preflight_results
+                        ],
+                    },
+                )
+                return _build_awaiting_input_result(
+                    plan=plan,
+                    multi_agent_task_id=multi_agent_task_id,
+                    results_by_step_id=results_by_step_id,
+                    ready_batches=ready_batches,
+                    awaiting_results=awaiting_preflight_results,
+                    base_metadata=base_metadata,
+                )
+
             ready_batches.append(current_batch_ids)
             _log_scheduler_event(
                 level="info",
@@ -826,6 +888,90 @@ class MultiAgentTaskScheduler:
             },
         )
         return final_result
+
+    async def _preflight_batch(
+        self,
+        *,
+        steps: list[AgentTaskStep],
+        results_by_step_id: Mapping[str, AgentTaskResult],
+    ) -> list[AgentTaskResult]:
+        """
+        在真正执行 Worker 前检查同一批步骤是否需要用户补充信息。
+
+        功能：
+            调用 Worker 可选的 preflight 方法。没有提供该方法的旧 Worker
+            视为可以直接执行；提供方法的 Worker 只能返回 None 或
+            awaiting_input。检查过程可以并发，但不会调用 Worker 主执行入口。
+
+        参数含义：
+            steps:
+                当前依赖已经满足、准备进入同一执行批次的步骤。
+            results_by_step_id:
+                已经完成的前置步骤结果，用于为每个步骤构建依赖输入。
+
+        返回值含义：
+            list[AgentTaskResult]:
+                当前批次中需要等待用户输入的步骤结果；全部可执行时为空。
+        """
+
+        checks = [
+            self._preflight_step(
+                step=step,
+                dependency_results={
+                    dependency_id: results_by_step_id[dependency_id]
+                    for dependency_id in step.depends_on
+                },
+            )
+            for step in steps
+        ]
+        raw_results = await asyncio.gather(*checks)
+        return [
+            result
+            for result in raw_results
+            if result is not None
+        ]
+
+    async def _preflight_step(
+        self,
+        *,
+        step: AgentTaskStep,
+        dependency_results: Mapping[str, AgentTaskResult],
+    ) -> AgentTaskResult | None:
+        """
+        调用一个 Worker 可选的执行前检查入口并校验返回契约。
+
+        参数含义：
+            step:
+                当前准备检查的任务步骤。
+            dependency_results:
+                当前步骤依赖的已完成步骤结果。
+
+        返回值含义：
+            AgentTaskResult | None:
+                步骤需要澄清时返回 awaiting_input；可直接执行时返回 None。
+        """
+
+        worker = self.workers.get(step.assigned_agent)
+        if worker is None:
+            raise ValueError(f"没有注册 Worker: {step.assigned_agent}")
+        preflight = getattr(worker, "preflight", None)
+        if not callable(preflight):
+            return None
+
+        raw_result = preflight(step, dependency_results)
+        if inspect.isawaitable(raw_result):
+            raw_result = await raw_result
+        if raw_result is None:
+            return None
+        if not isinstance(raw_result, AgentTaskResult):
+            raise TypeError("Worker preflight 必须返回 AgentTaskResult 或 None")
+        if raw_result.step_id != step.step_id:
+            raise ValueError("Worker preflight 返回了错误的 step_id")
+        if raw_result.assigned_agent != step.assigned_agent:
+            raise ValueError("Worker preflight 返回了错误的 assigned_agent")
+        if raw_result.status != "awaiting_input":
+            raise ValueError("Worker preflight 只能返回 awaiting_input 或 None")
+        return raw_result
 
     async def _execute_step(
         self,
@@ -1355,6 +1501,7 @@ def _validate_resume_request(
     *,
     task_result: MultiAgentTaskResult,
     user_inputs: Mapping[str, Any],
+    step_resume_decisions: Mapping[str, Any] | None = None,
 ) -> dict[str, AgentTaskResult]:
     """
     检查暂停结果和用户回答是否满足恢复执行条件。
@@ -1368,6 +1515,8 @@ def _validate_resume_request(
             准备恢复的多 Agent 暂停结果。
         user_inputs:
             等待步骤编号到用户回答的映射。
+        step_resume_decisions:
+            可选逐步骤恢复决定；合法的 degraded 决定允许该步骤没有新增字段。
 
     返回值含义：
         dict[str, AgentTaskResult]:
@@ -1408,6 +1557,10 @@ def _validate_resume_request(
         step_id
         for step_id in expected_step_ids
         if not str(user_inputs[step_id] or "").strip()
+        and not _raw_decision_requests_degraded_execution(
+            step_id=step_id,
+            raw_decisions=step_resume_decisions,
+        )
     )
     if empty_input_step_ids:
         raise ValueError(
@@ -1417,11 +1570,98 @@ def _validate_resume_request(
     return awaiting_results
 
 
+def _raw_decision_requests_degraded_execution(
+    *,
+    step_id: str,
+    raw_decisions: Mapping[str, Any] | None,
+) -> bool:
+    """
+    判断某个步骤是否携带了简化执行决定。
+
+    功能：
+        仅用于恢复输入的空值预校验。完整字段、步骤编号和动作合法性仍由
+        后续 MultiAgentStepResumeDecision 契约统一校验，不能绕过正式校验。
+
+    参数含义：
+        step_id:
+            当前正在检查恢复输入的等待步骤编号。
+        raw_decisions:
+            调用方传入的逐步骤原始决定映射。
+
+    返回值含义：
+        bool:
+            当前步骤明确声明 degraded 时返回 True，否则返回 False。
+    """
+
+    if not isinstance(raw_decisions, Mapping):
+        return False
+    raw_decision = raw_decisions.get(step_id)
+    if isinstance(raw_decision, MultiAgentStepResumeDecision):
+        return raw_decision.action == "degraded"
+    if not isinstance(raw_decision, Mapping):
+        return False
+    return str(raw_decision.get("action") or "") == "degraded"
+
+
+def _validate_step_resume_decisions(
+    *,
+    awaiting_step_ids: set[str],
+    raw_decisions: Mapping[str, Any] | None,
+) -> dict[str, MultiAgentStepResumeDecision]:
+    """
+    校验准备传入恢复计划的逐步骤执行决定。
+
+    功能：
+        旧调用方没有提供决定时保持兼容；新调用方提供后，只接受当前等待
+        步骤的 resume 或 degraded 决定。keep_waiting 不能进入 Scheduler，
+        因为严格批次门禁要求所有步骤先得到明确处理再恢复整批。
+
+    参数含义：
+        awaiting_step_ids:
+            当前任务真正等待输入的步骤编号集合。
+        raw_decisions:
+            主图传入的普通字典形式逐步骤决定。
+
+    返回值含义：
+        dict[str, MultiAgentStepResumeDecision]:
+            通过 Pydantic 契约校验的步骤决定映射。
+    """
+
+    if not raw_decisions:
+        return {}
+    unknown_step_ids = sorted(set(raw_decisions) - awaiting_step_ids)
+    if unknown_step_ids:
+        raise ValueError(
+            "步骤恢复决定包含并未等待输入的步骤编号: "
+            f"{unknown_step_ids}"
+        )
+
+    decisions: dict[str, MultiAgentStepResumeDecision] = {}
+    for step_id, raw_decision in raw_decisions.items():
+        decision = (
+            raw_decision
+            if isinstance(raw_decision, MultiAgentStepResumeDecision)
+            else MultiAgentStepResumeDecision.model_validate(raw_decision)
+        )
+        if decision.step_id != step_id:
+            raise ValueError("步骤恢复决定中的 step_id 与映射键不一致")
+        if decision.action == "keep_waiting":
+            raise ValueError(
+                f"步骤 {step_id} 仍需等待，不能启动严格执行批次"
+            )
+        decisions[step_id] = decision
+    return decisions
+
+
 def _build_resumable_plan(
     *,
     task_result: MultiAgentTaskResult,
     user_inputs: Mapping[str, Any],
     awaiting_results: Mapping[str, AgentTaskResult],
+    step_resume_decisions: Mapping[
+        str,
+        MultiAgentStepResumeDecision,
+    ],
 ) -> AgentTaskPlan:
     """
     把暂停计划转换成可以继续调度的新计划对象。
@@ -1437,6 +1677,8 @@ def _build_resumable_plan(
             等待步骤编号到用户回答的映射。
         awaiting_results:
             等待步骤编号到上一次 Worker 结果的索引。
+        step_resume_decisions:
+            步骤编号到恢复模式的结构化决定；简化执行信息只写入对应步骤。
 
     返回值含义：
         AgentTaskPlan:
@@ -1463,6 +1705,30 @@ def _build_resumable_plan(
             ),
             "multi_agent_is_resuming": True,
         }
+        decision = step_resume_decisions.get(step_id)
+        if decision is not None:
+            step_data["input_data"].update(
+                {
+                    "multi_agent_skill_execution_mode": (
+                        "degraded"
+                        if decision.action == "degraded"
+                        else "standard"
+                    ),
+                    "multi_agent_skill_ignored_input_ids": list(
+                        decision.ignored_input_ids
+                    ),
+                    "multi_agent_skill_degradation_reason": (
+                        decision.reason
+                        if decision.action == "degraded"
+                        else ""
+                    ),
+                    "multi_agent_skill_degradation_user_input": (
+                        decision.user_input
+                        if decision.action == "degraded"
+                        else ""
+                    ),
+                }
+            )
     return AgentTaskPlan.model_validate(plan_data)
 
 
@@ -1501,12 +1767,15 @@ def _build_awaiting_input_result(
             状态为 awaiting_input、可以展示澄清提示的暂停任务结果。
     """
 
-    first_awaiting_result = awaiting_results[0]
+    clarification_bundle = _build_clarification_bundle(
+        plan=plan,
+        awaiting_results=awaiting_results,
+    )
     updated_plan = _build_updated_plan(
         plan=plan,
         results_by_step_id=results_by_step_id,
         status="awaiting_input",
-        clarification_prompt=first_awaiting_result.clarification_prompt,
+        clarification_prompt=clarification_bundle.display_prompt,
     )
     ordered_results = [
         results_by_step_id[step.step_id]
@@ -1541,11 +1810,176 @@ def _build_awaiting_input_result(
                 ready_batches=ready_batches,
             ),
             "awaiting_step_ids": awaiting_step_ids,
-            "clarification_prompt": (
-                first_awaiting_result.clarification_prompt
+            "clarification_prompt": clarification_bundle.display_prompt,
+            "clarification_bundle": clarification_bundle.model_dump(
+                mode="python"
             ),
         },
     )
+
+
+def _build_clarification_bundle(
+    *,
+    plan: AgentTaskPlan,
+    awaiting_results: list[AgentTaskResult],
+) -> MultiAgentClarificationBundle:
+    """
+    汇总同一批次所有等待步骤的结构化澄清信息。
+
+    功能：
+        逐项保留每个步骤缺少的字段，再额外建立字段到步骤的反向映射。
+        同名字段只在用户提示中合并展示，机器记录不会因去重而丢失消费者。
+
+    参数含义：
+        plan:
+            当前执行的完整多智能体计划，用于查询步骤标题。
+        awaiting_results:
+            同一批次中所有状态为 awaiting_input 的 Worker 结果。
+
+    返回值含义：
+        MultiAgentClarificationBundle:
+            包含逐步骤请求、字段使用者映射和用户提示的整批澄清包。
+    """
+
+    steps_by_id = {step.step_id: step for step in plan.steps}
+    step_requests: list[MultiAgentStepClarification] = []
+    field_consumers: dict[str, list[str]] = {}
+
+    for result in awaiting_results:
+        step = steps_by_id[result.step_id]
+        skill_input_check = _read_skill_input_check(result)
+        missing_fields = _read_missing_clarification_fields(
+            skill_input_check
+        )
+        for field in missing_fields:
+            consumers = field_consumers.setdefault(field.input_id, [])
+            if result.step_id not in consumers:
+                consumers.append(result.step_id)
+
+        step_requests.append(
+            MultiAgentStepClarification(
+                step_id=result.step_id,
+                step_title=step.title,
+                assigned_agent=result.assigned_agent,
+                prompt=result.clarification_prompt,
+                missing_fields=missing_fields,
+                can_run_degraded=bool(
+                    skill_input_check.get("can_run_degraded")
+                ),
+            )
+        )
+
+    display_prompt = _build_clarification_display_prompt(step_requests)
+    return MultiAgentClarificationBundle(
+        step_requests=step_requests,
+        field_consumers=field_consumers,
+        display_prompt=display_prompt,
+    )
+
+
+def _read_skill_input_check(
+    result: AgentTaskResult,
+) -> Mapping[str, Any]:
+    """
+    从 Worker 结果中读取 Skill 输入检查数据。
+
+    参数含义：
+        result:
+            当前等待步骤的标准执行结果。
+
+    返回值含义：
+        Mapping[str, Any]:
+            找到时返回 Skill 输入检查字典；普通工具确认等非 Skill 等待
+            场景返回空字典。
+    """
+
+    skill_runtime = result.metadata.get("skill_runtime")
+    if not isinstance(skill_runtime, Mapping):
+        return {}
+    input_check = skill_runtime.get("input_check")
+    if not isinstance(input_check, Mapping):
+        return {}
+    return input_check
+
+
+def _read_missing_clarification_fields(
+    input_check: Mapping[str, Any],
+) -> list[MultiAgentClarificationField]:
+    """
+    把 Skill 输入检查中的缺失要求转换成多智能体澄清字段。
+
+    参数含义：
+        input_check:
+            SkillRuntime 保存的输入检查字典。
+
+    返回值含义：
+        list[MultiAgentClarificationField]:
+            保持 Skill 声明顺序的缺失字段列表；没有结构化信息时为空。
+    """
+
+    raw_requirements = input_check.get("missing_input_requirements")
+    if not isinstance(raw_requirements, list):
+        return []
+
+    fields: list[MultiAgentClarificationField] = []
+    for raw_requirement in raw_requirements:
+        if not isinstance(raw_requirement, Mapping):
+            continue
+        input_id = str(raw_requirement.get("input_id") or "").strip()
+        if not input_id:
+            continue
+        raw_requirement_level = str(
+            raw_requirement.get("requirement_level") or "unknown"
+        )
+        requirement_level = (
+            raw_requirement_level
+            if raw_requirement_level
+            in {"hard_required", "degradable", "optional"}
+            else "unknown"
+        )
+        fields.append(
+            MultiAgentClarificationField(
+                input_id=input_id,
+                name=str(raw_requirement.get("name") or ""),
+                description=str(
+                    raw_requirement.get("description") or ""
+                ),
+                requirement_level=requirement_level,
+            )
+        )
+    return fields
+
+
+def _build_clarification_display_prompt(
+    step_requests: list[MultiAgentStepClarification],
+) -> str:
+    """
+    构建面向用户的整批澄清提示。
+
+    功能：
+        单步骤时保留原提示以兼容旧界面；多步骤时按步骤分别展示问题，
+        避免只展示第一项或把重复字段简单删除后丢失步骤归属。
+
+    参数含义：
+        step_requests:
+            同一批次内所有等待步骤的结构化澄清请求。
+
+    返回值含义：
+        str:
+            可以直接写入计划并展示给用户的提示文本。
+    """
+
+    if len(step_requests) == 1:
+        return step_requests[0].prompt
+
+    lines = ["当前有多个步骤需要补充信息："]
+    for index, request in enumerate(step_requests, start=1):
+        lines.append(
+            f"{index}. {request.step_title}（{request.step_id}）："
+            f"{request.prompt}"
+        )
+    lines.append("请按步骤分别提供补充信息。")
+    return "\n".join(lines)
 
 
 def _build_updated_plan(

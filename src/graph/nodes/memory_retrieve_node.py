@@ -36,6 +36,7 @@ def build_memory_retrieve_node(
     semantic_recall: Any,
     checkpoint_manager: Any = None,
     runtime_context_getter=None,
+    pet_profile_service: Any = None,
 ) -> Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]:
     """
     构建 Memory 召回节点。
@@ -54,6 +55,10 @@ def build_memory_retrieve_node(
             MemorySemanticRecallService（记忆语义召回服务）。
             用于根据用户问题召回相关长期记忆。
             需要提供 retrieve(user_id, question, limit) 方法。
+
+        pet_profile_service：
+            PetProfileService（宠物档案服务）。用于根据当前宠物标识召回
+            结构化档案；为空时保持旧版只召回普通记忆的行为。
 
         checkpoint_manager：
             CheckpointManager（检查点管理器）。
@@ -125,6 +130,42 @@ def build_memory_retrieve_node(
             "selected_memory_ids": [],
             "reason": "未执行记忆召回。",
         }
+        pet_profile_recall_result: dict[str, Any] = {
+            "status": "empty",
+            "pet_key": "",
+            "pet_name": "",
+            "selection_source": "none",
+            "facts": {},
+            "selected_attributes": [],
+            "reason": "未配置宠物档案召回服务。",
+        }
+        active_pet_update: dict[str, str] = {}
+
+        # 这里只执行回答用途的访问计划，不再混入 Skill 补参字段。
+        raw_access_decision = state.get(
+            "answer_profile_access_decision"
+        )
+        profile_access_decision = (
+            dict(raw_access_decision)
+            if isinstance(raw_access_decision, dict)
+            else {}
+        )
+        raw_allowed_attributes = profile_access_decision.get(
+            "allowed_attributes",
+            [],
+        )
+        allowed_profile_attributes = (
+            list(raw_allowed_attributes)
+            if isinstance(raw_allowed_attributes, (list, tuple, set))
+            else []
+        )
+
+        # 用户标识同时供普通记忆和宠物档案使用，必须在两个独立降级块之前准备。
+        user_id = str(
+            state.get("user_id")
+            or state.get("session_id")
+            or "default_user"
+        )
 
         try:
             ctx = runtime_context_getter()
@@ -141,16 +182,6 @@ def build_memory_retrieve_node(
 
             logger.info(
                 "开始执行 Memory 召回节点"
-            )
-
-            user_id = str(
-                state.get(
-                    "user_id"
-                )
-                or state.get(
-                    "session_id"
-                )
-                or "default_user"
             )
 
             question = _resolve_memory_retrieval_text(state)
@@ -228,6 +259,71 @@ def build_memory_retrieve_node(
                 f"Memory 召回失败，已降级为空记忆: {e}"
             )
 
+        # 回答阶段只复用回答用途、字段集合完全相同的结果。
+        cached_profile_result = state.get("pet_profile_recall_result")
+        cached_profile_applied = (
+            isinstance(cached_profile_result, dict)
+            and cached_profile_result.get("status") == "applied"
+            and str(cached_profile_result.get("pet_key") or "")
+            == str(state.get("active_pet_key") or "")
+            and set(cached_profile_result.get("selected_attributes") or [])
+            == set(allowed_profile_attributes)
+        )
+        if cached_profile_applied:
+            pet_profile_recall_result = dict(cached_profile_result)
+            active_pet_update = {
+                "active_pet_key": str(
+                    pet_profile_recall_result.get("pet_key") or ""
+                ),
+                "active_pet_name": str(
+                    pet_profile_recall_result.get("pet_name") or ""
+                ),
+            }
+
+        # 宠物档案与普通语义记忆独立降级，一侧失败不会清空另一侧结果。
+        elif pet_profile_service is not None:
+            try:
+                profile_result = pet_profile_service.recall_profile(
+                    user_id=user_id,
+                    active_pet_key=state.get("active_pet_key"),
+                    active_pet_name=state.get("active_pet_name"),
+                    selected_attributes=allowed_profile_attributes,
+                )
+                pet_profile_recall_result = profile_result.model_dump(
+                    mode="python"
+                )
+                if pet_profile_recall_result.get("status") == "applied":
+                    # 单宠物回退也会升级成明确的当前宠物，供后续节点和下一轮复用。
+                    active_pet_update = {
+                        "active_pet_key": str(
+                            pet_profile_recall_result.get("pet_key") or ""
+                        ),
+                        "active_pet_name": str(
+                            pet_profile_recall_result.get("pet_name") or ""
+                        ),
+                    }
+                logger.info(
+                    "宠物档案召回完成: "
+                    f"status={pet_profile_recall_result.get('status')}, "
+                    f"pet_key={pet_profile_recall_result.get('pet_key')}, "
+                    "attributes="
+                    f"{pet_profile_recall_result.get('selected_attributes')}"
+                )
+            except Exception as profile_error:
+                pet_profile_recall_result.update(
+                    {
+                        "status": "failed",
+                        "reason": (
+                            "宠物档案召回异常，已跳过档案注入："
+                            f"{profile_error}"
+                        ),
+                    }
+                )
+                logger.warning(
+                    "宠物档案召回失败，已独立降级: %s",
+                    profile_error,
+                )
+
         if checkpoint_manager is not None:
             try:
                 checkpoint_manager.save_checkpoint()
@@ -240,6 +336,9 @@ def build_memory_retrieve_node(
         return {
             "memory_context": memory_context,
             "memory_recall_result": memory_recall_result,
+            "pet_profile_recall_result": pet_profile_recall_result,
+            "answer_profile_access_decision": profile_access_decision,
+            **active_pet_update,
         }
 
     return memory_retrieve_node

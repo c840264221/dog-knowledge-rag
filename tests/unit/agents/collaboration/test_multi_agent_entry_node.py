@@ -200,6 +200,8 @@ def test_entry_node_should_replan_with_planner_clarification() -> None:
                 "user_id": "user_001",
                 "session_id": "session_001",
                 "trace_id": "trace_001",
+                "active_pet_key": "pet_doudou",
+                "active_pet_name": "豆豆",
                 "multi_agent_resume_action": "replan",
                 "multi_agent_task_result": paused_result.model_dump(
                     mode="python"
@@ -221,6 +223,13 @@ def test_entry_node_should_replan_with_planner_clarification() -> None:
         "user_id": "user_001",
         "session_id": "session_001",
         "trace_id": "trace_001",
+    }
+    assert run_call["worker_runtime_context"] == {
+        "user_id": "user_001",
+        "session_id": "session_001",
+        "trace_id": "trace_001",
+        "active_pet_key": "pet_doudou",
+        "active_pet_name": "豆豆",
     }
     assert update["final_answer"] == "综合方案已生成。"
 
@@ -251,6 +260,50 @@ def test_entry_node_should_save_awaiting_result_for_checkpoint() -> None:
     assert update["multi_agent_pending_prompt"] == "是否继续？"
     assert update["waiting_user_input"] is True
     assert update["final_answer"] == "是否继续？"
+
+
+def test_entry_node_should_prefer_batch_clarification_prompt() -> None:
+    """
+    检查主图会优先展示调度器整理的整批澄清提示。
+
+    功能：
+        即使步骤结果仍保留旧版单步骤提示，也应把整批提示写入 DogState，
+        避免用户只能看到第一个 Worker 的问题。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    waiting_result = build_entry_task_result(status="awaiting_input")
+    waiting_result.metadata = {
+        "clarification_prompt": "整批统一提示。",
+        "clarification_bundle": {
+            "step_requests": [],
+            "field_consumers": {},
+            "display_prompt": "健康分析需要年龄；训练计划需要训练目标。",
+        },
+    }
+    orchestrator = FakeMultiAgentOrchestrator(waiting_result)
+    node = build_multi_agent_entry_node(orchestrator=orchestrator)
+
+    update = asyncio.run(
+        node(
+            {
+                "question": "生成综合方案",
+                "multi_agent_resume_action": "none",
+            }
+        )
+    )
+
+    assert update["multi_agent_pending_prompt"] == (
+        "健康分析需要年龄；训练计划需要训练目标。"
+    )
+    assert update["final_answer"] == (
+        "健康分析需要年龄；训练计划需要训练目标。"
+    )
 
 
 def test_entry_node_should_register_and_cleanup_cancellation_token() -> None:

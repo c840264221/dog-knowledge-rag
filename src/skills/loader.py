@@ -74,9 +74,12 @@ class SkillLoader:
             f"技能：{skill.name}（{skill.skill_id}@{skill.version}）",
             f"职责：{skill.description}",
             self._render_list(
-                "必需输入",
+                "输入要求",
                 [
-                    f"{item.name}（{item.input_id}）"
+                    (
+                        f"{item.name}（{item.input_id}，"
+                        f"{self._requirement_level_label(item.requirement_level)}）"
+                    )
                     for item in skill.required_inputs
                 ],
             ),
@@ -86,6 +89,30 @@ class SkillLoader:
             self._render_list("执行边界", skill.guardrails),
         ]
         return "\n".join(sections)
+
+    @staticmethod
+    def _requirement_level_label(requirement_level: str) -> str:
+        """
+        将技能输入级别转换成容易理解的中文名称。
+
+        功能：
+            避免把内部英文枚举直接放进 Agent 上下文，让模型能够明确区分
+            必须提供、允许简化时缺省和可选资料。
+
+        参数含义：
+            requirement_level:
+                技能输入契约中的缺失影响级别。
+
+        返回值含义：
+            str:
+                对应级别的中文说明。
+        """
+
+        return {
+            "hard_required": "必须提供",
+            "degradable": "简化执行时可缺省",
+            "optional": "可选",
+        }[requirement_level]
 
     def render_catalog(self) -> str:
         """
