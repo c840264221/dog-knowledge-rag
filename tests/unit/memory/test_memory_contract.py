@@ -1,4 +1,5 @@
 import sqlite3
+from datetime import datetime, timezone
 
 import pytest
 from pydantic import ValidationError
@@ -11,6 +12,7 @@ from src.memory.memory_manager import (
 )
 from src.memory.memory_schema import (
     MemoryOutput,
+    PetProfileFact,
 )
 from src.memory.sqlite_memory_store import (
     SQLiteMemoryStore,
@@ -178,6 +180,234 @@ def test_sqlite_memory_store_should_migrate_legacy_table(
             "updated_at",
             "expires_at",
         }.issubset(columns)
+
+        profile_table = store.conn.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table' AND name = 'pet_profile_fact'
+            """
+        ).fetchone()
+        assert profile_table is not None
+    finally:
+        store.close()
+
+
+def test_pet_profile_fact_should_update_same_pet_attribute(
+        tmp_path,
+) -> None:
+    """
+    验证同一只宠物的同一属性会更新，而不是产生相互冲突的当前值。
+
+    参数含义：
+        tmp_path：pytest 提供的临时目录，不会修改真实数据库。
+
+    返回值含义：
+        None，pytest 根据创建、更新和查询结果判断测试是否通过。
+    """
+
+    store = SQLiteMemoryStore(db_path=tmp_path / "pet_profile.sqlite3")
+    try:
+        created = store.upsert_pet_profile_fact(
+            PetProfileFact(
+                user_id="user_001",
+                pet_key="doudou",
+                pet_name="豆豆",
+                attribute="weight_kg",
+                value="30",
+                confidence=0.95,
+                observed_at=datetime(2026, 8, 1, tzinfo=timezone.utc),
+            )
+        )
+        updated = store.upsert_pet_profile_fact(
+            PetProfileFact(
+                user_id="user_001",
+                pet_key="doudou",
+                pet_name="豆豆",
+                attribute="weight_kg",
+                value="32",
+                confidence=0.98,
+                observed_at=datetime(2026, 8, 7, tzinfo=timezone.utc),
+            )
+        )
+
+        facts = store.get_pet_profile_facts("user_001", "doudou")
+        assert created["action"] == "created"
+        assert updated["action"] == "updated"
+        assert created["fact_id"] == updated["fact_id"]
+        assert len(facts) == 1
+        assert facts[0]["value"] == "32"
+    finally:
+        store.close()
+
+
+def test_pet_profile_fact_should_only_return_selected_attributes(
+    tmp_path,
+) -> None:
+    """验证档案存储层只查询调用方明确允许读取的字段。"""
+
+    store = SQLiteMemoryStore(db_path=tmp_path / "profile_fields.sqlite3")
+    try:
+        for attribute, value in (
+            ("breed", "金毛"),
+            ("age_years", "6"),
+            ("weight_kg", "30"),
+        ):
+            store.upsert_pet_profile_fact(
+                PetProfileFact(
+                    user_id="user_001",
+                    pet_key="doudou",
+                    pet_name="豆豆",
+                    attribute=attribute,
+                    value=value,
+                    confidence=0.95,
+                    observed_at=datetime.now(timezone.utc),
+                )
+            )
+
+        facts = store.get_pet_profile_facts(
+            "user_001",
+            "doudou",
+            attributes=["breed", "age_years"],
+        )
+
+        assert [fact["attribute"] for fact in facts] == [
+            "age_years",
+            "breed",
+        ]
+    finally:
+        store.close()
+
+
+def test_pet_profile_fact_should_reject_blank_pet_key() -> None:
+    """
+    验证只有空格的宠物标识不能进入结构化档案。
+
+    参数含义：无。
+
+    返回值含义：
+        None，pytest 根据 Pydantic ValidationError 判断测试是否通过。
+    """
+
+    with pytest.raises(ValidationError):
+        PetProfileFact(
+            user_id="user_001",
+            pet_key="   ",
+            attribute="breed",
+            value="金毛",
+            confidence=0.99,
+            observed_at=datetime(2026, 8, 7, tzinfo=timezone.utc),
+        )
+
+
+def test_pet_profile_fact_should_ignore_stale_update(
+        tmp_path,
+) -> None:
+    """
+    验证迟到的旧档案不会覆盖时间更新的当前值。
+
+    参数含义：
+        tmp_path：pytest 提供的临时目录，不会修改真实数据库。
+
+    返回值含义：
+        None，pytest 根据 ignored_stale 和最终值判断测试是否通过。
+    """
+
+    store = SQLiteMemoryStore(db_path=tmp_path / "stale_profile.sqlite3")
+    try:
+        store.upsert_pet_profile_fact(
+            PetProfileFact(
+                user_id="user_001",
+                pet_key="doudou",
+                attribute="weight_kg",
+                value="32",
+                confidence=0.98,
+                observed_at=datetime(2026, 8, 7, tzinfo=timezone.utc),
+            )
+        )
+        ignored = store.upsert_pet_profile_fact(
+            PetProfileFact(
+                user_id="user_001",
+                pet_key="doudou",
+                attribute="weight_kg",
+                value="30",
+                confidence=0.95,
+                observed_at=datetime(2026, 8, 1, tzinfo=timezone.utc),
+            )
+        )
+
+        facts = store.get_pet_profile_facts("user_001", "doudou")
+        assert ignored["action"] == "ignored_stale"
+        assert facts[0]["value"] == "32"
+    finally:
+        store.close()
+
+
+def test_pet_profile_fact_should_isolate_different_pets(
+        tmp_path,
+) -> None:
+    """
+    验证同一用户的不同宠物可以分别保存相同属性。
+
+    参数含义：
+        tmp_path：pytest 提供的临时目录，不会修改真实数据库。
+
+    返回值含义：
+        None，pytest 根据两只宠物的独立查询结果判断测试是否通过。
+    """
+
+    store = SQLiteMemoryStore(db_path=tmp_path / "multiple_pets.sqlite3")
+    try:
+        for pet_key, value in (("doudou", "金毛"), ("qiuqiu", "柯基")):
+            store.upsert_pet_profile_fact(
+                PetProfileFact(
+                    user_id="user_001",
+                    pet_key=pet_key,
+                    attribute="breed",
+                    value=value,
+                    confidence=0.99,
+                    observed_at=datetime(2026, 8, 7, tzinfo=timezone.utc),
+                )
+            )
+
+        all_facts = store.get_pet_profile_facts("user_001")
+        doudou_facts = store.get_pet_profile_facts("user_001", "doudou")
+        assert len(all_facts) == 2
+        assert len(doudou_facts) == 1
+        assert doudou_facts[0]["value"] == "金毛"
+    finally:
+        store.close()
+
+
+def test_pet_profile_identities_should_return_each_pet_once(tmp_path) -> None:
+    """
+    验证宠物身份查询不会因为一只宠物有多个属性而返回重复身份。
+
+    参数含义：
+        tmp_path：pytest 提供的临时目录。
+
+    返回值含义：
+        None：pytest 根据去重后的身份列表判断是否通过。
+    """
+
+    store = SQLiteMemoryStore(db_path=tmp_path / "pet_identities.sqlite3")
+    try:
+        for attribute, value in (("breed", "金毛"), ("age_years", "6")):
+            store.upsert_pet_profile_fact(
+                PetProfileFact(
+                    user_id="user_001",
+                    pet_key="pet_doudou",
+                    pet_name="豆豆",
+                    attribute=attribute,
+                    value=value,
+                    confidence=0.99,
+                    observed_at=datetime(2026, 8, 8, tzinfo=timezone.utc),
+                )
+            )
+
+        assert store.list_pet_profile_identities("user_001") == [
+            {"pet_key": "pet_doudou", "pet_name": "豆豆"}
+        ]
     finally:
         store.close()
 

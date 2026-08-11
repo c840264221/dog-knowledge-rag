@@ -358,8 +358,14 @@ class DogState(TypedDict, total=False):
     # 等待步骤编号到用户回答的映射，Scheduler.resume 会读取这个字段。
     multi_agent_resume_inputs: Dict[str, Any]
 
+    # 每个等待步骤自己的恢复决定，记录正常恢复、简化执行或继续等待。
+    multi_agent_step_resume_decisions: Dict[str, Any]
+
     # 当前输入是否已经整理成可以交给多 Agent 恢复入口的结构化回答。
     multi_agent_resume_ready: bool
+
+    # 自然语言澄清字段的提取轨迹，用于记录已识别、缺失和歧义字段。
+    multi_agent_clarification_extraction: Dict[str, Any]
 
     # 多个 Worker 同时等待且用户回答不完整时，需要继续展示的提示。
     multi_agent_pending_prompt: str
@@ -393,6 +399,18 @@ class DogState(TypedDict, total=False):
     # RootAgent 首轮选中的目标 Agent；恢复 Skill 时继续回到同一个 Agent。
     skill_target_agent: str
 
+    # 当前 Skill 的执行模式，例如 standard（完整执行）或 degraded（简化执行）。
+    skill_execution_mode: str
+
+    # 用户已同意在简化执行中忽略的可简化输入编号。
+    skill_ignored_input_ids: List[str]
+
+    # 进入简化执行的稳定原因代码，供日志、评估和审计使用。
+    skill_degradation_reason: str
+
+    # 用户触发简化执行时的原始输入，便于复盘系统是否理解正确。
+    skill_degradation_user_input: str
+
     # 专门交给 RAG 的简洁业务问题，不包含 Skill 说明和运行控制信息。
     retrieval_question: str
 
@@ -412,8 +430,44 @@ class DogState(TypedDict, total=False):
     # LLM 对当前输入的记忆抽取结果，包含 should_save、类型、内容、可信度和原因。
     memory_extract_result: Dict[str, Any]
 
+    # 确定性保留策略的审查结果，说明候选记忆是否达到长期保存门槛及拒绝原因。
+    memory_retention_result: Dict[str, Any]
+
     # MemoryManager 实际保存结果，包含 action、memory_id、强度和失效数量等字段；未保存时为 None。
     memory_save_result: Optional[Dict[str, Any]]
+
+    # LLM 从本轮用户输入中批量抽取出的宠物档案候选及拒绝数量。
+    pet_profile_extraction_result: Dict[str, Any]
+
+    # 宠物档案完成身份解析和数据库写入后的结构化结果。
+    pet_profile_save_result: Dict[str, Any]
+
+    # 当前一轮唯一确认的宠物稳定标识；没有明确宠物时为空。
+    active_pet_key: str
+
+    # 当前一轮唯一确认的宠物展示名称；不知道名字时为空。
+    active_pet_name: str
+
+    # 当前宠物的结构化档案召回结果；与普通语义记忆分开保存，避免混淆事实来源。
+    pet_profile_recall_result: Dict[str, Any]
+
+    # Skill 补参阶段单独召回的档案结果，不会直接作为最终回答上下文。
+    skill_profile_recall_result: Dict[str, Any]
+
+    # 上游查询理解阶段建议读取的宠物档案字段；当前没有建议时为空列表。
+    pet_profile_suggested_attributes: List[str]
+
+    # 当前 Skill 通过 source_mappings 声明需要从宠物档案读取的字段。
+    skill_required_pet_profile_attributes: List[str]
+
+    # Skill 补参用途的字段申请、允许字段和拒绝字段审计结果。
+    skill_profile_access_decision: Dict[str, Any]
+
+    # 最终回答上下文用途的字段申请、允许字段和拒绝字段审计结果。
+    answer_profile_access_decision: Dict[str, Any]
+
+    # DogKnowledgeAgent 对本轮问题执行规则与 LLM 合并后的查询理解结果。
+    dog_query_understanding_result: Dict[str, Any]
 
     # =========================
     # 13. 错误字段

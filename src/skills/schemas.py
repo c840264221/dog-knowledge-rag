@@ -13,9 +13,16 @@ SKILL_VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
 SKILL_INPUT_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 
 
+SkillInputRequirementLevel = Literal[
+    "hard_required",
+    "degradable",
+    "optional",
+]
+
+
 class SkillInputRequirement(BaseModel):
     """
-    描述 Skill 执行前必须具备的一项结构化输入。
+    描述 Skill 声明的一项结构化输入及其缺失影响。
 
     功能：
         将稳定机器字段与中文展示名称分开保存，使输入检查器可以使用
@@ -28,6 +35,13 @@ class SkillInputRequirement(BaseModel):
             面向用户展示的中文字段名称。
         description:
             该输入的用途和期望内容说明。
+        requirement_level:
+            该输入缺失时对技能执行的影响。hard_required 表示必须补充，
+            degradable 表示用户明确选择简化执行后可以缺省，optional 表示
+            没有该输入也不阻止执行。
+        source_mappings:
+            可用于补全该输入的外部结构化数据源映射，例如
+            {"pet_profile": "age_years"} 表示可以用宠物档案年龄补全。
 
     返回值含义：
         SkillInputRequirement:
@@ -43,6 +57,8 @@ class SkillInputRequirement(BaseModel):
     input_id: str = Field(..., min_length=1)
     name: str = Field(..., min_length=1)
     description: str = ""
+    requirement_level: SkillInputRequirementLevel = "hard_required"
+    source_mappings: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("input_id")
     @classmethod
@@ -68,6 +84,30 @@ class SkillInputRequirement(BaseModel):
             )
         return value
 
+    @field_validator("source_mappings")
+    @classmethod
+    def validate_source_mappings(
+        cls,
+        values: dict[str, str],
+    ) -> dict[str, str]:
+        """
+        校验外部输入源映射的名称和字段都不是空字符串。
+
+        参数含义：
+            values：数据源名称到来源字段名称的映射。
+
+        返回值含义：
+            dict[str, str]：去除首尾空白后的稳定映射。
+        """
+
+        normalized = {
+            str(source_name).strip(): str(source_key).strip()
+            for source_name, source_key in values.items()
+        }
+        if any(not source_name or not source_key for source_name, source_key in normalized.items()):
+            raise ValueError("source_mappings 的数据源名称和字段名称不能为空")
+        return normalized
+
 
 class SkillDefinition(BaseModel):
     """
@@ -87,7 +127,8 @@ class SkillDefinition(BaseModel):
         activation_hints:
             帮助选择器判断何时使用该技能的关键词或示例表达。
         required_inputs:
-            执行技能前必须具备的结构化输入要求。
+            技能声明的结构化输入要求。字段名为兼容旧代码继续保留，列表中
+            每项可以分别声明必须、可简化或可选级别。
         instructions:
             Agent 执行技能时应依次遵守的步骤。
         allowed_tools:
@@ -133,7 +174,7 @@ class SkillDefinition(BaseModel):
     )
     required_inputs: list[SkillInputRequirement] = Field(
         default_factory=list,
-        description="执行前必需的输入字段",
+        description="技能声明的输入字段及其缺失影响级别",
     )
     instructions: list[str] = Field(
         ...,
@@ -380,8 +421,8 @@ class SkillInputCheckResult(BaseModel):
     保存一次 Skill 必需输入检查结果。
 
     功能：
-        记录可用输入、缺失输入、空值输入和面向用户的澄清提示，使调用方可以
-        明确决定继续执行 Skill，还是先进入 awaiting_input。
+        记录可用输入、不同级别的缺失输入、空值输入和面向用户的澄清提示，
+        使调用方可以决定完整执行、请求补充或由用户选择简化执行。
 
     参数含义：
         skill_id:
@@ -391,9 +432,22 @@ class SkillInputCheckResult(BaseModel):
         available_input_ids:
             已具备有效值的必需输入编号。
         missing_input_ids:
-            当前不可用的必需输入编号，包含完全缺失和空值字段。
+            当前影响完整执行的输入编号，包含必须输入和可简化输入。
+        missing_input_requirements:
+            与 missing_input_ids 一一对应的完整输入要求，包含中文名称、说明
+            和缺失级别，供多智能体调度器准确汇总每个步骤缺少的信息。
+        missing_hard_required_input_ids:
+            缺失后不能执行技能的输入编号。
+        missing_degradable_input_ids:
+            用户明确选择简化执行后可以忽略的缺失输入编号。
+        missing_optional_input_ids:
+            当前未提供、但不影响执行的可选输入编号。
+        ignored_degradable_input_ids:
+            用户已经明确同意在简化模式中忽略的可简化输入编号。
+        can_run_degraded:
+            是否只缺少可简化输入，因此具备让用户选择简化执行的条件。
         empty_input_ids:
-            已提供字段但值为空的输入编号，是 missing_input_ids 的子集。
+            已提供但值为空的技能输入编号，也可能包含可选输入。
         accepted_inputs:
             检查通过并允许交给 Skill 的输入值。
         clarification_prompt:
@@ -413,6 +467,22 @@ class SkillInputCheckResult(BaseModel):
     is_ready: bool = False
     available_input_ids: list[str] = Field(default_factory=list)
     missing_input_ids: list[str] = Field(default_factory=list)
+    missing_input_requirements: list[SkillInputRequirement] = Field(
+        default_factory=list
+    )
+    missing_hard_required_input_ids: list[str] = Field(
+        default_factory=list
+    )
+    missing_degradable_input_ids: list[str] = Field(
+        default_factory=list
+    )
+    missing_optional_input_ids: list[str] = Field(
+        default_factory=list
+    )
+    ignored_degradable_input_ids: list[str] = Field(
+        default_factory=list
+    )
+    can_run_degraded: bool = False
     empty_input_ids: list[str] = Field(default_factory=list)
     accepted_inputs: dict[str, Any] = Field(default_factory=dict)
     clarification_prompt: str = ""

@@ -14,6 +14,11 @@ from src.agents.collaboration.contracts.schemas import (
     AgentTaskResultStatus,
     AgentTaskStep,
     AgentTaskStepStatus,
+    MultiAgentClarificationBundle,
+    MultiAgentClarificationExtractionResult,
+    MultiAgentClarificationField,
+    MultiAgentStepClarification,
+    MultiAgentStepResumeDecision,
     MultiAgentTaskResult,
 )
 
@@ -25,5 +30,10 @@ __all__ = [
     "AgentTaskResultStatus",
     "AgentTaskStep",
     "AgentTaskStepStatus",
+    "MultiAgentClarificationBundle",
+    "MultiAgentClarificationExtractionResult",
+    "MultiAgentClarificationField",
+    "MultiAgentStepClarification",
+    "MultiAgentStepResumeDecision",
     "MultiAgentTaskResult",
 ]

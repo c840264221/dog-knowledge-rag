@@ -111,6 +111,7 @@ class MultiAgentOrchestrator:
         objective: str,
         *,
         context: Mapping[str, Any] | None = None,
+        worker_runtime_context: Mapping[str, Any] | None = None,
         plan_id: str | None = None,
         multi_agent_task_id: str | None = None,
         cancellation_token: MultiAgentTaskCancellationToken | None = None,
@@ -127,6 +128,9 @@ class MultiAgentOrchestrator:
                 用户希望多 Agent 共同完成的原始目标。
             context:
                 PlannerAgent 可以参考的用户资料、记忆和运行时补充信息。
+            worker_runtime_context:
+                只交给 Worker 的可信运行数据，例如用户标识和当前宠物标识；
+                这些内部字段不会进入 Planner 提示词。
             plan_id:
                 可选计划编号；不传时由 PlannerAgent 自动生成。
             multi_agent_task_id:
@@ -170,7 +174,11 @@ class MultiAgentOrchestrator:
             )
             plan = _attach_worker_runtime_context(
                 plan=plan,
-                context=context,
+                context=(
+                    worker_runtime_context
+                    if worker_runtime_context is not None
+                    else context
+                ),
             )
             visited_stages.append("planning")
             stage_metrics.append(
@@ -272,6 +280,7 @@ class MultiAgentOrchestrator:
         task_result: MultiAgentTaskResult,
         *,
         user_inputs: Mapping[str, Any],
+        step_resume_decisions: Mapping[str, Any] | None = None,
         cancellation_token: MultiAgentTaskCancellationToken | None = None,
     ) -> MultiAgentTaskResult:
         """
@@ -286,6 +295,8 @@ class MultiAgentOrchestrator:
                 上一次返回给用户的 awaiting_input 多 Agent 任务结果。
             user_inputs:
                 等待步骤编号到用户回答的映射。
+            step_resume_decisions:
+                每个等待步骤自己的正常恢复或简化执行决定。
             cancellation_token:
                 可选任务取消令牌，会传给 Scheduler 停止未完成步骤。
 
@@ -315,6 +326,13 @@ class MultiAgentOrchestrator:
                 task_result,
                 user_inputs=user_inputs,
                 cancellation_token=cancellation_token,
+                **(
+                    {
+                        "step_resume_decisions": step_resume_decisions
+                    }
+                    if step_resume_decisions
+                    else {}
+                ),
             )
             visited_stages.append("resume_scheduling")
             stage_metrics.append(
@@ -405,7 +423,8 @@ def _attach_worker_runtime_context(
         plan:
             PlannerAgent 已经生成并通过校验的 AgentTaskPlan。
         context:
-            主图传入的补充上下文，可能包含 user_id、session_id 和 trace_id。
+            主图传入的可信运行上下文，可能包含用户、会话、追踪和当前宠物
+            标识。这些字段由程序写入，不能由 Planner 生成。
 
     返回值含义：
         AgentTaskPlan:
@@ -414,7 +433,13 @@ def _attach_worker_runtime_context(
 
     runtime_identity = {
         field_name: str((context or {}).get(field_name) or "").strip()
-        for field_name in ("user_id", "session_id", "trace_id")
+        for field_name in (
+            "user_id",
+            "session_id",
+            "trace_id",
+            "active_pet_key",
+            "active_pet_name",
+        )
         if str((context or {}).get(field_name) or "").strip()
     }
     if not runtime_identity:

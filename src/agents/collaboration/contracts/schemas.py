@@ -411,6 +411,228 @@ class AgentTaskResult(BaseModel):
         return self
 
 
+class MultiAgentClarificationField(BaseModel):
+    """
+    保存某个等待步骤缺少的一项结构化信息。
+
+    功能：
+        同时保留机器使用的字段编号和用户可读的中文名称，使调度器既能
+        正确分配恢复输入，也能生成不会泄露内部字段细节的展示提示。
+
+    参数含义：
+        input_id:
+            Skill 使用的稳定字段编号，例如 age。
+        name:
+            展示给用户的字段名称，例如“年龄”。
+        description:
+            该信息的用途说明。
+        requirement_level:
+            字段缺失时是必须补充、允许简化，还是未知来源的普通澄清。
+
+    返回值含义：
+        MultiAgentClarificationField:
+            一项经过校验的多智能体缺失信息记录。
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        str_strip_whitespace=True,
+    )
+
+    input_id: str = Field(..., min_length=1)
+    name: str = ""
+    description: str = ""
+    requirement_level: Literal[
+        "hard_required",
+        "degradable",
+        "optional",
+        "unknown",
+    ] = "unknown"
+
+
+class MultiAgentStepClarification(BaseModel):
+    """
+    保存一个等待步骤需要用户补充的完整信息。
+
+    功能：
+        明确记录“哪个步骤由哪个 Worker 执行、缺少哪些字段、原本准备向
+        用户询问什么”，避免多个步骤的缺失信息在汇总时失去归属关系。
+
+    参数含义：
+        step_id:
+            等待输入的步骤编号。
+        step_title:
+            面向用户和日志的步骤名称。
+        assigned_agent:
+            执行该步骤的 Worker Agent 名称。
+        prompt:
+            当前 Worker 返回的原始澄清提示。
+        missing_fields:
+            当前步骤缺少的结构化字段明细。
+        can_run_degraded:
+            当前步骤是否允许用户选择简化执行。
+
+    返回值含义：
+        MultiAgentStepClarification:
+            一个步骤的标准澄清请求。
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        str_strip_whitespace=True,
+    )
+
+    step_id: str = Field(..., min_length=1)
+    step_title: str = Field(..., min_length=1)
+    assigned_agent: str = Field(..., min_length=1)
+    prompt: str = Field(..., min_length=1)
+    missing_fields: list[MultiAgentClarificationField] = Field(
+        default_factory=list
+    )
+    can_run_degraded: bool = False
+
+
+class MultiAgentClarificationBundle(BaseModel):
+    """
+    保存同一调度批次的完整澄清信息包。
+
+    功能：
+        将逐步骤机器记录、字段使用者映射和面向用户的统一提示分开保存。
+        字段可以在展示时合并，但每个字段属于哪些步骤的关系不会丢失。
+
+    参数含义：
+        step_requests:
+            每个等待步骤各自的澄清请求。
+        field_consumers:
+            字段编号到所有需要该字段的步骤编号列表的映射。
+        display_prompt:
+            可以直接展示给用户的整批澄清提示。
+
+    返回值含义：
+        MultiAgentClarificationBundle:
+            可写入任务 metadata、Checkpoint 和可观测系统的澄清包。
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        str_strip_whitespace=True,
+    )
+
+    step_requests: list[MultiAgentStepClarification] = Field(
+        ...,
+        min_length=1,
+    )
+    field_consumers: dict[str, list[str]] = Field(default_factory=dict)
+    display_prompt: str = Field(..., min_length=1)
+
+
+class MultiAgentClarificationExtractionResult(BaseModel):
+    """
+    保存一次多智能体澄清回答的字段提取结果。
+
+    功能：
+        只回答“用户补充了哪些字段”，不判断这些字段属于哪个步骤。分别
+        保存本轮新值、跨轮合并值、缺失字段和歧义字段，供后续确定性分配。
+
+    参数含义：
+        requested_field_ids:
+            当前等待任务允许提取的字段编号白名单。
+        extracted_fields:
+            本轮从自然语言中明确识别出的字段和值。
+        resolved_fields:
+            本轮字段与前几轮已识别字段合并后的结果。
+        missing_field_ids:
+            合并后仍然没有值的字段编号。
+        ambiguous_field_ids:
+            同一轮出现多个冲突候选值、暂时不能安全采用的字段编号。
+        field_sources:
+            每个已识别字段由哪些确定性规则提供。
+        field_confidences:
+            每个已识别字段的可信度；确定性高精度规则命中时为 1.0。
+        coverage_ratio:
+            已解决字段数量占申请字段数量的比例，不代表语义可信度。
+        llm_fallback_used:
+            确定性规则仍有缺失字段时是否调用过 LLM 兜底层。
+        llm_reason:
+            LLM 对本轮字段提取结果给出的简短原因。
+        llm_error_message:
+            LLM 调用或输出校验失败时的降级原因；成功时为空。
+        rejected_field_ids:
+            LLM 返回但不在本轮字段白名单中的字段编号。
+
+    返回值含义：
+        MultiAgentClarificationExtractionResult:
+            字段提取层的标准输出，不包含步骤分配决策。
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        str_strip_whitespace=True,
+    )
+
+    requested_field_ids: list[str] = Field(default_factory=list)
+    extracted_fields: dict[str, Any] = Field(default_factory=dict)
+    resolved_fields: dict[str, Any] = Field(default_factory=dict)
+    missing_field_ids: list[str] = Field(default_factory=list)
+    ambiguous_field_ids: list[str] = Field(default_factory=list)
+    field_sources: dict[str, list[str]] = Field(default_factory=dict)
+    field_confidences: dict[str, float] = Field(default_factory=dict)
+    coverage_ratio: float = Field(default=0.0, ge=0.0, le=1.0)
+    llm_fallback_used: bool = False
+    llm_reason: str = ""
+    llm_error_message: str = ""
+    rejected_field_ids: list[str] = Field(default_factory=list)
+
+
+class MultiAgentStepResumeDecision(BaseModel):
+    """
+    保存一个等待步骤在本轮应该如何继续。
+
+    功能：
+        将正常恢复、简化执行和继续等待分开记录，并保留该步骤已经收到的
+        输入、允许忽略的字段、决策原因和用户原话，供恢复、审计和观测使用。
+
+    参数含义：
+        step_id:
+            当前决定所属的多智能体步骤编号。
+        action:
+            resume 表示输入齐全；degraded 表示用户同意忽略可简化字段；
+            keep_waiting 表示仍有字段不能安全跳过。
+        provided_inputs:
+            已经确定分配给当前步骤的结构化输入。
+        ignored_input_ids:
+            简化执行时允许 Skill 忽略的字段编号。
+        waiting_input_ids:
+            当前仍会阻止该步骤执行、需要继续补充或明确处理的字段编号。
+        reason:
+            产生当前决定的稳定原因说明。
+        user_input:
+            触发本次决定的用户原始输入，便于后续复盘。
+
+    返回值含义：
+        MultiAgentStepResumeDecision:
+            一个可写入 DogState 和 Checkpoint 的标准步骤恢复决定。
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        str_strip_whitespace=True,
+    )
+
+    step_id: str = Field(..., min_length=1)
+    action: Literal["resume", "degraded", "keep_waiting"]
+    provided_inputs: dict[str, Any] = Field(default_factory=dict)
+    ignored_input_ids: list[str] = Field(default_factory=list)
+    waiting_input_ids: list[str] = Field(default_factory=list)
+    reason: str = Field(..., min_length=1)
+    user_input: str = ""
+
+
 class MultiAgentTaskResult(BaseModel):
     """
     保存一次多 Agent 协作完成后的统一结果。

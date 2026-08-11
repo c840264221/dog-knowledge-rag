@@ -45,3 +45,35 @@ def test_generation_prompt_does_not_treat_favorite_dog_as_pet_profile() -> None:
     assert MEMORY_USAGE_RULES in prompt
     assert "只代表偏好，不代表用户当前饲养该犬种" in prompt
     assert "不能用偏好记忆自动补全" in prompt
+
+
+def test_generation_prompt_should_include_structured_pet_profile() -> None:
+    """验证狗狗知识回答 Prompt 会注入结构化宠物档案。"""
+
+    prompt = build_generation_prompt(
+        state={
+            "question": "给它制定训练计划",
+            "pet_profile_recall_result": {
+                "status": "applied",
+                "pet_name": "豆豆",
+                "facts": {
+                    "breed": "金毛",
+                    "age_years": "6",
+                },
+            },
+        },
+        answer_strategy=AnswerStrategy(
+            task_type="care_advice",
+            answer_style="step_by_step_advice",
+            reason="测试档案注入。",
+        ),
+        context="训练资料",
+        context_source="rag_context",
+        memory_text="暂无用户记忆",
+        history_text="",
+    )
+
+    assert "# 当前宠物档案" in prompt
+    assert "- 宠物名称：豆豆" in prompt
+    assert "- 品种：金毛" in prompt
+    assert "- 年龄：6" in prompt

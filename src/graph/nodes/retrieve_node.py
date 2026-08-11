@@ -194,7 +194,12 @@ async def execute_new_rag_retrieve(
         f"进入新版 RAG retrieve_node，question={question}"
     )
 
-    parser = retriever_provider.dog_query_filter_parser
+    # 查询理解节点已经完成规则与 LLM 合并时，直接使用 state 中的最终 filters，避免重复解析。
+    parser = (
+        None
+        if state.get("dog_query_understanding_result")
+        else retriever_provider.dog_query_filter_parser
+    )
 
     retriever = retriever_provider.metadata_filter_retriever
 

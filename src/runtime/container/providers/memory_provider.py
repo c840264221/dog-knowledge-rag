@@ -17,6 +17,7 @@ from src.settings import settings
 from src.memory.memory_ranker import (
     MemoryRanker
 )
+from src.memory.pet_profile_service import PetProfileService
 
 
 
@@ -35,6 +36,7 @@ class MemoryProvider:
         - 统一管理 MemoryManager
         - 统一管理 MemoryRanker
         - 统一管理 MemorySemanticRecallService
+        - 统一管理 PetProfileService
         - 将 Memory 模块接入 Container 生命周期
 
         参数：
@@ -56,6 +58,8 @@ class MemoryProvider:
         self._semantic_recall = None
 
         self._ranker = None
+
+        self._pet_profile_service = None
 
     @property
     def store(
@@ -205,6 +209,36 @@ class MemoryProvider:
 
         return self._semantic_recall
 
+    @property
+    def pet_profile_service(
+            self
+    ) -> PetProfileService:
+        """
+        获取 PetProfileService（宠物档案服务）。
+
+        功能：
+        - 延迟创建并缓存宠物档案服务
+        - 复用 MemoryProvider 管理的 SQLiteMemoryStore
+        - 避免主图节点自行查找存储器和组装服务
+
+        参数含义：
+        - 无。
+
+        返回值含义：
+        - PetProfileService
+          使用统一 SQLite 存储器的宠物档案服务。
+        """
+
+        if self._pet_profile_service is None:
+            logger.info(
+                "🚀 初始化 PetProfileService..."
+            )
+            self._pet_profile_service = PetProfileService(
+                store=self.store
+            )
+
+        return self._pet_profile_service
+
     async def startup(
             self
     ):
@@ -216,6 +250,7 @@ class MemoryProvider:
         - 提前初始化 MemoryManager
         - 提前初始化 MemoryRanker
         - 提前初始化 MemorySemanticRecallService
+        - 提前初始化 PetProfileService
         - 接入 Container startup 生命周期
 
         参数：
@@ -233,6 +268,8 @@ class MemoryProvider:
         _ = self.ranker
 
         _ = self.semantic_recall
+
+        _ = self.pet_profile_service
 
         logger.info(
             "MemoryProvider 启动完成"

@@ -312,6 +312,88 @@ async def test_run_main_graph_with_result_should_return_final_result(
 
 
 @pytest.mark.asyncio
+async def test_restore_active_pet_state_should_use_user_scoped_whitelist() -> None:
+    """
+    验证当前宠物恢复会校验用户，并且只复制宠物身份白名单字段。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None，断言失败时由 pytest 报错。
+    """
+
+    app = FakeGraphApp(
+        current_state=FakeCurrentState(
+            values={
+                "user_id": "test_user",
+                "active_pet_key": "pet_v1_abc123",
+                "active_pet_name": "豆豆",
+                "final_answer": "不应恢复的旧答案",
+                "route_decision": {"route": "general_agent"},
+                "rag_context": {"chunks": ["不应恢复"]},
+            }
+        )
+    )
+
+    restored = await graph_run.restore_active_pet_state(
+        app=app,
+        config={"configurable": {"thread_id": "pet-thread"}},
+        state={
+            "user_id": "test_user",
+            "question": "它现在30公斤",
+            "active_pet_key": "",
+            "active_pet_name": "",
+            "final_answer": "",
+            "route_decision": {},
+            "rag_context": None,
+        },
+    )
+
+    assert restored["active_pet_key"] == "pet_v1_abc123"
+    assert restored["active_pet_name"] == "豆豆"
+    assert restored["final_answer"] == ""
+    assert restored["route_decision"] == {}
+    assert restored["rag_context"] is None
+
+
+@pytest.mark.asyncio
+async def test_restore_active_pet_state_should_reject_other_user() -> None:
+    """
+    验证检查点属于其他用户时不会恢复宠物身份。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None，断言失败时由 pytest 报错。
+    """
+
+    app = FakeGraphApp(
+        current_state=FakeCurrentState(
+            values={
+                "user_id": "other_user",
+                "active_pet_key": "pet_v1_other",
+                "active_pet_name": "其他用户的宠物",
+            }
+        )
+    )
+
+    restored = await graph_run.restore_active_pet_state(
+        app=app,
+        config={"configurable": {"thread_id": "shared-thread"}},
+        state={
+            "user_id": "test_user",
+            "active_pet_key": "",
+            "active_pet_name": "",
+        },
+    )
+
+    assert restored["active_pet_key"] == ""
+    assert restored["active_pet_name"] == ""
+
+
+@pytest.mark.asyncio
 async def test_restore_pending_tool_clarification_state_should_use_whitelist() -> None:
     """测试主图入口只从检查点恢复参数澄清所需字段。"""
 
@@ -457,6 +539,12 @@ async def test_restore_pending_skill_state_should_use_whitelist() -> None:
                 "skill_pending_prompt": "请补充当前行为和训练目标。",
                 "skill_original_question": "为6岁金毛制定训练计划。",
                 "skill_target_agent": "dog_knowledge_agent",
+                "skill_execution_mode": "degraded",
+                "skill_ignored_input_ids": ["current_behavior"],
+                "skill_degradation_reason": (
+                    "user_selected_degraded_execution"
+                ),
+                "skill_degradation_user_input": "简化执行",
                 "final_answer": "不应恢复的旧答案",
                 "rag_context": {"chunks": ["不应恢复"]},
             }
@@ -477,6 +565,12 @@ async def test_restore_pending_skill_state_should_use_whitelist() -> None:
     assert restored["skill_selected_id"] == "dog-training-plan"
     assert restored["skill_original_question"] == "为6岁金毛制定训练计划。"
     assert restored["skill_target_agent"] == "dog_knowledge_agent"
+    assert restored["skill_execution_mode"] == "degraded"
+    assert restored["skill_ignored_input_ids"] == ["current_behavior"]
+    assert restored["skill_degradation_reason"] == (
+        "user_selected_degraded_execution"
+    )
+    assert restored["skill_degradation_user_input"] == "简化执行"
     assert restored["final_answer"] == ""
     assert restored["rag_context"] is None
 

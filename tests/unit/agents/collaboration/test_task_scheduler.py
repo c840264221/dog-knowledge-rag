@@ -930,6 +930,333 @@ def test_scheduler_should_pause_when_worker_awaits_input() -> None:
     assert downstream_calls == []
 
 
+def test_scheduler_should_collect_all_batch_clarification_requests() -> None:
+    """
+    检查同批多个 Worker 等待输入时不会丢失步骤和字段对应关系。
+
+    功能：
+        两个并行步骤都缺少年龄，其中训练步骤还缺少训练目标。调度器应
+        保留两份步骤明细，并记录 age 同时被两个步骤使用。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    async def waiting_worker(
+        step: AgentTaskStep,
+        dependency_results: Mapping[str, AgentTaskResult],
+    ) -> AgentTaskResult:
+        """根据步骤返回包含固定 Skill 缺失字段的等待结果。"""
+
+        _ = dependency_results
+        requirements = [
+            {
+                "input_id": "age",
+                "name": "年龄",
+                "description": "狗狗年龄。",
+                "requirement_level": "hard_required",
+                "source_mappings": {"pet_profile": "age_years"},
+            }
+        ]
+        if step.step_id == "step_training":
+            requirements.append(
+                {
+                    "input_id": "training_goal",
+                    "name": "训练目标",
+                    "description": "希望狗狗学会的行为。",
+                    "requirement_level": "degradable",
+                    "source_mappings": {},
+                }
+            )
+        return AgentTaskResult(
+            step_id=step.step_id,
+            assigned_agent=step.assigned_agent,
+            status="awaiting_input",
+            requires_user_input=True,
+            clarification_prompt=(
+                "请补充年龄和训练目标。"
+                if step.step_id == "step_training"
+                else "请补充年龄。"
+            ),
+            metadata={
+                "skill_runtime": {
+                    "input_check": {
+                        "missing_input_requirements": requirements,
+                        "can_run_degraded": (
+                            step.step_id == "step_training"
+                        ),
+                    }
+                }
+            },
+        )
+
+    scheduler = MultiAgentTaskScheduler(
+        workers={
+            "health_agent": waiting_worker,
+            "training_agent": waiting_worker,
+        },
+        maximum_parallel_steps=2,
+    )
+    plan = AgentTaskPlan(
+        plan_id="batch_clarification_plan",
+        objective="生成健康和训练方案",
+        steps=[
+            AgentTaskStep(
+                step_id="step_health",
+                title="生成健康建议",
+                assigned_agent="health_agent",
+            ),
+            AgentTaskStep(
+                step_id="step_training",
+                title="生成训练计划",
+                assigned_agent="training_agent",
+            ),
+        ],
+    )
+
+    result = asyncio.run(scheduler.execute(plan))
+    bundle = result.metadata["clarification_bundle"]
+
+    assert result.status == "awaiting_input"
+    assert result.metadata["awaiting_step_ids"] == [
+        "step_health",
+        "step_training",
+    ]
+    assert [
+        request["step_id"] for request in bundle["step_requests"]
+    ] == ["step_health", "step_training"]
+    assert bundle["field_consumers"] == {
+        "age": ["step_health", "step_training"],
+        "training_goal": ["step_training"],
+    }
+    assert "生成健康建议（step_health）" in bundle["display_prompt"]
+    assert "生成训练计划（step_training）" in bundle["display_prompt"]
+    assert result.plan.clarification_prompt == bundle["display_prompt"]
+
+
+def test_scheduler_preflight_should_block_entire_parallel_batch() -> None:
+    """验证一个步骤预检查等待时，同批所有 Worker 都不会真正执行。"""
+
+    class PreflightWorker:
+        """提供可配置执行前检查结果的测试 Worker。"""
+
+        def __init__(self, *, should_wait: bool) -> None:
+            self.should_wait = should_wait
+            self.call_count = 0
+
+        def preflight(
+            self,
+            step: AgentTaskStep,
+            dependency_results: Mapping[str, AgentTaskResult],
+        ) -> AgentTaskResult | None:
+            """需要等待时返回标准暂停结果，否则允许执行。"""
+
+            _ = dependency_results
+            if not self.should_wait:
+                return None
+            return AgentTaskResult(
+                step_id=step.step_id,
+                assigned_agent=step.assigned_agent,
+                status="awaiting_input",
+                requires_user_input=True,
+                clarification_prompt="请补充训练目标。",
+            )
+
+        async def __call__(
+            self,
+            step: AgentTaskStep,
+            dependency_results: Mapping[str, AgentTaskResult],
+        ) -> AgentTaskResult:
+            """记录真正执行次数并返回完成结果。"""
+
+            _ = dependency_results
+            self.call_count += 1
+            return AgentTaskResult(
+                step_id=step.step_id,
+                assigned_agent=step.assigned_agent,
+                status="completed",
+            )
+
+    waiting_worker = PreflightWorker(should_wait=True)
+    ready_worker = PreflightWorker(should_wait=False)
+    scheduler = MultiAgentTaskScheduler(
+        workers={
+            "training_agent": waiting_worker,
+            "health_agent": ready_worker,
+        },
+        maximum_parallel_steps=2,
+    )
+    plan = AgentTaskPlan(
+        plan_id="strict_preflight_plan",
+        objective="并行生成健康和训练建议",
+        steps=[
+            AgentTaskStep(
+                step_id="training_step",
+                title="生成训练计划",
+                assigned_agent="training_agent",
+            ),
+            AgentTaskStep(
+                step_id="health_step",
+                title="生成健康建议",
+                assigned_agent="health_agent",
+            ),
+        ],
+    )
+
+    result = asyncio.run(scheduler.execute(plan))
+
+    assert result.status == "awaiting_input"
+    assert waiting_worker.call_count == 0
+    assert ready_worker.call_count == 0
+    assert result.metadata["ready_batches"] == []
+    assert result.metadata["preflight_batches"] == [
+        ["training_step", "health_step"]
+    ]
+    assert result.plan.steps[0].status == "awaiting_input"
+    assert result.plan.steps[1].status == "pending"
+
+
+def test_scheduler_resume_should_apply_degraded_mode_to_one_step_only() -> None:
+    """验证简化执行控制字段只写入用户选择的等待步骤。"""
+
+    class DegradableWorker:
+        """首次预检查等待，收到简化决定后允许执行的测试 Worker。"""
+
+        def __init__(self) -> None:
+            self.received_inputs: list[dict[str, object]] = []
+
+        def preflight(
+            self,
+            step: AgentTaskStep,
+            dependency_results: Mapping[str, AgentTaskResult],
+        ) -> AgentTaskResult | None:
+            """没有简化标记时返回等待结果。"""
+
+            _ = dependency_results
+            if (
+                step.input_data.get("multi_agent_skill_execution_mode")
+                == "degraded"
+            ):
+                return None
+            return AgentTaskResult(
+                step_id=step.step_id,
+                assigned_agent=step.assigned_agent,
+                status="awaiting_input",
+                output={
+                    "skill_status": "awaiting_input",
+                    "skill_selected_id": "training-skill",
+                    "skill_inputs": {},
+                },
+                requires_user_input=True,
+                clarification_prompt="请补充训练目标或选择简化执行。",
+            )
+
+        async def __call__(
+            self,
+            step: AgentTaskStep,
+            dependency_results: Mapping[str, AgentTaskResult],
+        ) -> AgentTaskResult:
+            """保存步骤私有输入并返回完成结果。"""
+
+            _ = dependency_results
+            self.received_inputs.append(dict(step.input_data))
+            return AgentTaskResult(
+                step_id=step.step_id,
+                assigned_agent=step.assigned_agent,
+                status="completed",
+            )
+
+    class ReadyWorker:
+        """始终通过预检查的普通测试 Worker。"""
+
+        def __init__(self) -> None:
+            self.received_inputs: list[dict[str, object]] = []
+
+        def preflight(
+            self,
+            step: AgentTaskStep,
+            dependency_results: Mapping[str, AgentTaskResult],
+        ) -> None:
+            """允许步骤直接执行。"""
+
+            _ = step, dependency_results
+            return None
+
+        async def __call__(
+            self,
+            step: AgentTaskStep,
+            dependency_results: Mapping[str, AgentTaskResult],
+        ) -> AgentTaskResult:
+            """保存步骤输入并返回完成结果。"""
+
+            _ = dependency_results
+            self.received_inputs.append(dict(step.input_data))
+            return AgentTaskResult(
+                step_id=step.step_id,
+                assigned_agent=step.assigned_agent,
+                status="completed",
+            )
+
+    training_worker = DegradableWorker()
+    health_worker = ReadyWorker()
+    scheduler = MultiAgentTaskScheduler(
+        workers={
+            "training_agent": training_worker,
+            "health_agent": health_worker,
+        },
+        maximum_parallel_steps=2,
+    )
+    plan = AgentTaskPlan(
+        plan_id="degraded_resume_plan",
+        objective="生成训练和健康建议",
+        steps=[
+            AgentTaskStep(
+                step_id="training_step",
+                title="生成训练计划",
+                assigned_agent="training_agent",
+            ),
+            AgentTaskStep(
+                step_id="health_step",
+                title="生成健康建议",
+                assigned_agent="health_agent",
+            ),
+        ],
+    )
+
+    paused_result = asyncio.run(scheduler.execute(plan))
+    resumed_result = asyncio.run(
+        scheduler.resume(
+            paused_result,
+            user_inputs={"training_step": {}},
+            step_resume_decisions={
+                "training_step": {
+                    "step_id": "training_step",
+                    "action": "degraded",
+                    "provided_inputs": {},
+                    "ignored_input_ids": ["training_goal"],
+                    "waiting_input_ids": [],
+                    "reason": "用户选择简化执行。",
+                    "user_input": "简化执行",
+                }
+            },
+        )
+    )
+
+    assert resumed_result.status == "running"
+    assert len(training_worker.received_inputs) == 1
+    assert len(health_worker.received_inputs) == 1
+    training_input = training_worker.received_inputs[0]
+    health_input = health_worker.received_inputs[0]
+    assert training_input["multi_agent_skill_execution_mode"] == "degraded"
+    assert training_input["multi_agent_skill_ignored_input_ids"] == [
+        "training_goal"
+    ]
+    assert "multi_agent_skill_execution_mode" not in health_input
+
+
 def test_scheduler_should_resume_without_repeating_completed_steps() -> None:
     """
     检查用户回答后是否只重跑等待步骤并继续执行后续步骤。

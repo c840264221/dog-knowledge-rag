@@ -15,7 +15,8 @@ class SkillInputChecker:
 
     功能：
         从 SkillLoader 读取完整技能定义，逐项检查 required_inputs 对应的
-        input_id 是否存在且非空，并生成结构化结果和用户澄清提示。
+        input_id 是否存在且非空，并按必须、可简化、可选三个级别生成
+        结构化结果和用户澄清提示。
 
     参数含义：
         loader:
@@ -33,13 +34,15 @@ class SkillInputChecker:
         self,
         skill_id: str,
         available_inputs: Mapping[str, Any] | None,
+        *,
+        ignored_input_ids: list[str] | None = None,
     ) -> SkillInputCheckResult:
         """
         检查指定技能的必需输入。
 
         功能：
-            区分完全没有提供的字段和已经提供但内容为空的字段；只把通过检查的
-            必需输入放进 accepted_inputs，避免把无关 state 数据交给 Skill。
+            区分完全没有提供的字段和已经提供但内容为空的字段；再根据输入契约
+            判断该字段会阻止执行、允许简化还是可以直接忽略。
 
         参数含义：
             skill_id:
@@ -47,6 +50,9 @@ class SkillInputChecker:
             available_inputs:
                 上游已经结构化的输入映射，例如
                 {"breed": "金毛", "age": "6岁"}。
+            ignored_input_ids:
+                用户已明确同意在简化执行中忽略的输入编号。这里只接受技能
+                契约中标为 degradable 的字段，不能绕过强制输入。
 
         返回值含义：
             SkillInputCheckResult:
@@ -55,45 +61,163 @@ class SkillInputChecker:
 
         skill = self.loader.load(skill_id)
         provided_inputs = dict(available_inputs or {})
+        requirement_by_id = {
+            requirement.input_id: requirement
+            for requirement in skill.required_inputs
+        }
+        requested_ignored_input_ids = {
+            str(input_id).strip()
+            for input_id in (ignored_input_ids or [])
+            if str(input_id).strip()
+        }
+        invalid_ignored_input_ids = sorted(
+            input_id
+            for input_id in requested_ignored_input_ids
+            if input_id not in requirement_by_id
+            or requirement_by_id[input_id].requirement_level
+            != "degradable"
+        )
+        if invalid_ignored_input_ids:
+            raise ValueError(
+                "只有可简化输入允许被忽略: "
+                f"{invalid_ignored_input_ids}"
+            )
+
         available_input_ids: list[str] = []
         missing_input_ids: list[str] = []
+        missing_hard_required_input_ids: list[str] = []
+        missing_degradable_input_ids: list[str] = []
+        missing_optional_input_ids: list[str] = []
+        ignored_degradable_input_ids: list[str] = []
         empty_input_ids: list[str] = []
         accepted_inputs: dict[str, Any] = {}
 
         for requirement in skill.required_inputs:
             input_id = requirement.input_id
             if input_id not in provided_inputs:
-                missing_input_ids.append(input_id)
+                if input_id in requested_ignored_input_ids:
+                    ignored_degradable_input_ids.append(input_id)
+                    continue
+                self._record_missing_input(
+                    input_id=input_id,
+                    requirement_level=requirement.requirement_level,
+                    missing_input_ids=missing_input_ids,
+                    missing_hard_required_input_ids=(
+                        missing_hard_required_input_ids
+                    ),
+                    missing_degradable_input_ids=(
+                        missing_degradable_input_ids
+                    ),
+                    missing_optional_input_ids=missing_optional_input_ids,
+                )
                 continue
 
             value = provided_inputs[input_id]
             if self._is_empty(value):
-                missing_input_ids.append(input_id)
                 empty_input_ids.append(input_id)
+                if input_id in requested_ignored_input_ids:
+                    ignored_degradable_input_ids.append(input_id)
+                    continue
+                self._record_missing_input(
+                    input_id=input_id,
+                    requirement_level=requirement.requirement_level,
+                    missing_input_ids=missing_input_ids,
+                    missing_hard_required_input_ids=(
+                        missing_hard_required_input_ids
+                    ),
+                    missing_degradable_input_ids=(
+                        missing_degradable_input_ids
+                    ),
+                    missing_optional_input_ids=missing_optional_input_ids,
+                )
                 continue
 
             available_input_ids.append(input_id)
             accepted_inputs[input_id] = value
 
+        can_run_degraded = (
+            bool(missing_degradable_input_ids)
+            and not missing_hard_required_input_ids
+        )
         clarification_prompt = self._build_clarification_prompt(
             skill_id=skill_id,
             missing_input_ids=missing_input_ids,
+            can_run_degraded=can_run_degraded,
         )
         return SkillInputCheckResult(
             skill_id=skill_id,
             is_ready=not missing_input_ids,
             available_input_ids=available_input_ids,
             missing_input_ids=missing_input_ids,
+            # 保留缺失字段的完整契约，不能只留下 age、breed 这类机器编号。
+            missing_input_requirements=[
+                requirement_by_id[input_id]
+                for input_id in missing_input_ids
+            ],
+            missing_hard_required_input_ids=(
+                missing_hard_required_input_ids
+            ),
+            missing_degradable_input_ids=missing_degradable_input_ids,
+            missing_optional_input_ids=missing_optional_input_ids,
+            ignored_degradable_input_ids=ignored_degradable_input_ids,
+            can_run_degraded=can_run_degraded,
             empty_input_ids=empty_input_ids,
             accepted_inputs=accepted_inputs,
             clarification_prompt=clarification_prompt,
         )
+
+    @staticmethod
+    def _record_missing_input(
+        *,
+        input_id: str,
+        requirement_level: str,
+        missing_input_ids: list[str],
+        missing_hard_required_input_ids: list[str],
+        missing_degradable_input_ids: list[str],
+        missing_optional_input_ids: list[str],
+    ) -> None:
+        """
+        按输入级别记录一个当前不可用的技能字段。
+
+        功能：
+            必须输入和可简化输入都会阻止标准模式执行；可选输入只记录下来，
+            不进入阻塞列表，也不会触发用户澄清。
+
+        参数含义：
+            input_id:
+                当前不可用的技能输入编号。
+            requirement_level:
+                输入契约声明的缺失影响级别。
+            missing_input_ids:
+                会阻止标准模式执行的缺失字段列表。
+            missing_hard_required_input_ids:
+                不能通过简化执行忽略的缺失字段列表。
+            missing_degradable_input_ids:
+                用户明确选择后允许忽略的缺失字段列表。
+            missing_optional_input_ids:
+                不影响执行的可选缺失字段列表。
+
+        返回值含义：
+            None:
+                直接更新调用方传入的分类结果列表。
+        """
+
+        if requirement_level == "optional":
+            missing_optional_input_ids.append(input_id)
+            return
+
+        missing_input_ids.append(input_id)
+        if requirement_level == "degradable":
+            missing_degradable_input_ids.append(input_id)
+            return
+        missing_hard_required_input_ids.append(input_id)
 
     def _build_clarification_prompt(
         self,
         *,
         skill_id: str,
         missing_input_ids: list[str],
+        can_run_degraded: bool,
     ) -> str:
         """
         根据缺失字段构建用户澄清提示。
@@ -107,6 +231,8 @@ class SkillInputChecker:
                 当前技能编号。
             missing_input_ids:
                 当前缺失或为空的输入字段编号。
+            can_run_degraded:
+                本次是否可以向用户提供简化执行选项。
 
         返回值含义：
             str:
@@ -132,7 +258,13 @@ class SkillInputChecker:
             )
             for input_id in missing_input_ids
         ]
-        return f"请继续补充：{'；'.join(missing_descriptions)}。"
+        missing_text = "；".join(missing_descriptions)
+        if can_run_degraded:
+            return (
+                f"当前缺少：{missing_text}。请补充这些信息；"
+                "你也可以回复“简化执行”按现有信息继续，或回复“取消”。"
+            )
+        return f"当前缺少：{missing_text}。请补充这些信息，或回复“取消”。"
 
     @staticmethod
     def _is_empty(value: Any) -> bool:

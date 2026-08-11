@@ -119,3 +119,70 @@ async def test_guard_should_skip_memory_for_control_or_ambiguous_input(
     }
     assert result["route_decision"]["route"] == "FINISH"
     assert result["route_decision"]["requires_memory"] is False
+
+
+@pytest.mark.asyncio
+async def test_guard_should_record_degraded_skill_choice_without_memory() -> None:
+    """
+    验证简化执行会写入审计状态，但不会作为长期记忆抽取。
+
+    参数含义：无。
+    返回值含义：None，断言失败时由 pytest 报错。
+    """
+
+    result = await task_relation_guard_node(
+        {
+            "raw_user_input": "简化执行",
+            "question": "简化执行",
+            "skill_status": "awaiting_input",
+            "skill_selected_id": "dog-training-plan",
+            "skill_inputs": {
+                "age": "6岁",
+                "training_goal": "学习等待",
+            },
+            "skill_runtime_result": {
+                "input_check": {
+                    "can_run_degraded": True,
+                    "missing_degradable_input_ids": [
+                        "breed",
+                        "current_behavior",
+                    ],
+                }
+            },
+        }
+    )
+
+    assert result["task_relation_decision"]["relation"] == "resume"
+    assert result["skill_execution_mode"] == "degraded"
+    assert result["skill_ignored_input_ids"] == [
+        "breed",
+        "current_behavior",
+    ]
+    assert result["skill_degradation_user_input"] == "简化执行"
+    assert result["memory_source_text"] == ""
+    assert result["memory_retrieval_text"] == ""
+
+
+@pytest.mark.asyncio
+async def test_guard_should_skip_memory_for_multi_agent_degraded_control() -> None:
+    """
+    验证多智能体简化执行控制指令不会进入记忆抽取。
+
+    参数含义：无。
+    返回值含义：None，pytest 根据记忆专用文本是否为空判断是否通过。
+    """
+
+    result = await task_relation_guard_node(
+        {
+            "raw_user_input": "简化执行",
+            "question": "简化执行",
+            "multi_agent_task_result": {
+                "status": "awaiting_input",
+            },
+        }
+    )
+
+    assert result["task_relation_decision"]["relation"] == "resume"
+    assert result["task_relation_pending_kind"] == "multi_agent"
+    assert result["memory_source_text"] == ""
+    assert result["memory_retrieval_text"] == ""

@@ -15,6 +15,9 @@ from src.agents.collaboration import (
     AgentTaskPlan,
     AgentTaskResult,
     AgentTaskStep,
+    MultiAgentClarificationBundle,
+    MultiAgentClarificationField,
+    MultiAgentStepClarification,
     MultiAgentTaskResult,
 )
 
@@ -283,6 +286,68 @@ def test_awaiting_task_result_should_require_user_prompt() -> None:
 
     assert result.requires_user_input is True
     assert "数据库查询" in result.clarification_prompt
+
+
+def test_clarification_bundle_should_preserve_step_field_relationships() -> None:
+    """
+    检查整批澄清契约能同时保存逐步骤明细和字段使用者映射。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    bundle = MultiAgentClarificationBundle(
+        step_requests=[
+            MultiAgentStepClarification(
+                step_id="step_health",
+                step_title="生成健康建议",
+                assigned_agent="health_agent",
+                prompt="请补充年龄。",
+                missing_fields=[
+                    MultiAgentClarificationField(
+                        input_id="age",
+                        name="年龄",
+                        requirement_level="hard_required",
+                    )
+                ],
+            ),
+            MultiAgentStepClarification(
+                step_id="step_training",
+                step_title="生成训练计划",
+                assigned_agent="training_agent",
+                prompt="请补充年龄和训练目标。",
+                missing_fields=[
+                    MultiAgentClarificationField(
+                        input_id="age",
+                        name="年龄",
+                        requirement_level="hard_required",
+                    ),
+                    MultiAgentClarificationField(
+                        input_id="training_goal",
+                        name="训练目标",
+                        requirement_level="degradable",
+                    ),
+                ],
+                can_run_degraded=True,
+            ),
+        ],
+        field_consumers={
+            "age": ["step_health", "step_training"],
+            "training_goal": ["step_training"],
+        },
+        display_prompt="请补充年龄和训练目标。",
+    )
+
+    dumped = bundle.model_dump(mode="python")
+
+    assert dumped["field_consumers"]["age"] == [
+        "step_health",
+        "step_training",
+    ]
+    assert dumped["step_requests"][1]["can_run_degraded"] is True
 
 
 def test_completed_collaboration_should_dump_to_plain_dict() -> None:

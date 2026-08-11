@@ -170,7 +170,7 @@ def test_loader_should_render_deterministic_agent_context() -> None:
     context = loader.render_context("dog-training-plan")
 
     assert "技能：测试技能 dog-training-plan（dog-training-plan@1.0.0）" in context
-    assert "必需输入：用户问题（question）" in context
+    assert "输入要求：用户问题（question，必须提供）" in context
     assert "执行步骤：\n1. 读取问题\n2. 生成回答" in context
     assert "允许工具：dog_knowledge_search" in context
     assert "输出要求：输出结构清晰的中文回答。" in context

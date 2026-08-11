@@ -14,6 +14,8 @@ def build_skill_enhanced_question(
     question: str,
     skill_inputs: Mapping[str, Any],
     skill_context: str,
+    execution_mode: str = "standard",
+    ignored_input_ids: list[str] | None = None,
 ) -> str:
     """
     把已经准备完成的 Skill 输入和说明追加到业务问题。
@@ -30,6 +32,10 @@ def build_skill_enhanced_question(
             已经通过必需字段检查的结构化 Skill 输入。
         skill_context:
             SkillLoader 渲染出的完整技能执行说明。
+        execution_mode:
+            当前使用完整执行还是简化执行模式。
+        ignored_input_ids:
+            用户已经同意在简化执行中忽略的输入编号。
 
     返回值含义：
         str:
@@ -47,12 +53,27 @@ def build_skill_enhanced_question(
         ensure_ascii=False,
         default=str,
     )
+    execution_note = ""
+    normalized_ignored_input_ids = [
+        str(input_id).strip()
+        for input_id in (ignored_input_ids or [])
+        if str(input_id).strip()
+    ]
+    if execution_mode == "degraded":
+        ignored_text = "、".join(normalized_ignored_input_ids) or "无"
+        execution_note = (
+            "\n\n本次 Skill 使用简化执行模式。\n"
+            f"用户已同意忽略的缺失输入：{ignored_text}。\n"
+            "生成最终答案时必须明确说明缺少了哪些资料、因此采用了哪些"
+            "保守假设或通用方案，不得编造缺失信息。"
+        )
     return (
         f"{normalized_question}\n\n"
         "以下是已经校验通过的 Skill 输入：\n"
         f"{skill_input_text}\n\n"
         "以下是当前步骤必须遵守的 Skill 执行说明：\n"
         f"{normalized_context}"
+        f"{execution_note}"
     ).strip()
 
 

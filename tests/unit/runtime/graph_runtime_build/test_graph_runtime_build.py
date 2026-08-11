@@ -275,10 +275,38 @@ async def test_graph_runtime_should_inject_memory_extract_node_dependencies(
         fake_build_memory_extract_node,
     )
     injected_skill_node = object()
+    injected_guard_node = object()
+    shared_skill_runtime = object()
+    captured_skill_kwargs = {}
+    captured_guard_kwargs = {}
+
+    def fake_build_skill_prepare_node(**kwargs):
+        """记录主图向 Skill 节点注入的宠物档案服务。"""
+
+        captured_skill_kwargs.update(kwargs)
+        return injected_skill_node
+
     monkeypatch.setattr(
         graph_runtime_service,
         "build_skill_prepare_node",
-        lambda: injected_skill_node,
+        fake_build_skill_prepare_node,
+    )
+    monkeypatch.setattr(
+        graph_runtime_service,
+        "build_default_skill_runtime",
+        lambda: shared_skill_runtime,
+    )
+
+    def fake_build_task_relation_guard_node(**kwargs):
+        """记录主图向任务关系门卫注入的 Skill 运行器。"""
+
+        captured_guard_kwargs.update(kwargs)
+        return injected_guard_node
+
+    monkeypatch.setattr(
+        graph_runtime_service,
+        "build_task_relation_guard_node",
+        fake_build_task_relation_guard_node,
     )
     monkeypatch.setattr(
         graph_runtime_service,
@@ -307,7 +335,15 @@ async def test_graph_runtime_should_inject_memory_extract_node_dependencies(
     )
 
     llm_provider = object()
-    memory_provider = object()
+    pet_profile_service = object()
+
+    class FakeMemoryProvider:
+        """只提供宠物档案服务的主图构建测试替身。"""
+
+        def __init__(self) -> None:
+            self.pet_profile_service = pet_profile_service
+
+    memory_provider = FakeMemoryProvider()
     checkpoint_provider = FakeCheckpointProvider()
     service = GraphRuntimeService(
         llm_provider=llm_provider,
@@ -320,14 +356,20 @@ async def test_graph_runtime_should_inject_memory_extract_node_dependencies(
     assert captured_kwargs == {
         "llm_provider": llm_provider,
         "memory_provider": memory_provider,
+        "pet_profile_service": pet_profile_service,
         "checkpoint_manager": checkpoint_provider.manager,
     }
     assert graph.nodes["memory_extract"] is injected_node
-    assert graph.nodes["task_relation_guard"] is (
-        graph_runtime_service.task_relation_guard_node
-    )
+    assert graph.nodes["task_relation_guard"] is injected_guard_node
+    assert captured_guard_kwargs == {
+        "skill_runtime": shared_skill_runtime,
+    }
     assert graph.entry_point == "task_relation_guard"
     assert graph.nodes["skill_prepare"] is injected_skill_node
+    assert captured_skill_kwargs == {
+        "skill_runtime": shared_skill_runtime,
+        "pet_profile_service": pet_profile_service
+    }
     assert graph.nodes["multi_agent"] == "multi_agent"
 
 

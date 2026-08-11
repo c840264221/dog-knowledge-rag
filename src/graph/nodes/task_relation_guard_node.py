@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
+from src.agents.collaboration.adapters.resume_input_adapter import (
+    MULTI_AGENT_DEGRADED_INPUTS,
+)
 from src.graph.states.dog_state import DogState
 from src.logger import logger
 from src.runtime.resume import resolve_pending_task_relation
+from src.skills import SkillRuntime, build_default_skill_runtime
 
 
 def _find_pending_prompt(
@@ -89,6 +93,8 @@ def _build_memory_source_text(
 
 async def task_relation_guard_node(
     state: DogState,
+    *,
+    skill_runtime: SkillRuntime | None = None,
 ) -> dict[str, Any]:
     """
     在 Memory 和 RootAgent 之前判断本轮输入与旧等待任务的关系。
@@ -100,6 +106,8 @@ async def task_relation_guard_node(
     参数含义：
         state:
             包含原始输入和 Checkpoint 等待字段的当前 DogState。
+        skill_runtime:
+            可选的技能运行器，用于识别本轮输入是否补充了等待技能的字段。
 
     返回值含义：
         dict[str, Any]:
@@ -107,7 +115,10 @@ async def task_relation_guard_node(
             memory_source_text。
     """
 
-    resolution = resolve_pending_task_relation(state)
+    resolution = resolve_pending_task_relation(
+        state,
+        skill_runtime=skill_runtime,
+    )
     state_update = dict(resolution.get("state_update") or {})
     action = str(resolution.get("action") or "none").strip()
     normalized_input = str(
@@ -151,6 +162,19 @@ async def task_relation_guard_node(
         normalized_input=normalized_input,
         pending_kind=pending_kind,
     )
+    # “简化执行”是运行控制指令，不是用户画像或长期偏好，不能进入记忆抽取。
+    is_multi_agent_degraded_control = (
+        pending_kind == "multi_agent"
+        and any(
+            keyword in normalized_input.casefold()
+            for keyword in MULTI_AGENT_DEGRADED_INPUTS
+        )
+    )
+    if (
+        state_update.get("skill_execution_mode") == "degraded"
+        or is_multi_agent_degraded_control
+    ):
+        memory_source_text = ""
     logger.info(
         "[task_relation_guard_node] "
         f"action={action}, "
@@ -171,3 +195,34 @@ async def task_relation_guard_node(
         "memory_source_text": memory_source_text,
         "memory_retrieval_text": memory_source_text,
     }
+
+
+def build_task_relation_guard_node(
+    *,
+    skill_runtime: SkillRuntime | None = None,
+) -> Callable[[DogState], Awaitable[dict[str, Any]]]:
+    """
+    构建复用同一 SkillRuntime 的任务关系门卫节点。
+
+    功能：
+        在主图构建阶段创建一次技能运行器，并把它注入每次请求都会调用的
+        门卫函数，避免为每轮模糊输入重复组装技能目录和检查组件。
+
+    参数含义：
+        skill_runtime：可选的技能运行器；为空时创建项目默认实例。
+
+    返回值含义：
+        Callable：可以注册到 LangGraph 主图中的异步门卫节点函数。
+    """
+
+    resolved_runtime = skill_runtime or build_default_skill_runtime()
+
+    async def _task_relation_guard_node(
+        state: DogState,
+    ) -> dict[str, Any]:
+        return await task_relation_guard_node(
+            state,
+            skill_runtime=resolved_runtime,
+        )
+
+    return _task_relation_guard_node

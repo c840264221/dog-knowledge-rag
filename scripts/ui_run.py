@@ -23,11 +23,16 @@ from src.runtime.timeline.timeline_reporter import TimelineReporter
 from src.runtime.services.multi_agent_ui_task_tracker import (
     MultiAgentUiTaskTracker,
 )
+from src.runtime.services.ui_session_request_guard import (
+    UiSessionRequestGuard,
+    should_resume_from_primary_input,
+)
 
 from src.settings import settings
 
 
 multi_agent_ui_task_tracker = MultiAgentUiTaskTracker()
+ui_session_request_guard = UiSessionRequestGuard()
 
 
 def cancel_active_multi_agent_task(request: gr.Request) -> str:
@@ -223,6 +228,68 @@ async def respond_and_process(
     state: dict,
     request: gr.Request
 ):
+
+    session_id = request.session_hash
+
+    # 等待补充信息时，普通输入框和确认面板必须进入同一条恢复链路。
+    if should_resume_from_primary_input(state):
+        return await resume_agent(
+            question,
+            history,
+            state,
+            request,
+        )
+
+    if not ui_session_request_guard.try_start(session_id):
+        history.append({
+            "role": "assistant",
+            "content": "当前请求仍在处理中，请等待完成后再提交。",
+        })
+        return (
+            history,
+            state,
+            gr.update(visible=False),
+            "",
+        )
+
+    try:
+        return await _respond_and_process_once(
+            question,
+            history,
+            state,
+            request,
+        )
+    finally:
+        ui_session_request_guard.finish(session_id)
+
+
+async def _respond_and_process_once(
+    question: str,
+    history: list,
+    state: dict,
+    request: gr.Request,
+):
+    """
+    执行一次已经取得会话执行权的普通 UI 请求。
+
+    功能：
+        保留原有新任务处理逻辑，由 respond_and_process 在完成等待任务分流
+        和同会话防重后调用。
+
+    参数含义：
+        question:
+            用户本轮输入的问题。
+        history:
+            Gradio 当前对话历史。
+        state:
+            Gradio 当前会话状态。
+        request:
+            Gradio 请求对象，用于读取 session_hash（会话编号）。
+
+    返回值含义：
+        tuple:
+            更新后的对话历史、会话状态、确认区域状态和确认提示词。
+    """
 
     session_id = request.session_hash
 
@@ -471,6 +538,59 @@ async def resume_agent(
             gr.update(visible=False),
             ""
         )
+
+    if not ui_session_request_guard.try_start(session_id):
+        history.append({
+            "role": "assistant",
+            "content": "当前请求仍在处理中，请等待完成后再提交。",
+        })
+        return (
+            history,
+            state,
+            gr.update(visible=True),
+            state.get("pending_prompt", ""),
+        )
+
+    try:
+        return await _resume_agent_once(
+            confirm_value,
+            history,
+            state,
+            request,
+        )
+    finally:
+        ui_session_request_guard.finish(session_id)
+
+
+async def _resume_agent_once(
+    confirm_value: str,
+    history: list,
+    state: dict,
+    request: gr.Request,
+):
+    """
+    执行一次已经取得会话执行权的 UI 恢复请求。
+
+    功能：
+        保留原有 Checkpoint（检查点）恢复逻辑，由 resume_agent 完成等待状态
+        校验和同会话防重后调用。
+
+    参数含义：
+        confirm_value:
+            用户对等待任务提供的确认值或补充信息。
+        history:
+            Gradio 当前对话历史。
+        state:
+            Gradio 当前会话状态。
+        request:
+            Gradio 请求对象，用于读取 session_hash（会话编号）。
+
+    返回值含义：
+        tuple:
+            更新后的对话历史、会话状态、确认区域状态和确认提示词。
+    """
+
+    session_id = request.session_hash
 
     # =========================
     # 恢复 trace_id
