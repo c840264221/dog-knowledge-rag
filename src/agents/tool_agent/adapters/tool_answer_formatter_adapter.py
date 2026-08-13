@@ -12,6 +12,8 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
+from src.runtime.observability.llm_call_records import LLMCallMetadata
+
 
 MAX_TOOL_RESULT_PROMPT_CHARS = 12000
 
@@ -20,6 +22,7 @@ async def format_tool_results_with_llm(
     question: str,
     tool_results: list[Mapping[str, Any]],
     llm_provider: Any,
+    call_metadata: LLMCallMetadata | None = None,
 ) -> str:
     """
     使用 LLM 把工具结果格式化成自然语言。
@@ -81,6 +84,7 @@ async def format_tool_results_with_llm(
         llm=llm,
         prompt=prompt,
         fallback_response="",
+        call_metadata=call_metadata,
     )
     answer = extract_llm_answer_text(
         response=response,

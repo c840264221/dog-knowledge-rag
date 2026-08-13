@@ -57,6 +57,7 @@ class FakeOrchestrationLLMProvider:
         llm: Any,
         prompt: str,
         fallback_response: str | None = None,
+        call_metadata: Any | None = None,
     ) -> FakeOrchestrationMessage:
         """
         记录提示词并返回下一条固定文本。

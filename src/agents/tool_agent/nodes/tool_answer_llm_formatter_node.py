@@ -19,6 +19,10 @@ from src.agents.tool_agent.debug.state_logging import log_tool_agent_state
 from src.agents.tool_agent.nodes.tool_answer_node import build_tool_answer_update
 from src.logger import logger
 from src.runtime.context import runtime_ctx
+from src.runtime.observability.llm_call_records import (
+    LLMCallPurpose,
+    build_llm_call_metadata,
+)
 
 
 ToolAnswerLlmFormatterNode = Callable[
@@ -111,6 +115,12 @@ def build_tool_agent_tool_answer_llm_formatter_node(
                 ),
                 tool_results=successful_results,
                 llm_provider=llm_provider,
+                call_metadata=build_llm_call_metadata(
+                    purpose=LLMCallPurpose.TOOL_ANSWER_FORMATTING,
+                    component="tool_answer_llm_formatter_node",
+                    agent_name="tool_agent",
+                    state=state,
+                ),
             )
         except Exception as exc:
             logger.warning(

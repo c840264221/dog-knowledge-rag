@@ -16,6 +16,10 @@ from src.rag.context_builders.generation_context_builder import (
 )
 from src.runtime.context import runtime_ctx
 from src.runtime.scopes.retrieval_scope import RetrievalScope
+from src.runtime.observability.llm_call_records import (
+    LLMCallPurpose,
+    build_llm_call_metadata,
+)
 
 
 def build_history_text(
@@ -327,6 +331,12 @@ def build_generate_node(
             llm=main_llm,
             prompt=prompt_text,
             fallback_response="调用 LLM 失败",
+            call_metadata=build_llm_call_metadata(
+                purpose=LLMCallPurpose.ANSWER_GENERATION,
+                component="generate_node",
+                agent_name="dog_knowledge_agent",
+                state=state,
+            ),
         )
 
         answer = normalize_llm_response_to_text(

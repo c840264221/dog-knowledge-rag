@@ -307,6 +307,7 @@ class FakeLLMProvider:
         llm,
         prompt,
         fallback_response: str,
+        call_metadata=None,
     ) -> str:
         """
         模拟安全调用 LLM。

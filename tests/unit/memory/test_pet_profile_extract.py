@@ -33,6 +33,7 @@ class FakePetProfileLLMProvider:
         llm,
         prompt: str,
         fallback_response: str,
+        call_metadata=None,
     ) -> FakeMessage:
         """
         返回预设 JSON 并记录完整提示词。

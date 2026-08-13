@@ -110,6 +110,7 @@ def test_metrics_scope_init_metrics_should_create_default_metrics():
         "llm_input_tokens": 0,
         "llm_output_tokens": 0,
         "llm_total_tokens": 0,
+        "llm_calls": [],
     }
 
 
@@ -143,6 +144,7 @@ def test_metrics_scope_init_metrics_should_store_data_in_request_scope():
         "llm_input_tokens": 0,
         "llm_output_tokens": 0,
         "llm_total_tokens": 0,
+        "llm_calls": [],
     }
 
 
@@ -495,6 +497,7 @@ async def test_metrics_scope_startup_should_init_metrics_when_empty():
         "llm_input_tokens": 0,
         "llm_output_tokens": 0,
         "llm_total_tokens": 0,
+        "llm_calls": [],
     }
 
 

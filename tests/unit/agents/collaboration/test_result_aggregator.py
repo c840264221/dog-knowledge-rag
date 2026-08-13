@@ -55,6 +55,7 @@ class FakeAggregationLLMProvider:
         llm: Any,
         prompt: str,
         fallback_response: str | None = None,
+        call_metadata: Any | None = None,
     ) -> FakeAggregationMessage:
         """
         记录调用参数并返回下一条预设消息。

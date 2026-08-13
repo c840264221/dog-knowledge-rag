@@ -6,6 +6,10 @@ from src.graph.states.state import DogState
 from src.logger import logger
 from src.memory.pet_profile_context import format_pet_profile_context
 from src.runtime.context import runtime_ctx
+from src.runtime.observability.llm_call_records import (
+    LLMCallPurpose,
+    build_llm_call_metadata,
+)
 
 
 def build_answer_gen_node(
@@ -155,7 +159,13 @@ def build_answer_gen_node(
             response = await llm_provider.safe_ainvoke(
                 llm=main_llm,
                 prompt=base_prompt,
-                fallback_response="模型暂时不可用"
+                fallback_response="模型暂时不可用",
+                call_metadata=build_llm_call_metadata(
+                    purpose=LLMCallPurpose.ANSWER_GENERATION,
+                    component="answer_gen_node",
+                    agent_name="general_agent",
+                    state=state,
+                ),
             )
 
             answer_text = str(

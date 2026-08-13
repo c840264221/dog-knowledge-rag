@@ -21,6 +21,10 @@ from src.agents.collaboration.planner.prompts import (
     build_planner_prompt,
     build_planner_repair_prompt,
 )
+from src.runtime.observability.llm_call_records import (
+    LLMCallPurpose,
+    build_llm_call_metadata,
+)
 
 
 class PlannerGenerationError(RuntimeError):
@@ -153,6 +157,11 @@ class PlannerAgent:
                     prompt=current_prompt,
                     fallback_response=(
                         '{"planner_error":"LLM unavailable"}'
+                    ),
+                    call_metadata=build_llm_call_metadata(
+                        purpose=LLMCallPurpose.MULTI_AGENT_PLANNING,
+                        component="planner_agent",
+                        agent_name="multi_agent",
                     ),
                 )
                 previous_output = extract_planner_output_text(raw_output)

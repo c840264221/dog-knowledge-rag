@@ -97,6 +97,7 @@ class EvaluationMainGraphLLMProvider:
         prompt: Any,
         fallback_response: str | None = None,
         max_attempts: int | None = None,
+        call_metadata: Any | None = None,
     ) -> AIMessage:
         """
         按 Prompt 用途返回确定性 LLM 响应。
@@ -116,7 +117,7 @@ class EvaluationMainGraphLLMProvider:
                 包含当前调用类型对应固定文本的 LangChain AI 消息。
         """
 
-        _ = llm, max_attempts
+        _ = llm, max_attempts, call_metadata
         prompt_text = (
             prompt.to_string()
             if hasattr(prompt, "to_string")
@@ -249,6 +250,7 @@ class EvaluationMainGraphPlanningProvider(
         llm: Any,
         prompt: str,
         fallback_response: str | None = None,
+        call_metadata: Any | None = None,
     ) -> EvaluationOrchestrationMessage:
         """
         根据真实 Planner 提示词生成本轮合法的确定性计划响应。
@@ -266,7 +268,7 @@ class EvaluationMainGraphPlanningProvider(
                 包含动态运行编号和固定步骤结构的 JSON 消息。
         """
 
-        _ = llm, fallback_response
+        _ = llm, fallback_response, call_metadata
         self.prompts.append(prompt)
         plan_data = dict(self.plan_template)
         plan_data["plan_id"] = _extract_planner_plan_id(prompt)

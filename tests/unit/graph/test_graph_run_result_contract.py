@@ -263,6 +263,11 @@ def patch_user_id(monkeypatch: pytest.MonkeyPatch) -> None:
         "write_rag_debug_report_if_enabled",
         lambda **_kwargs: None,
     )
+    monkeypatch.setattr(
+        graph_run,
+        "write_llm_call_report_if_enabled",
+        lambda **_kwargs: None,
+    )
 
 
 @pytest.mark.asyncio
