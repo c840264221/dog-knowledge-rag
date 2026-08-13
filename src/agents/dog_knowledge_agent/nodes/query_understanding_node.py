@@ -18,6 +18,10 @@ from src.rag.query_builders.rag_query_builder import (
     merge_metadata_filters,
     normalize_metadata_filter,
 )
+from src.runtime.observability.llm_call_records import (
+    LLMCallPurpose,
+    build_llm_call_metadata,
+)
 
 
 DogQueryUnderstandingNode = Callable[
@@ -103,6 +107,7 @@ def build_dog_query_understanding_node(
         llm_analysis = await _analyze_query_with_llm(
             llm_provider=llm_provider,
             question=question,
+            state=state,
         )
 
         # LLM 条件先放入，确定性规则后放入；同字段冲突时规则结果覆盖 LLM。
@@ -161,6 +166,7 @@ async def _analyze_query_with_llm(
     *,
     llm_provider: Any,
     question: str,
+    state: Mapping[str, Any] | None = None,
 ) -> DogQueryLLMAnalysis:
     """
     调用 LLM 补充解析 RAG 过滤条件和回答所需档案字段。
@@ -197,6 +203,12 @@ async def _analyze_query_with_llm(
             llm=llm_provider.main_llm,
             prompt=prompt,
             fallback_response=fallback,
+            call_metadata=build_llm_call_metadata(
+                purpose=LLMCallPurpose.QUERY_UNDERSTANDING,
+                component="dog_query_understanding_node",
+                agent_name="dog_knowledge_agent",
+                state=state,
+            ),
         )
         output_text = _extract_output_text(raw_output)
         return DogQueryLLMAnalysis.model_validate_json(

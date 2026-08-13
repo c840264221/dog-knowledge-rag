@@ -21,6 +21,10 @@ from src.agents.collaboration.aggregator.prompts import (
 )
 from src.agents.collaboration.contracts import MultiAgentTaskResult
 from src.logger import logger
+from src.runtime.observability.llm_call_records import (
+    LLMCallPurpose,
+    build_llm_call_metadata,
+)
 
 
 class ResultAggregationError(RuntimeError):
@@ -145,6 +149,11 @@ class ResultAggregator:
                     prompt=current_prompt,
                     fallback_response=(
                         '{"aggregation_error":"LLM unavailable"}'
+                    ),
+                    call_metadata=build_llm_call_metadata(
+                        purpose=LLMCallPurpose.MULTI_AGENT_AGGREGATION,
+                        component="result_aggregator",
+                        agent_name="multi_agent",
                     ),
                 )
                 previous_output = extract_aggregation_output_text(raw_output)

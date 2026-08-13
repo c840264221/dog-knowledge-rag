@@ -209,6 +209,7 @@ class FakeLLMProvider:
         llm,
         prompt,
         fallback_response,
+        call_metadata=None,
     ):
         """
         模拟 LLMProvider.safe_ainvoke。

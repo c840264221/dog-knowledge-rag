@@ -23,6 +23,7 @@ class FakeLlmProvider:
         llm,
         prompt,
         fallback_response="",
+        call_metadata=None,
     ) -> str:
         """返回固定答案或抛出测试异常。"""
 

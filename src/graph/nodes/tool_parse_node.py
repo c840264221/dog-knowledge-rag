@@ -17,6 +17,10 @@ from src.graph.tools.schemas.tool_call_schema import (
 from src.logger import logger
 
 from src.runtime.context import runtime_ctx
+from src.runtime.observability.llm_call_records import (
+    LLMCallPurpose,
+    build_llm_call_metadata,
+)
 
 
 parser = PydanticOutputParser(
@@ -210,7 +214,13 @@ def build_tool_parse_node(
             return await llm_provider.safe_ainvoke(
                 llm=backup_llm,
                 prompt=x,
-                fallback_response="调用LLM失败"
+                fallback_response="调用LLM失败",
+                call_metadata=build_llm_call_metadata(
+                    purpose=LLMCallPurpose.TOOL_PLANNING,
+                    component="tool_parse_node",
+                    agent_name="general_agent",
+                    state=state,
+                ),
             )
 
         safe_llm = RunnableLambda(

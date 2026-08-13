@@ -27,6 +27,16 @@ from src.rag.debug.retriever_debug_report import (
     cleanup_old_rag_debug_reports,
     save_rag_debug_report,
 )
+from src.runtime.observability.llm_call_report import (
+    build_llm_call_report,
+    render_llm_call_log_summary,
+    save_llm_call_report,
+    save_llm_call_report_json,
+)
+from src.runtime.observability.llm_call_budget import (
+    render_llm_budget_warning,
+)
+from src.runtime.scopes.metrics_scope import MetricsScope
 
 
 def create_initial_state(
@@ -350,6 +360,86 @@ def write_rag_debug_report_if_enabled(
         )
 
 
+def write_llm_call_report_if_enabled(
+        runtime_context: Any,
+        trace_id: str | None = None,
+) -> None:
+    """
+    按配置生成本次请求的 LLM 调用报告。
+
+    功能：
+        从 RuntimeContext 的 MetricsScope 读取 llm_calls，只构建一次结构化
+        报告，再根据两个独立开关输出日志摘要和 Markdown 文件。报告失败
+        只记录 warning，不影响用户请求原有结果。
+
+    参数含义：
+        runtime_context:
+            当前请求的运行时上下文，内部持有 MetricsScope 指标作用域。
+        trace_id:
+            当前请求的链路追踪编号。
+
+    返回值含义：
+        None：只执行可观测报告输出，不改变主图业务结果。
+    """
+
+    if not settings.observability.ENABLE_LLM_CALL_REPORT:
+        return
+    if not (
+            settings.observability.LLM_CALL_REPORT_TO_LOG
+            or settings.observability.LLM_CALL_REPORT_TO_FILE
+    ):
+        return
+
+    try:
+        metrics_scope = runtime_context.service(MetricsScope)
+        metrics = metrics_scope.get_metrics()
+        raw_calls = metrics.get("llm_calls", [])
+        if not isinstance(raw_calls, list):
+            raw_calls = []
+
+        report = build_llm_call_report(
+            trace_id=str(
+                trace_id
+                or getattr(runtime_context, "trace_id", "")
+                or ""
+            ),
+            raw_calls=raw_calls,
+            budgets_by_purpose=(
+                settings.observability.LLM_CALL_BUDGETS_BY_PURPOSE
+            ),
+        )
+
+        if settings.observability.LLM_CALL_REPORT_TO_LOG:
+            logger.info(render_llm_call_log_summary(report))
+        if (
+                settings.observability.LLM_CALL_BUDGET_WARNING_TO_LOG
+                and report.budget_evaluation.status == "exceeded"
+        ):
+            logger.warning(
+                render_llm_budget_warning(report.budget_evaluation)
+            )
+
+        if settings.observability.LLM_CALL_REPORT_TO_FILE:
+            report_path = save_llm_call_report(
+                report=report,
+                report_dir=settings.path.LLM_CALL_REPORT_DIR,
+                use_date_dir=(
+                    settings.observability.LLM_CALL_REPORT_USE_DATE_DIR
+                ),
+            )
+            json_report_path = save_llm_call_report_json(
+                report=report,
+                markdown_report_path=report_path,
+            )
+            logger.info(
+                f"LLM 调用报告已保存: {report_path.resolve()} "
+                f"json={json_report_path.resolve()} "
+                f"exists={report_path.exists() and json_report_path.exists()}"
+            )
+    except Exception as exc:
+        logger.warning(f"LLM 调用报告生成失败: {exc}")
+
+
 def get_final_state_values(
         current_state,
 ) -> dict[str, Any]:
@@ -502,13 +592,34 @@ async def run_main_graph_with_result(
         )
     )
 
-    if (
-            resolved_resume_value is not None
-            and (
-                _has_pending_multi_agent_resume_state(state)
-                or _has_pending_skill_resume_state(state)
+    try:
+        if (
+                resolved_resume_value is not None
+                and (
+                    _has_pending_multi_agent_resume_state(state)
+                    or _has_pending_skill_resume_state(state)
+                )
+        ):
+            return await _start_main_graph_with_result(
+                app=app,
+                state=state,
+                config=config,
+                stream_runner=resolved_stream_runner,
+                thread_id=thread_id,
+                checkpoint_ns=resume_checkpoint_ns,
+                trace_id=trace_id,
             )
-    ):
+
+        if resolved_resume_value is not None:
+            return await _resume_main_graph_with_result(
+                app=app,
+                config=config,
+                resume_value=str(resolved_resume_value),
+                thread_id=thread_id,
+                checkpoint_ns=resume_checkpoint_ns,
+                trace_id=trace_id,
+            )
+
         return await _start_main_graph_with_result(
             app=app,
             state=state,
@@ -518,26 +629,12 @@ async def run_main_graph_with_result(
             checkpoint_ns=resume_checkpoint_ns,
             trace_id=trace_id,
         )
-
-    if resolved_resume_value is not None:
-        return await _resume_main_graph_with_result(
-            app=app,
-            config=config,
-            resume_value=str(resolved_resume_value),
-            thread_id=thread_id,
-            checkpoint_ns=resume_checkpoint_ns,
+    finally:
+        # 完成、等待输入和异常退出都要保留本轮已经发生的 LLM 调用证据。
+        write_llm_call_report_if_enabled(
+            runtime_context=resolved_runtime_context,
             trace_id=trace_id,
         )
-
-    return await _start_main_graph_with_result(
-        app=app,
-        state=state,
-        config=config,
-        stream_runner=resolved_stream_runner,
-        thread_id=thread_id,
-        checkpoint_ns=resume_checkpoint_ns,
-        trace_id=trace_id,
-    )
 
 
 async def restore_active_pet_state(

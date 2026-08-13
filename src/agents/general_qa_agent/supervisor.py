@@ -11,6 +11,10 @@ from src.agents.general_qa_agent.valid_workers import (
 )
 from src.logger import logger
 from src.runtime.context import runtime_ctx
+from src.runtime.observability.llm_call_records import (
+    LLMCallPurpose,
+    build_llm_call_metadata,
+)
 
 
 def build_general_qa_supervisor_node(
@@ -163,7 +167,13 @@ def build_general_qa_supervisor_node(
                     ensure_ascii=False
                 )
             ),
-            fallback_response="所有模型均不可用！"
+            fallback_response="所有模型均不可用！",
+            call_metadata=build_llm_call_metadata(
+                purpose=LLMCallPurpose.ROUTING_DECISION,
+                component="general_qa_supervisor_node",
+                agent_name="general_agent",
+                state=state,
+            ),
         )
 
         decision = str(

@@ -364,6 +364,12 @@ class DogState(TypedDict, total=False):
     # 当前输入是否已经整理成可以交给多 Agent 恢复入口的结构化回答。
     multi_agent_resume_ready: bool
 
+    # 当前隔离 Worker 正在执行的多智能体步骤编号；普通主图请求为空。
+    multi_agent_step_id: str
+
+    # 当前隔离 Worker 步骤被分配到的 Agent 名称；普通主图请求为空。
+    multi_agent_assigned_agent: str
+
     # 自然语言澄清字段的提取轨迹，用于记录已识别、缺失和歧义字段。
     multi_agent_clarification_extraction: Dict[str, Any]
 

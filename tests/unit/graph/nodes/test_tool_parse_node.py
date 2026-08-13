@@ -23,6 +23,7 @@ import pytest
 from src.graph.nodes.tool_parse_node import (
     build_tool_parse_node,
 )
+from src.runtime.observability.llm_call_records import LLMCallPurpose
 
 
 class FakeStateScope:
@@ -197,6 +198,7 @@ class FakeLLMProvider:
         llm,
         prompt,
         fallback_response,
+        call_metadata=None,
     ):
         """
         模拟安全异步调用 LLM。
@@ -211,6 +213,9 @@ class FakeLLMProvider:
             fallback_response：
                 调用失败时的兜底返回文本。
 
+            call_metadata：
+                当前逻辑调用的用途、组件、Agent 和步骤身份。
+
         返回值：
             str：
                 模拟 LLM 返回的字符串。
@@ -221,6 +226,7 @@ class FakeLLMProvider:
                 "llm": llm,
                 "prompt": prompt,
                 "fallback_response": fallback_response,
+                "call_metadata": call_metadata,
             }
         )
 
@@ -384,6 +390,7 @@ async def test_tool_parse_node_should_return_weather_tool_call_when_llm_requires
     state = {
         "question": "北京 2025-03-15 天气怎么样？",
         "tool_round": 2,
+        "multi_agent_step_id": "step-weather",
     }
 
     result = await node(
@@ -416,6 +423,11 @@ async def test_tool_parse_node_should_return_weather_tool_call_when_llm_requires
     ]
 
     assert len(fake_llm_provider.calls) == 1
+    call_metadata = fake_llm_provider.calls[0]["call_metadata"]
+    assert call_metadata.call_purpose == LLMCallPurpose.TOOL_PLANNING
+    assert call_metadata.component == "tool_parse_node"
+    assert call_metadata.agent_name == "general_agent"
+    assert call_metadata.step_id == "step-weather"
     assert fake_checkpoint_manager.save_count == 1
 
 

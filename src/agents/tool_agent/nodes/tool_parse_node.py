@@ -25,7 +25,6 @@ from typing import Any
 
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnableLambda
 from pydantic import ValidationError
 
 from src.agents.tool_agent.adapters.state_adapter import (
@@ -38,6 +37,10 @@ from src.agents.tool_agent.debug.state_logging import (
 from src.graph.tools.schemas.tool_call_schema import ToolCall, ToolParseResult
 from src.logger import logger
 from src.runtime.context import runtime_ctx
+from src.runtime.observability.llm_call_records import (
+    LLMCallPurpose,
+    build_llm_call_metadata,
+)
 
 
 ToolParseNode = Callable[[Mapping[str, Any]], Awaitable[dict[str, Any]]]
@@ -337,37 +340,6 @@ def build_llm_tool_parser(
         + "{format_instructions}"
     )
 
-    async def safe_llm_ainvoke(
-        prompt_value: Any,
-    ) -> str:
-        """
-        安全调用 LLM。
-
-        功能：
-            调用 llm_provider.safe_ainvoke，并使用 backup_llm 执行工具解析。
-
-        参数：
-            prompt_value:
-                ChatPromptTemplate 渲染后的 prompt 输入。
-
-        返回值：
-            str:
-                LLM 返回的文本结果。
-        """
-
-        return await llm_provider.safe_ainvoke(
-            llm=backup_llm,
-            prompt=prompt_value,
-            fallback_response="调用LLM失败",
-        )
-
-    safe_llm = RunnableLambda(
-        safe_llm_ainvoke
-    )
-
-    # 先保留 LLM 原始文本，再由解析函数兼容“解释文字 + JSON”的输出。
-    chain = prompt | safe_llm
-
     async def llm_tool_parser(
         parser_input: Mapping[str, Any],
     ) -> ToolParseResult:
@@ -388,7 +360,7 @@ def build_llm_tool_parser(
                 LLM 解析后的工具解析结果。
         """
 
-        raw_output = await chain.ainvoke(
+        prompt_value = await prompt.ainvoke(
             {
                 "question": parser_input.get(
                     "question",
@@ -404,6 +376,17 @@ def build_llm_tool_parser(
                     tool_parse_output_parser.get_format_instructions()
                 ),
             }
+        )
+        raw_output = await llm_provider.safe_ainvoke(
+            llm=backup_llm,
+            prompt=prompt_value,
+            fallback_response="调用LLM失败",
+            call_metadata=build_llm_call_metadata(
+                purpose=LLMCallPurpose.TOOL_PLANNING,
+                component="tool_parse_node",
+                agent_name="tool_agent",
+                state=parser_input.get("state"),
+            ),
         )
 
         return parse_tool_parse_llm_output(

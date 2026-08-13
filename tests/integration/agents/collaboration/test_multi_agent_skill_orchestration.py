@@ -57,6 +57,7 @@ class FixedOrchestrationLLMProvider:
         llm: Any,
         prompt: str,
         fallback_response: str | None = None,
+        call_metadata: Any | None = None,
     ) -> FixedOrchestrationMessage:
         """
         记录本次提示词并返回下一条固定响应。

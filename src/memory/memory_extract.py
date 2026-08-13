@@ -17,6 +17,10 @@ from src.memory.memory_schema import (
     MemoryOutput,
     VALID_MEMORY_TYPES,
 )
+from src.runtime.observability.llm_call_records import (
+    LLMCallPurpose,
+    build_llm_call_metadata,
+)
 
 
 _alias_cache = get_alias_dict()
@@ -457,7 +461,11 @@ async def extract_memory(
         response = await llm_provider.safe_ainvoke(
             llm=llm_provider.chinese_llm,
             prompt=prompt_text,
-            fallback_response=fallback_response
+            fallback_response=fallback_response,
+            call_metadata=build_llm_call_metadata(
+                purpose=LLMCallPurpose.MEMORY_EXTRACTION,
+                component="memory_extract",
+            ),
         )
 
         return str(

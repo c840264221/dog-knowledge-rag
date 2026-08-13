@@ -11,7 +11,7 @@ class PathSettings(BaseAppSettings):
 
     功能：
         统一管理项目中的数据目录、日志目录、缓存目录、
-        checkpoint 路径、RAG Debug Report 路径等。
+        checkpoint 路径、RAG Debug Report 路径、LLM 调用报告路径等。
 
         如果 .env 中传入的是相对路径，例如：
             RAG_DEBUG_REPORT_DIR=logs/report/rag_debug
@@ -41,6 +41,10 @@ class PathSettings(BaseAppSettings):
     RAG_DEBUG_REPORT_DIR: Path = REPORT_DIR / "rag_debug"
 
     RAG_EVALUATE_REPORT_DIR: Path = REPORT_DIR / "rag_evaluate"
+
+    LLM_CALL_REPORT_DIR: Path = (
+        BASE_DIR / "evaluation" / "reports" / "llm_calls"
+    )
 
     CACHE_DIR: Path = BASE_DIR / "models_cache"
 
@@ -123,6 +127,7 @@ class PathSettings(BaseAppSettings):
             "REPORT_DIR",
             "RAG_DEBUG_REPORT_DIR",
             "RAG_EVALUATE_REPORT_DIR",
+            "LLM_CALL_REPORT_DIR",
             "CACHE_DIR",
             "CHROMA_DB_DIR",
             "MEMORY_CHROMA_DB_DIR",

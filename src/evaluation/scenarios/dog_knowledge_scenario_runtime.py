@@ -222,6 +222,7 @@ class EvaluationLLMProvider:
         prompt: str,
         fallback_response: str | None = None,
         max_attempts: int | None = None,
+        call_metadata: Any | None = None,
     ) -> AIMessage:
         """
         记录真实生成节点构造的 Prompt 并返回固定 AIMessage。
@@ -241,7 +242,7 @@ class EvaluationLLMProvider:
                 包含预设答案的 LangChain AI 消息对象。
         """
 
-        _ = llm, fallback_response, max_attempts
+        _ = llm, fallback_response, max_attempts, call_metadata
         self.prompts.append(str(prompt))
         return AIMessage(content=self.answer)
 

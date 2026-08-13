@@ -321,6 +321,8 @@ def test_default_state_builder_should_keep_identity_and_clear_control_fields(
     assert state["question"] == "查询金毛健康知识"
     assert state["retrieval_question"] == "查询金毛健康知识"
     assert state["memory_retrieval_text"] == "查询金毛健康知识"
+    assert state["multi_agent_step_id"] == "query_health"
+    assert state["multi_agent_assigned_agent"] == "dog_knowledge_agent"
     assert "intent" not in state
     assert "route_decision" not in state
     assert "answer_strategy" not in state

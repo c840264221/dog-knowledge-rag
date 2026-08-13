@@ -91,6 +91,7 @@ class FakeLLMProvider:
         llm,
         prompt,
         fallback_response,
+        call_metadata=None,
     ):
         """
         模拟异步调用 LLM。

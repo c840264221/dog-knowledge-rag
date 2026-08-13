@@ -13,6 +13,10 @@ from src.agents.collaboration.contracts import (
     MultiAgentClarificationExtractionResult,
 )
 from src.skills.extractors import extract_dog_training_plan_inputs
+from src.runtime.observability.llm_call_records import (
+    LLMCallPurpose,
+    build_llm_call_metadata,
+)
 
 
 ClarificationExtractionRule = Callable[[str], Mapping[str, Any]]
@@ -366,6 +370,11 @@ class MultiAgentClarificationFieldResolver:
             llm=llm,
             prompt=prompt,
             fallback_response=fallback_response,
+            call_metadata=build_llm_call_metadata(
+                purpose=LLMCallPurpose.CLARIFICATION_FIELD_EXTRACTION,
+                component="multi_agent_clarification_field_resolver",
+                agent_name="multi_agent",
+            ),
         )
         output_text = _extract_output_text(raw_output)
         return _ClarificationLLMResponse.model_validate_json(

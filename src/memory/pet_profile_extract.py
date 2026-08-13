@@ -15,6 +15,10 @@ from src.memory.memory_schema import (
     PetProfileExtractionResult,
     PetProfileFactCandidate,
 )
+from src.runtime.observability.llm_call_records import (
+    LLMCallPurpose,
+    build_llm_call_metadata,
+)
 
 
 MAX_PET_PROFILE_CANDIDATES = 20
@@ -184,6 +188,10 @@ async def extract_pet_profile_facts(
             llm=llm_provider.chinese_llm,
             prompt=prompt_value.to_string(),
             fallback_response=fallback_response,
+            call_metadata=build_llm_call_metadata(
+                purpose=LLMCallPurpose.PET_PROFILE_EXTRACTION,
+                component="pet_profile_extract",
+            ),
         )
         return str(getattr(response, "content", response))
 

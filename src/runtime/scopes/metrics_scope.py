@@ -36,8 +36,33 @@ class MetricsScope(BaseScope):
                 "llm_output_tokens": 0,
 
                 "llm_total_tokens": 0,
+
+                # 保存每一次逻辑 LLM 调用的结构化明细，供成本和重复调用审计。
+                "llm_calls": [],
             }
         )
+
+    def append_llm_call(self, call_record: dict) -> None:
+        """
+        向当前请求追加一条 LLM 调用明细。
+
+        功能：
+            复制现有列表后追加记录，避免调用方直接修改 RequestScope 中保存
+            的列表对象。旧检查点没有 llm_calls 字段时会自动从空列表开始。
+
+        参数含义：
+            call_record：已经转换成普通字典的标准 LLM 调用记录。
+
+        返回值含义：
+            None：只更新当前请求的指标数据。
+        """
+
+        metrics = self.get_metrics()
+        raw_calls = metrics.get("llm_calls", [])
+        calls = list(raw_calls) if isinstance(raw_calls, list) else []
+        calls.append(dict(call_record))
+        metrics["llm_calls"] = calls
+        self.scope.set(self.KEY, metrics)
 
     def get_metrics(self):
 

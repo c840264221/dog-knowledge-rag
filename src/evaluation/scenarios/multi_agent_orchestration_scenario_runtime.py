@@ -51,6 +51,7 @@ class EvaluationOrchestrationLLMProvider:
         llm: Any,
         prompt: str,
         fallback_response: str | None = None,
+        call_metadata: Any | None = None,
     ) -> EvaluationOrchestrationMessage:
         """
         返回下一条预设响应并记录当前提示词。
@@ -68,7 +69,7 @@ class EvaluationOrchestrationLLMProvider:
                 包含确定性文本的消息对象。
         """
 
-        _ = llm, fallback_response
+        _ = llm, fallback_response, call_metadata
         self.prompts.append(prompt)
         if not self.responses:
             raise ValueError("总编排评估 Provider 缺少预设响应")

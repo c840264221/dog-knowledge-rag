@@ -711,6 +711,9 @@ def build_default_agent_state(
     state["question"] = question
     state["retrieval_question"] = retrieval_question
     state["memory_retrieval_text"] = retrieval_question
+    # 每个 Worker 都使用独立 state，深层 LLM 节点可安全读取当前步骤身份。
+    state["multi_agent_step_id"] = step.step_id
+    state["multi_agent_assigned_agent"] = step.assigned_agent
     return state
 
 

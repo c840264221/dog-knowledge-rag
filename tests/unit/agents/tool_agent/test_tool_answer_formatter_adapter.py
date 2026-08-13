@@ -19,6 +19,7 @@ class FakeLlmProvider:
         llm,
         prompt,
         fallback_response="",
+        call_metadata=None,
     ) -> str:
         """记录 LLM 调用并返回固定文本。"""
 
