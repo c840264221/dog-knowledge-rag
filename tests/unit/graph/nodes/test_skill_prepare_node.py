@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from src.graph.nodes.skill_prepare_node import build_skill_prepare_node
 from src.memory.memory_schema import PetProfileRecallResult
+from src.runtime.resume import resolve_pending_task_relation
 
 
 class FakePetProfileService:
@@ -91,19 +92,23 @@ def test_skill_prepare_node_should_resume_saved_skill() -> None:
 
     node = build_skill_prepare_node()
 
-    update = node(
-        {
-            "question": "它目前会坐下，希望学习等待和召回。",
-            "skill_status": "awaiting_input",
-            "skill_selected_id": "dog-training-plan",
-            "skill_inputs": {
-                "breed": "Golden Retriever",
-                "age": "6岁",
-            },
-            "skill_original_question": "帮我为6岁的金毛制定训练计划。",
-            "skill_target_agent": "dog_knowledge_agent",
-        }
-    )
+    state = {
+        "question": "它目前会坐下，希望学习等待和召回。",
+        "user_id": "test_user",
+        "session_id": "test_session",
+        "skill_status": "awaiting_input",
+        "skill_selected_id": "dog-training-plan",
+        "skill_inputs": {
+            "breed": "Golden Retriever",
+            "age": "6岁",
+        },
+        "skill_pending_prompt": "请补充当前行为和训练目标。",
+        "skill_original_question": "帮我为6岁的金毛制定训练计划。",
+        "skill_target_agent": "dog_knowledge_agent",
+    }
+    relation_update = resolve_pending_task_relation(state)["state_update"]
+
+    update = node({**state, **relation_update})
 
     assert update["skill_status"] == "ready"
     assert update["skill_inputs"] == {
@@ -115,6 +120,11 @@ def test_skill_prepare_node_should_resume_saved_skill() -> None:
     assert update["skill_pending_prompt"] == ""
     assert update["waiting_user_input"] is False
     assert "技能：狗狗训练计划" in update["skill_context"]
+    pending_task = update["pending_tasks"][
+        "skill:dog-training-plan"
+    ]
+    assert pending_task["status"] == "running"
+    assert pending_task["version"] == 2
     assert "用户原始任务" in update["question"]
     assert "帮我为6岁的金毛制定训练计划。" in update["question"]
     assert "用户本轮补充信息" in update["question"]

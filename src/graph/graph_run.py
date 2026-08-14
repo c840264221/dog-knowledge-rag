@@ -12,6 +12,7 @@ from src.runtime.resume.legacy_protocol import (
     encode_legacy_interrupt_result,
     parse_legacy_resume_message,
 )
+from src.runtime.resume.pending_tasks import PendingTaskCollection
 from src.runtime.services.checkpoint_config import build_graph_checkpoint_config
 from src.agents.collaboration.contracts import MultiAgentTaskResult
 
@@ -180,6 +181,10 @@ def create_initial_state(
         "task_relation_decision": {},
         "task_relation_pending_kind": "",
         "task_relation_requires_confirmation": False,
+        "task_relation_candidates": [],
+        "task_relation_unassigned_input": "",
+        "task_relation_selection_action": "",
+        "pending_tasks": {},
         "task_relation_guard_processed": False,
 
         # ========= 多 Agent 跨轮恢复字段 =========
@@ -527,6 +532,7 @@ async def run_main_graph_with_result(
     state = create_initial_state(
         normalized_question,
         trace_id,
+        session_id=thread_id,
     )
 
     resolved_runtime_context.user_id = state.get(
@@ -560,6 +566,11 @@ async def run_main_graph_with_result(
         config=config,
         state=state,
     )
+    state = await restore_pending_task_collection_state(
+        app=app,
+        config=config,
+        state=state,
+    )
     state = await restore_pending_tool_clarification_state(
         app=app,
         config=config,
@@ -571,6 +582,11 @@ async def run_main_graph_with_result(
         state=state,
     )
     state = await restore_pending_skill_state(
+        app=app,
+        config=config,
+        state=state,
+    )
+    state = await restore_pending_task_selection_state(
         app=app,
         config=config,
         state=state,
@@ -705,6 +721,81 @@ async def restore_active_pet_state(
     logger.info(
         "已从当前 thread_id 的 Checkpoint 恢复当前宠物身份: "
         f"pet_key={active_pet_key}"
+    )
+    return restored_state
+
+
+async def restore_pending_task_collection_state(
+        app: Any,
+        config: Mapping[str, Any],
+        state: Mapping[str, Any],
+) -> dict[str, Any]:
+    """
+    从当前线程检查点恢复统一活动任务集合。
+
+    功能：
+        读取 pending_tasks 单一白名单字段，通过 PendingTaskCollection 完成
+        Schema 校验，并确认每个任务都属于当前用户和当前 thread_id。
+        任一任务非法时拒绝恢复整个集合，避免部分可信状态进入门禁链路。
+
+    参数含义：
+        app:
+            已编译的 LangGraph 主图对象，需要提供 aget_state 方法。
+        config:
+            当前运行配置，包含定位检查点的 thread_id。
+        state:
+            本轮干净初始状态。
+
+    返回值含义：
+        dict[str, Any]:
+            合并合法 pending_tasks 快照后的状态；无合法数据时返回原状态副本。
+    """
+
+    restored_state = dict(state)
+    try:
+        current_state = await app.aget_state(config)
+        checkpoint_values = get_final_state_values(
+            current_state=current_state,
+        )
+    except Exception as exc:
+        logger.debug(
+            f"读取统一等待任务 Checkpoint 失败，按空注册表继续: {exc}"
+        )
+        return restored_state
+
+    raw_tasks = checkpoint_values.get("pending_tasks")
+    if not isinstance(raw_tasks, Mapping) or not raw_tasks:
+        return restored_state
+    if len(raw_tasks) > 100:
+        logger.warning("统一等待任务数量超过单会话上限，拒绝恢复。")
+        return restored_state
+
+    try:
+        collection = PendingTaskCollection.from_state(raw_tasks)
+    except (TypeError, ValueError):
+        logger.warning("统一等待任务 Checkpoint 结构无效，拒绝恢复。")
+        return restored_state
+
+    current_user_id = str(state.get("user_id") or "").strip()
+    raw_configurable = config.get("configurable")
+    current_thread_id = str(
+        raw_configurable.get("thread_id") or ""
+        if isinstance(raw_configurable, Mapping)
+        else ""
+    ).strip()
+    if not current_user_id or not current_thread_id:
+        return restored_state
+    if any(
+        task.user_id != current_user_id
+        or task.thread_id != current_thread_id
+        for task in collection.list_tasks()
+    ):
+        logger.warning("统一等待任务不属于当前用户或线程，拒绝恢复。")
+        return restored_state
+
+    restored_state["pending_tasks"] = collection.to_state()
+    logger.info(
+        "已从当前 thread_id 的 Checkpoint 恢复统一等待任务注册表。"
     )
     return restored_state
 
@@ -958,6 +1049,103 @@ async def restore_pending_skill_state(
     )
     logger.info(
         "已从当前 thread_id 的 Checkpoint 恢复等待输入的顶层 Skill。"
+    )
+    return restored_state
+
+
+async def restore_pending_task_selection_state(
+        app: Any,
+        config: Mapping[str, Any],
+        state: Mapping[str, Any],
+) -> dict[str, Any]:
+    """
+    从当前线程检查点恢复尚未完成的等待任务选择。
+
+    功能：
+        仅恢复门禁生成的候选任务列表和尚未绑定的用户输入，使用户下一轮
+        回复编号时可以把原输入交给被选中的业务模块。恢复前会校验用户身份、
+        候选结构和长度，避免旧检查点或异常数据直接进入执行链路。
+
+    参数含义：
+        app:
+            已编译的 LangGraph 主图对象，需要提供 aget_state 方法。
+        config:
+            当前图执行配置，包含用于定位检查点的 thread_id。
+        state:
+            已恢复各业务等待字段的本轮初始状态。
+
+    返回值含义：
+        dict[str, Any]:
+            合并合法任务选择白名单字段后的状态；无有效选择时返回原状态副本。
+    """
+
+    restored_state = dict(state)
+    try:
+        current_state = await app.aget_state(config)
+        checkpoint_values = get_final_state_values(
+            current_state=current_state,
+        )
+    except Exception as exc:
+        logger.debug(
+            f"读取等待任务选择 Checkpoint 失败，按未选择继续: {exc}"
+        )
+        return restored_state
+
+    current_user_id = str(state.get("user_id") or "").strip()
+    checkpoint_user_id = str(
+        checkpoint_values.get("user_id") or ""
+    ).strip()
+    if not current_user_id or checkpoint_user_id != current_user_id:
+        return restored_state
+
+    unassigned_input = str(
+        checkpoint_values.get("task_relation_unassigned_input") or ""
+    ).strip()
+    selection_action = str(
+        checkpoint_values.get("task_relation_selection_action") or "resume"
+    ).strip()
+    raw_candidates = checkpoint_values.get("task_relation_candidates")
+    if (
+        not unassigned_input
+        or len(unassigned_input) > 10_000
+        or selection_action not in {"resume", "cancel"}
+        or not isinstance(raw_candidates, list)
+        or not 2 <= len(raw_candidates) <= 10
+    ):
+        return restored_state
+
+    candidates: list[dict[str, str]] = []
+    for raw_candidate in raw_candidates:
+        if not isinstance(raw_candidate, Mapping):
+            return restored_state
+        candidate = {
+            "task_id": str(raw_candidate.get("task_id") or "").strip(),
+            "task_kind": str(
+                raw_candidate.get("task_kind") or ""
+            ).strip(),
+            "title": str(raw_candidate.get("title") or "").strip(),
+            "pending_prompt": str(
+                raw_candidate.get("pending_prompt") or ""
+            ).strip(),
+        }
+        if (
+            not candidate["task_id"]
+            or candidate["task_kind"] not in {
+                "tool",
+                "multi_agent",
+                "skill",
+            }
+            or not candidate["title"]
+            or any(len(value) > 2_000 for value in candidate.values())
+        ):
+            return restored_state
+        candidates.append(candidate)
+
+    restored_state["task_relation_candidates"] = candidates
+    restored_state["task_relation_unassigned_input"] = unassigned_input
+    restored_state["task_relation_selection_action"] = selection_action
+    logger.info(
+        "已从当前 thread_id 的 Checkpoint 恢复等待任务候选选择状态。"
     )
     return restored_state
 

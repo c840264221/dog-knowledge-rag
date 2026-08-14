@@ -14,6 +14,12 @@ from src.runtime.resume.contracts import (
     GraphInterruptResult,
     GraphInterruptType,
 )
+from src.runtime.resume.pending_tasks import (
+    PendingInputContract,
+    PendingTaskCollection,
+    PendingTaskSnapshot,
+    ToolPendingPayload,
+)
 
 
 class FakeRuntimeContext:
@@ -399,6 +405,72 @@ async def test_restore_active_pet_state_should_reject_other_user() -> None:
 
 
 @pytest.mark.asyncio
+async def test_restore_pending_task_registry_should_validate_scope() -> None:
+    """
+    测试统一等待任务注册表只恢复属于当前用户和线程的合法任务。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    task = PendingTaskSnapshot(
+        task_id="pending_tool_checkpoint_001",
+        task_kind="tool",
+        user_id="test_user",
+        thread_id="pending-thread",
+        title="查询数据库表",
+        pending_prompt="请选择数据库别名。",
+        input_contracts=[
+            PendingInputContract(
+                field_id="database_name",
+                value_type="string",
+                enum_values=["memory", "rag"],
+            )
+        ],
+        payload=ToolPendingPayload(
+            tool_name="sqlite_list_tables",
+            missing_fields=["database_name"],
+        ),
+    )
+    app = FakeGraphApp(
+        current_state=FakeCurrentState(
+            values={
+                "pending_tasks": PendingTaskCollection([task]).to_state(),
+                "final_answer": "不应恢复的旧答案",
+            }
+        )
+    )
+
+    restored = await graph_run.restore_pending_task_collection_state(
+        app=app,
+        config={"configurable": {"thread_id": "pending-thread"}},
+        state={
+            "user_id": "test_user",
+            "pending_tasks": {},
+            "final_answer": "",
+        },
+    )
+
+    assert list(restored["pending_tasks"]) == [task.task_id]
+    assert restored["pending_tasks"][task.task_id]["task_kind"] == "tool"
+    assert restored["final_answer"] == ""
+
+    rejected = await graph_run.restore_pending_task_collection_state(
+        app=app,
+        config={"configurable": {"thread_id": "other-thread"}},
+        state={
+            "user_id": "test_user",
+            "pending_tasks": {},
+        },
+    )
+
+    assert rejected["pending_tasks"] == {}
+
+
+@pytest.mark.asyncio
 async def test_restore_pending_tool_clarification_state_should_use_whitelist() -> None:
     """测试主图入口只从检查点恢复参数澄清所需字段。"""
 
@@ -578,6 +650,62 @@ async def test_restore_pending_skill_state_should_use_whitelist() -> None:
     assert restored["skill_degradation_user_input"] == "简化执行"
     assert restored["final_answer"] == ""
     assert restored["rag_context"] is None
+
+
+@pytest.mark.asyncio
+async def test_restore_pending_task_selection_should_use_whitelist() -> None:
+    """
+    测试主图入口只恢复合法的多等待任务候选和未绑定输入。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    app = FakeGraphApp(
+        current_state=FakeCurrentState(
+            values={
+                "user_id": "test_user",
+                "task_relation_candidates": [
+                    {
+                        "task_id": "tool:sqlite_list_tables",
+                        "task_kind": "tool",
+                        "title": "补充工具参数",
+                        "pending_prompt": "请选择数据库。",
+                    },
+                    {
+                        "task_id": "multi_agent:task_001",
+                        "task_kind": "multi_agent",
+                        "title": "补充多智能体任务",
+                        "pending_prompt": "请补充狗狗年龄。",
+                    },
+                ],
+                "task_relation_unassigned_input": "500",
+                "task_relation_selection_action": "resume",
+                "final_answer": "不应恢复的旧答案",
+            }
+        )
+    )
+
+    restored = await graph_run.restore_pending_task_selection_state(
+        app=app,
+        config={"configurable": {"thread_id": "selection-thread"}},
+        state={
+            "user_id": "test_user",
+            "question": "2",
+            "final_answer": "",
+        },
+    )
+
+    assert restored["task_relation_unassigned_input"] == "500"
+    assert restored["task_relation_selection_action"] == "resume"
+    assert len(restored["task_relation_candidates"]) == 2
+    assert restored["task_relation_candidates"][1]["task_id"] == (
+        "multi_agent:task_001"
+    )
+    assert restored["final_answer"] == ""
 
 
 def test_skill_logical_wait_should_return_interrupt_result() -> None:

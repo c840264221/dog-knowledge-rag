@@ -37,6 +37,12 @@ class TaskRelationDecision(BaseModel):
         source:
             判断来源。explicit 表示用户明确说明，rule 表示确定性规则，
             fallback 表示现有信息不足。
+        selected_task_id:
+            已唯一确定的等待任务编号；尚未确定时为空。
+        candidate_task_ids:
+            本轮可能匹配的等待任务编号，供用户选择和审计使用。
+        requires_task_selection:
+            是否必须先让用户选择任务，True 时执行层不得恢复任何业务任务。
 
     返回值含义：
         TaskRelationDecision:
@@ -53,10 +59,17 @@ class TaskRelationDecision(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     reason: str = Field(min_length=1)
     source: Literal["explicit", "rule", "fallback"]
+    selected_task_id: str | None = None
+    candidate_task_ids: list[str] = Field(default_factory=list)
+    requires_task_selection: bool = False
 
 
 _CANCEL_INPUTS = {
     "取消",
+    "全部取消",
+    "取消全部",
+    "全部停止",
+    "cancel all",
     "算了",
     "不继续了",
     "停止任务",
