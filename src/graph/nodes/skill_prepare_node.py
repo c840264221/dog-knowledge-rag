@@ -18,6 +18,8 @@ from src.agents.root_agent.routes import (
     get_root_route_from_state,
     normalize_root_route,
 )
+from src.runtime.resume.pending_tasks import PendingTaskError
+from src.runtime.resume.state_adapter import transition_pending_task_kind
 
 
 SkillPrepareNode = Callable[[Mapping[str, Any]], dict[str, Any]]
@@ -252,6 +254,38 @@ def build_skill_prepare_node(
                 execution_mode=execution_mode,
                 ignored_input_ids=ignored_input_ids,
             )
+            if is_resuming_skill:
+                try:
+                    update["pending_tasks"] = transition_pending_task_kind(
+                        raw_tasks=(
+                            state.get("pending_tasks")
+                            if isinstance(
+                                state.get("pending_tasks"),
+                                Mapping,
+                            )
+                            else None
+                        ),
+                        task_kind="skill",
+                        target_status="running",
+                    )
+                except (PendingTaskError, TypeError, ValueError):
+                    return {
+                        **update,
+                        "skill_status": "awaiting_input",
+                        "skill_pending_prompt": (
+                            "任务状态已经发生变化，本轮没有继续执行。"
+                            "请重新查看当前等待任务后再操作。"
+                        ),
+                        "pending_prompt": (
+                            "任务状态已经发生变化，本轮没有继续执行。"
+                            "请重新查看当前等待任务后再操作。"
+                        ),
+                        "waiting_user_input": True,
+                        "final_answer": (
+                            "任务状态已经发生变化，本轮没有继续执行。"
+                            "请重新查看当前等待任务后再操作。"
+                        ),
+                    }
         return update
 
     return skill_prepare_node

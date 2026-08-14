@@ -50,6 +50,38 @@ def _build_pending_skill_state(question: str) -> dict:
     }
 
 
+def _build_multiple_pending_state(question: str) -> dict:
+    """
+    构建工具与多智能体同时等待输入的测试状态。
+
+    参数含义：
+        question:
+            本轮用户输入。
+
+    返回值含义：
+        dict:
+            包含两个独立等待模块及其确定性契约的最小状态。
+    """
+
+    state = _build_pending_multi_agent_state(question)
+    state.update(
+        {
+            "tool_agent_clarification_request": {
+                "status": "pending",
+                "tool_name": "sqlite_list_tables",
+                "missing_fields": ["database_name"],
+                "options": {"database_name": ["memory", "rag"]},
+                "question": "请选择数据库别名。",
+            },
+            "tool_agent_pending_tool_call": {
+                "name": "sqlite_list_tables",
+                "args": {},
+            },
+        }
+    )
+    return state
+
+
 def test_complete_request_should_clear_old_pending_task() -> None:
     """
     测试完整的新请求会清理旧多智能体等待状态。
@@ -144,9 +176,9 @@ def test_ambiguous_input_should_request_explicit_choice() -> None:
     assert "新问题" in update["pending_prompt"]
 
 
-def test_cancel_should_clear_all_pending_task_types() -> None:
+def test_cancel_with_multiple_tasks_should_require_target_selection() -> None:
     """
-    测试明确取消会统一清理 Tool、Multi-Agent 和 Skill 等待字段。
+    测试多个等待任务下只说取消时不会猜测取消目标。
 
     参数含义：
         无。
@@ -165,11 +197,261 @@ def test_cancel_should_clear_all_pending_task_types() -> None:
     result = resolve_pending_task_relation(state)
     update = result["state_update"]
 
-    # 多个等待状态虽然异常，但明确“取消”仍应安全地清理全部状态。
+    assert result["action"] == "ambiguous"
+    assert "multi_agent_task_result" not in update
+    assert "skill_status" not in update
+    assert update["task_relation_requires_confirmation"] is True
+    assert update["task_relation_selection_action"] == "cancel"
+    assert "请选择要取消的任务" in update["pending_prompt"]
+    assert "全部取消" in update["pending_prompt"]
+
+
+def test_cancel_all_should_clear_every_pending_task() -> None:
+    """
+    测试明确“全部取消”会统一清理所有等待任务。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    state = _build_pending_multi_agent_state("全部取消")
+    state.update(
+        {
+            "skill_status": "awaiting_input",
+            "skill_selected_id": "dog-training-plan",
+        }
+    )
+
+    result = resolve_pending_task_relation(state)
+    update = result["state_update"]
+
     assert result["action"] == "cancel"
+    assert result["state_update"]["pending_tasks"] == {}
     assert update["multi_agent_task_result"] == {}
     assert update["skill_status"] == "no_skill"
-    assert update["task_relation_requires_confirmation"] is False
+    assert update["final_answer"] == "已取消全部等待任务。"
+
+
+def test_cancel_selection_should_only_clear_selected_task() -> None:
+    """
+    测试跨轮选择取消目标后只清理目标任务并保留其他等待任务。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    first_result = resolve_pending_task_relation(
+        _build_multiple_pending_state("取消")
+    )
+    second_state = _build_multiple_pending_state("1")
+    second_state.update(
+        {
+            "task_relation_candidates": first_result["state_update"][
+                "task_relation_candidates"
+            ],
+            "task_relation_unassigned_input": "取消",
+            "task_relation_selection_action": "cancel",
+        }
+    )
+
+    second_result = resolve_pending_task_relation(second_state)
+    update = second_result["state_update"]
+
+    assert second_result["action"] == "cancel"
+    assert update["tool_agent_pending_tool_call"] is None
+    assert "multi_agent_task_result" not in update
+    assert update["task_relation_pending_kind"] == "tool"
+    assert update["task_relation_decision"]["selected_task_id"] == (
+        "tool:sqlite_list_tables"
+    )
+    assert "其他等待任务仍保留" in update["final_answer"]
+
+
+def test_direct_cancel_selection_should_cancel_numbered_task() -> None:
+    """
+    测试“取消任务：编号”可以在一轮内定向取消候选任务。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    result = resolve_pending_task_relation(
+        _build_multiple_pending_state("取消任务：2")
+    )
+    update = result["state_update"]
+
+    assert result["action"] == "cancel"
+    assert update["multi_agent_task_result"] == {}
+    assert "tool_agent_pending_tool_call" not in update
+    assert update["task_relation_pending_kind"] == "multi_agent"
+
+
+def test_remaining_task_should_resume_after_targeted_cancel() -> None:
+    """
+    测试定向取消一个任务后，另一个等待任务下一轮仍然可以恢复。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    original_state = _build_multiple_pending_state("取消任务：1")
+    cancel_result = resolve_pending_task_relation(original_state)
+    remaining_state = {
+        **original_state,
+        **cancel_result["state_update"],
+        "question": "简化执行",
+    }
+
+    resume_result = resolve_pending_task_relation(remaining_state)
+    update = resume_result["state_update"]
+
+    assert resume_result["action"] == "resume"
+    assert update["task_relation_pending_kind"] == "multi_agent"
+    assert update["task_relation_decision"]["relation"] == "resume"
+
+
+def test_multiple_pending_tasks_should_return_numbered_candidates() -> None:
+    """
+    测试多个契约都无法唯一命中时会暂存输入并要求用户选择任务。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    result = resolve_pending_task_relation(
+        _build_multiple_pending_state("500")
+    )
+    update = result["state_update"]
+
+    assert result["action"] == "ambiguous"
+    assert update["task_relation_pending_kind"] == "multiple"
+    assert update["task_relation_unassigned_input"] == "500"
+    assert len(update["task_relation_candidates"]) == 2
+    assert set(update["pending_tasks"]) == {
+        "tool:sqlite_list_tables",
+        "multi_agent:pending",
+    }
+    assert all(
+        task["status"] == "awaiting_input"
+        and task["version"] == 1
+        for task in update["pending_tasks"].values()
+    )
+    assert update["task_relation_decision"][
+        "requires_task_selection"
+    ] is True
+    assert "1. 补充工具" in update["pending_prompt"]
+    assert "2. 补充多智能体" in update["pending_prompt"]
+
+
+def test_task_number_selection_should_rebind_saved_input() -> None:
+    """
+    测试用户选择候选编号后会把上一轮原始输入绑定到目标任务。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    first_result = resolve_pending_task_relation(
+        _build_multiple_pending_state("500")
+    )
+    second_state = _build_multiple_pending_state("2")
+    second_state.update(
+        {
+            "task_relation_candidates": first_result["state_update"][
+                "task_relation_candidates"
+            ],
+            "task_relation_unassigned_input": "500",
+        }
+    )
+
+    second_result = resolve_pending_task_relation(second_state)
+    update = second_result["state_update"]
+
+    assert second_result["action"] == "resume"
+    assert update["question"] == "500"
+    assert update["task_relation_pending_kind"] == "multi_agent"
+    assert update["task_relation_candidates"] == []
+    assert update["task_relation_unassigned_input"] == ""
+    assert update["task_relation_decision"]["selected_task_id"] == (
+        "multi_agent:pending"
+    )
+
+
+def test_invalid_task_number_should_preserve_unassigned_input() -> None:
+    """
+    测试无效候选编号不会覆盖上一轮尚未绑定的业务输入。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    first_result = resolve_pending_task_relation(
+        _build_multiple_pending_state("500")
+    )
+    second_state = _build_multiple_pending_state("9")
+    second_state.update(
+        {
+            "task_relation_candidates": first_result["state_update"][
+                "task_relation_candidates"
+            ],
+            "task_relation_unassigned_input": "500",
+        }
+    )
+
+    second_result = resolve_pending_task_relation(second_state)
+    update = second_result["state_update"]
+
+    assert second_result["action"] == "ambiguous"
+    assert update["task_relation_unassigned_input"] == "500"
+    assert "你输入的“500”" in update["pending_prompt"]
+
+
+def test_unique_contract_match_should_select_only_tool_task() -> None:
+    """
+    测试确定性契约只命中一个任务时可以直接定向恢复。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    result = resolve_pending_task_relation(
+        _build_multiple_pending_state("memory")
+    )
+    update = result["state_update"]
+
+    assert result["action"] == "resume"
+    assert update["task_relation_pending_kind"] == "tool"
+    assert update["task_relation_decision"]["selected_task_id"] == (
+        "tool:sqlite_list_tables"
+    )
+    assert update["task_relation_decision"]["candidate_task_ids"] == [
+        "tool:sqlite_list_tables",
+        "multi_agent:pending",
+    ]
 
 
 def test_partial_skill_input_should_resume_pending_skill() -> None:

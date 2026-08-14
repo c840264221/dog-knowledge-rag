@@ -9,6 +9,21 @@ from src.runtime.resume.state_adapter import (
     PendingTaskKind,
     resolve_pending_task_relation,
 )
+from src.runtime.resume.pending_tasks import (
+    DuplicatePendingTaskError,
+    InvalidPendingTaskRegistrationError,
+    InvalidPendingTaskTransitionError,
+    MultiAgentPendingPayload,
+    PendingInputContract,
+    PendingTaskNotFoundError,
+    PendingTaskCollection,
+    PendingTaskSnapshot,
+    PendingTaskType,
+    PendingTaskVersionConflictError,
+    SkillPendingPayload,
+    ToolPendingPayload,
+    build_pending_task_id,
+)
 
 __all__ = [
     "TaskRelation",
@@ -16,4 +31,17 @@ __all__ = [
     "classify_pending_task_relation",
     "PendingTaskKind",
     "resolve_pending_task_relation",
+    "DuplicatePendingTaskError",
+    "InvalidPendingTaskRegistrationError",
+    "InvalidPendingTaskTransitionError",
+    "MultiAgentPendingPayload",
+    "PendingInputContract",
+    "PendingTaskNotFoundError",
+    "PendingTaskCollection",
+    "PendingTaskSnapshot",
+    "PendingTaskType",
+    "PendingTaskVersionConflictError",
+    "SkillPendingPayload",
+    "ToolPendingPayload",
+    "build_pending_task_id",
 ]

@@ -199,6 +199,18 @@ class DogState(TypedDict, total=False):
     # 无法安全区分新旧任务时为 True，主图会要求用户明确选择。
     task_relation_requires_confirmation: bool
 
+    # 多个等待任务无法唯一匹配时展示给用户的稳定候选列表。
+    task_relation_candidates: List[Dict[str, str]]
+
+    # 尚未绑定到具体等待任务的原始输入，用户选择后再交给目标模块处理。
+    task_relation_unassigned_input: str
+
+    # 当前候选编号选择的意图，resume 表示继续任务，cancel 表示取消任务。
+    task_relation_selection_action: str
+
+    # 统一等待任务注册表的 Checkpoint 友好快照，键为真正唯一的 task_id。
+    pending_tasks: Dict[str, Dict[str, Any]]
+
     # 独立任务关系门卫已经执行时为 True，避免语义路由兼容入口重复分类。
     task_relation_guard_processed: bool
 

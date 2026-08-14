@@ -26,6 +26,7 @@ from src.agents.collaboration import (
 from src.graph.nodes.router_node import (
     semantic_router_node,
 )
+from src.runtime.resume import resolve_pending_task_relation
 
 
 @pytest.mark.asyncio
@@ -74,6 +75,64 @@ async def test_semantic_router_should_not_repeat_processed_task_relation(
     )
 
     assert result["route_decision"]["route"] == "tool_agent"
+
+
+@pytest.mark.asyncio
+async def test_selected_tool_task_should_not_run_multi_agent_resume(
+        monkeypatch,
+) -> None:
+    """
+    验证用户选中工具等待任务后不会让多智能体适配器消费同一输入。
+
+    参数含义：
+        monkeypatch:
+            pytest 提供的临时替换工具，用于检测错误的跨模块恢复调用。
+
+    返回值含义：
+        None。
+    """
+
+    async def fail_if_multi_agent_called(*_args, **_kwargs):
+        """
+        在未选中的多智能体恢复适配器被调用时让测试失败。
+
+        参数含义：
+            *_args、**_kwargs:
+                错误调用传入的参数，本测试不使用。
+
+        返回值含义：
+            无；函数始终抛出 AssertionError。
+        """
+
+        raise AssertionError("未选中的多智能体任务不应消费输入")
+
+    monkeypatch.setattr(
+        router_module,
+        "resolve_multi_agent_resume_input",
+        fail_if_multi_agent_called,
+    )
+
+    result = await semantic_router_node(
+        {
+            "question": "memory",
+            "task_relation_guard_processed": True,
+            "task_relation_decision": {"relation": "resume"},
+            "task_relation_pending_kind": "tool",
+            "tool_agent_clarification_request": {
+                "status": "pending",
+                "missing_fields": ["database_name"],
+                "options": {"database_name": ["memory", "rag"]},
+            },
+            "tool_agent_pending_tool_call": {
+                "name": "sqlite_list_tables",
+                "args": {},
+            },
+            "multi_agent_task_result": {"status": "awaiting_input"},
+        }
+    )
+
+    assert result["next_agent"] == "tool_agent"
+    assert result["tool_calls"][0]["args"]["database_name"] == "memory"
 
 
 @pytest.mark.asyncio
@@ -230,6 +289,11 @@ async def test_semantic_router_adapter_should_restore_pending_tool_argument() ->
     assert result["tool_calls"][0]["args"]["database_name"] == "memory"
     assert result["tool_agent_clarification_request"] is None
     assert result["tool_agent_clarification_resume_ready"] is True
+    pending_task = result["pending_tasks"][
+        "tool:sqlite_list_tables"
+    ]
+    assert pending_task["status"] == "running"
+    assert pending_task["version"] == 2
 
 
 @pytest.mark.asyncio
@@ -270,6 +334,62 @@ async def test_semantic_router_should_keep_partial_clarification_in_tool_agent()
     assert result["tool_agent_clarification_request"]["missing_fields"] == [
         "table_name",
     ]
+    pending_task = result["pending_tasks"][
+        "tool:sqlite_describe_table"
+    ]
+    assert pending_task["status"] == "awaiting_input"
+    assert pending_task["version"] == 1
+
+
+@pytest.mark.asyncio
+async def test_semantic_router_should_stop_when_task_transition_fails() -> None:
+    """
+    测试任务已经处于 running 时不会重复恢复并执行同一个工具。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    state = {
+        "question": "memory",
+        "user_id": "test_user",
+        "session_id": "test_session",
+        "trace_id": "test_trace",
+        "tool_agent_clarification_request": {
+            "status": "pending",
+            "missing_fields": ["database_name"],
+            "options": {"database_name": ["memory", "rag"]},
+            "question": "请选择数据库别名。",
+        },
+        "tool_agent_pending_tool_call": {
+            "name": "sqlite_list_tables",
+            "args": {},
+        },
+    }
+    relation_update = resolve_pending_task_relation(state)["state_update"]
+    pending_tasks = relation_update["pending_tasks"]
+    pending_tasks["tool:sqlite_list_tables"]["status"] = "running"
+    pending_tasks["tool:sqlite_list_tables"]["version"] = 2
+
+    result = await semantic_router_node(
+        {
+            **state,
+            **relation_update,
+            "pending_tasks": pending_tasks,
+            "task_relation_guard_processed": True,
+        }
+    )
+
+    assert result["next_agent"] == "FINISH"
+    assert result["route_decision"]["source"] == (
+        "pending_task_state_guard"
+    )
+    assert result["tool_calls"] == []
+    assert result["need_tool"] is False
+    assert "本轮没有继续执行" in result["final_answer"]
 
 
 @pytest.mark.asyncio
