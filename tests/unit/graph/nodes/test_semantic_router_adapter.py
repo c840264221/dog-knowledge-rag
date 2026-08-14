@@ -393,6 +393,55 @@ async def test_semantic_router_should_stop_when_task_transition_fails() -> None:
 
 
 @pytest.mark.asyncio
+async def test_new_question_should_not_execute_or_cancel_suspended_tool() -> None:
+    """
+    测试新问题正常路由，同时保留并隔离旧 Tool 等待任务。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    old_pending_state = {
+        "question": "请介绍金毛犬。",
+        "user_id": "test_user",
+        "session_id": "test_session",
+        "tool_agent_clarification_request": {
+            "status": "pending",
+            "tool_name": "sqlite_list_tables",
+            "missing_fields": ["database_name"],
+            "options": {"database_name": ["memory", "rag"]},
+            "question": "请选择数据库别名。",
+        },
+        "tool_agent_pending_tool_call": {
+            "name": "sqlite_list_tables",
+            "args": {},
+        },
+    }
+    suspension = resolve_pending_task_relation(old_pending_state)
+
+    result = await semantic_router_node(
+        {
+            "question": "金毛的寿命有多长？",
+            "user_id": "test_user",
+            "session_id": "test_session",
+            "trace_id": "test_trace",
+            "pending_tasks": suspension["state_update"]["pending_tasks"],
+        }
+    )
+
+    assert result["next_agent"] == "dog_knowledge_agent"
+    assert result.get("tool_calls", []) == []
+    assert result["tool_agent_pending_tool_call"] is None
+    pending_task = result["pending_tasks"][
+        "tool:sqlite_list_tables"
+    ]
+    assert pending_task["status"] == "awaiting_input"
+
+
+@pytest.mark.asyncio
 async def test_semantic_router_should_route_multi_agent_resume() -> None:
     """
     测试暂停任务的用户回答会先转换成恢复输入并路由到 multi_agent。

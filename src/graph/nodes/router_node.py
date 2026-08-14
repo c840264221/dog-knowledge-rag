@@ -125,6 +125,16 @@ async def semantic_router_node(
         **dict(multi_agent_update),
     }
     pending_task_update: dict[str, Any] = {}
+    raw_task_relation_decision = resolved_state.get(
+        "task_relation_decision"
+    )
+    selected_task_id = (
+        str(
+            raw_task_relation_decision.get("selected_task_id") or ""
+        ).strip()
+        if isinstance(raw_task_relation_decision, Mapping)
+        else ""
+    )
     try:
         raw_pending_tasks = resolved_state.get("pending_tasks")
         if clarification_resolution.get("action") == "resumed":
@@ -136,6 +146,7 @@ async def semantic_router_node(
                 ),
                 task_kind="tool",
                 target_status="running",
+                task_id=selected_task_id or None,
             )
         if multi_agent_resolution.get("action") in {"resume", "replan"}:
             raw_pending_tasks = transition_pending_task_kind(
@@ -146,6 +157,7 @@ async def semantic_router_node(
                 ),
                 task_kind="multi_agent",
                 target_status="running",
+                task_id=selected_task_id or None,
             )
         if isinstance(raw_pending_tasks, Mapping):
             pending_task_update = {

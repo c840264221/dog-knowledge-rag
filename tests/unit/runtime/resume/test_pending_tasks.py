@@ -187,6 +187,52 @@ def test_transition_should_increment_version_and_update_status() -> None:
     assert collection.require(task.task_id) == running_task
 
 
+def test_refresh_waiting_task_should_update_payload_and_version() -> None:
+    """
+    测试部分补参后可以刷新恢复 Payload，并保持等待输入状态。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    task = _build_tool_task()
+    collection = PendingTaskCollection([task])
+    refreshed_payload = task.payload.model_copy(
+        update={
+            "arguments": {"database_name": "memory"},
+            "missing_fields": ["table_name"],
+            "resume_state": {
+                "tool_agent_pending_tool_call": {
+                    "name": "sqlite_describe_table",
+                    "args": {"database_name": "memory"},
+                }
+            },
+        }
+    )
+    latest_snapshot = task.model_copy(
+        update={
+            "pending_prompt": "请继续补充表名。",
+            "payload": refreshed_payload,
+        }
+    )
+
+    refreshed_task = collection.refresh_waiting_task(
+        latest_snapshot,
+        expected_version=1,
+    )
+
+    assert refreshed_task.status == "awaiting_input"
+    assert refreshed_task.version == 2
+    assert refreshed_task.created_at == task.created_at
+    assert refreshed_task.payload.arguments == {
+        "database_name": "memory"
+    }
+    assert collection.require(task.task_id) == refreshed_task
+
+
 def test_transition_should_reject_stale_expected_version() -> None:
     """
     测试旧版本调用方不能覆盖已经变化的任务状态。

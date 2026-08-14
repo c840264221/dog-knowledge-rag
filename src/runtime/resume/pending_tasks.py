@@ -131,6 +131,7 @@ class ToolPendingPayload(BaseModel):
     arguments: dict[str, Any] = Field(default_factory=dict)
     missing_fields: list[str] = Field(default_factory=list)
     call_id: str | None = Field(default=None, max_length=200)
+    resume_state: dict[str, Any] = Field(default_factory=dict)
 
 
 class SkillPendingPayload(BaseModel):
@@ -142,6 +143,7 @@ class SkillPendingPayload(BaseModel):
     skill_id: str = Field(min_length=1, max_length=200)
     inputs: dict[str, Any] = Field(default_factory=dict)
     target_agent: str = Field(min_length=1, max_length=100)
+    resume_state: dict[str, Any] = Field(default_factory=dict)
 
 
 class MultiAgentPendingPayload(BaseModel):
@@ -152,6 +154,7 @@ class MultiAgentPendingPayload(BaseModel):
     payload_kind: Literal["multi_agent"] = "multi_agent"
     collaboration_id: str = Field(min_length=1, max_length=200)
     waiting_step_ids: list[str] = Field(default_factory=list)
+    resume_state: dict[str, Any] = Field(default_factory=dict)
 
 
 PendingTaskPayload = Annotated[
@@ -401,6 +404,63 @@ class PendingTaskCollection:
         """
 
         return self._tasks.get(str(task_id or "").strip())
+
+    def refresh_waiting_task(
+        self,
+        task: PendingTaskSnapshot,
+        *,
+        expected_version: int,
+    ) -> PendingTaskSnapshot:
+        """
+        刷新等待任务的恢复 Payload，并递增乐观锁版本。
+
+        功能：
+            当用户只补充了部分参数、任务仍处于 awaiting_input 时，用最新
+            业务快照替换旧 Payload。该方法不允许改变 task_id、task_kind
+            或任务状态，避免绕过 transition 状态机。
+
+        参数含义：
+            task:
+                包含最新等待提示、输入契约和恢复 Payload 的任务快照。
+            expected_version:
+                调用方读取旧任务时看到的版本号。
+
+        返回值含义：
+            PendingTaskSnapshot:
+                内容已刷新、版本递增且保留原创建时间的新任务快照。
+        """
+
+        current_task = self.require(task.task_id)
+        if current_task.version != expected_version:
+            raise PendingTaskVersionConflictError(
+                "任务版本冲突: "
+                f"expected={expected_version}, actual={current_task.version}"
+            )
+        if current_task.status != "awaiting_input":
+            raise InvalidPendingTaskTransitionError(
+                "只有 awaiting_input 任务可以刷新恢复快照"
+            )
+        if task.status != "awaiting_input":
+            raise InvalidPendingTaskRegistrationError(
+                "刷新后的任务必须保持 awaiting_input 状态"
+            )
+        if task.task_kind != current_task.task_kind:
+            raise ValueError("刷新任务时不能改变 task_kind")
+        if (
+            task.user_id != current_task.user_id
+            or task.thread_id != current_task.thread_id
+        ):
+            raise ValueError("刷新任务时不能改变用户或会话边界")
+
+        refreshed_task = task.model_copy(
+            update={
+                "version": current_task.version + 1,
+                "created_at": current_task.created_at,
+                "updated_at": _utc_now_iso(),
+            }
+        )
+        self._tasks[task.task_id] = refreshed_task
+        return refreshed_task
 
     def require(self, task_id: str) -> PendingTaskSnapshot:
         """

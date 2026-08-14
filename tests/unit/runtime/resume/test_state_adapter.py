@@ -82,9 +82,9 @@ def _build_multiple_pending_state(question: str) -> dict:
     return state
 
 
-def test_complete_request_should_clear_old_pending_task() -> None:
+def test_new_task_should_suspend_instead_of_cancel_pending_task() -> None:
     """
-    测试完整的新请求会清理旧多智能体等待状态。
+    测试完整的新请求只隔离旧业务字段，并保留统一等待任务快照。
 
     参数含义：
         无。
@@ -105,6 +105,65 @@ def test_complete_request_should_clear_old_pending_task() -> None:
     assert update["multi_agent_resume_action"] == "new_question"
     assert update["question"] == "请使用多个智能体制定新的健康方案。"
     assert update["task_relation_pending_kind"] == "multi_agent"
+    pending_task = update["pending_tasks"]["multi_agent:pending"]
+    assert pending_task["status"] == "awaiting_input"
+    assert pending_task["payload"]["resume_state"][
+        "multi_agent_task_result"
+    ] == {"status": "awaiting_input"}
+
+
+def test_suspended_tool_task_should_resume_from_collection_payload() -> None:
+    """
+    测试新问题隔离旧字段后，下一轮仍能从任务 Payload 恢复 Tool。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    pending_state = {
+        "question": "请介绍金毛犬。",
+        "user_id": "test_user",
+        "session_id": "test_thread",
+        "tool_agent_clarification_request": {
+            "status": "pending",
+            "tool_name": "sqlite_list_tables",
+            "missing_fields": ["database_name"],
+            "options": {"database_name": ["memory", "rag"]},
+            "question": "请选择数据库别名。",
+        },
+        "tool_agent_pending_tool_call": {
+            "name": "sqlite_list_tables",
+            "args": {},
+        },
+    }
+
+    new_task_result = resolve_pending_task_relation(pending_state)
+    suspended_tasks = new_task_result["state_update"]["pending_tasks"]
+    resume_result = resolve_pending_task_relation(
+        {
+            "question": "继续任务：memory",
+            "user_id": "test_user",
+            "session_id": "test_thread",
+            "pending_tasks": suspended_tasks,
+        }
+    )
+    resume_update = resume_result["state_update"]
+
+    assert resume_result["action"] == "resume"
+    assert resume_update["question"] == "memory"
+    assert resume_update["task_relation_decision"][
+        "selected_task_id"
+    ] == "tool:sqlite_list_tables"
+    assert resume_update["tool_agent_pending_tool_call"] == {
+        "name": "sqlite_list_tables",
+        "args": {},
+    }
+    assert resume_update["tool_agent_clarification_request"][
+        "missing_fields"
+    ] == ["database_name"]
 
 
 def test_answer_shaped_input_should_preserve_pending_task() -> None:
