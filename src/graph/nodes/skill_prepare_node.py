@@ -256,6 +256,22 @@ def build_skill_prepare_node(
             )
             if is_resuming_skill:
                 try:
+                    raw_task_relation_decision = state.get(
+                        "task_relation_decision"
+                    )
+                    selected_task_id = (
+                        str(
+                            raw_task_relation_decision.get(
+                                "selected_task_id"
+                            )
+                            or ""
+                        ).strip()
+                        if isinstance(
+                            raw_task_relation_decision,
+                            Mapping,
+                        )
+                        else ""
+                    )
                     update["pending_tasks"] = transition_pending_task_kind(
                         raw_tasks=(
                             state.get("pending_tasks")
@@ -267,6 +283,7 @@ def build_skill_prepare_node(
                         ),
                         task_kind="skill",
                         target_status="running",
+                        task_id=selected_task_id or None,
                     )
                 except (PendingTaskError, TypeError, ValueError):
                     return {

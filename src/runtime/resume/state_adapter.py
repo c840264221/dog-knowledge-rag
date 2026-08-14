@@ -58,6 +58,45 @@ _CANCEL_ALL_INPUTS = {
     "cancel all",
 }
 
+_TOOL_RESUME_STATE_KEYS = (
+    "tool_agent_clarification_request",
+    "tool_agent_pending_tool_call",
+    "tool_agent_pending_original_question",
+    "tool_agent_pending_created_at",
+)
+_MULTI_AGENT_RESUME_STATE_KEYS = (
+    "multi_agent_task_result",
+    "multi_agent_resume_action",
+    "multi_agent_resume_inputs",
+    "multi_agent_step_resume_decisions",
+    "multi_agent_resume_ready",
+    "multi_agent_clarification_extraction",
+    "multi_agent_pending_prompt",
+)
+_SKILL_RESUME_STATE_KEYS = (
+    "skill_runtime_result",
+    "skill_selected_id",
+    "skill_inputs",
+    "skill_status",
+    "skill_pending_prompt",
+    "skill_context",
+    "skill_original_question",
+    "skill_target_agent",
+    "skill_execution_mode",
+    "skill_ignored_input_ids",
+    "skill_degradation_reason",
+    "skill_degradation_user_input",
+    "retrieval_question",
+    "memory_retrieval_text",
+    "pet_profile_recall_result",
+    "pet_profile_suggested_attributes",
+    "skill_required_pet_profile_attributes",
+    "skill_profile_recall_result",
+    "skill_profile_access_decision",
+    "answer_profile_access_decision",
+    "dog_query_understanding_result",
+)
+
 
 def resolve_pending_task_relation(
     state: Mapping[str, Any],
@@ -85,24 +124,32 @@ def resolve_pending_task_relation(
             局部状态。没有等待任务时 action 为 none。
     """
 
-    # 当前真正处于等待状态的业务模块，可能是工具、多智能体或 Skill。
-    pending_kinds = _find_pending_task_kinds(state)
-    if not pending_kinds:
+    # 先恢复统一集合，再把尚未登记的旧业务等待字段增量同步进去。这样即使
+    # 新问题执行时隔离了旧字段，挂起任务仍能从自己的 Payload 中被发现。
+    legacy_pending_kinds = _find_pending_task_kinds(state)
+    legacy_candidates = _build_pending_task_candidates(
+        state=state,
+        pending_kinds=legacy_pending_kinds,
+    )
+    pending_task_collection = _build_pending_task_collection(
+        state=state,
+        pending_kinds=legacy_pending_kinds,
+        candidates=legacy_candidates,
+    )
+    pending_candidates = _build_collection_task_candidates(
+        pending_task_collection
+    )
+    if not pending_candidates:
         return {
             "action": "none",
             "state_update": {},
         }
 
     user_input = str(state.get("question") or "").strip()
-    pending_candidates = _build_pending_task_candidates(
-        state=state,
-        pending_kinds=pending_kinds,
-    )
-    pending_task_collection = _build_pending_task_collection(
-        state=state,
-        pending_kinds=pending_kinds,
-        candidates=pending_candidates,
-    )
+    pending_kinds = [
+        candidate["task_kind"]
+        for candidate in pending_candidates
+    ]
     direct_cancel_candidate = _resolve_direct_cancel_selection(
         current_candidates=pending_candidates,
         user_input=user_input,
@@ -195,6 +242,7 @@ def resolve_pending_task_relation(
             matched_candidates = _find_contextually_matched_candidates(
                 state=state,
                 candidates=pending_candidates,
+                collection=pending_task_collection,
                 initial_decision=initial_decision,
                 skill_runtime=skill_runtime,
             )
@@ -229,8 +277,14 @@ def resolve_pending_task_relation(
                 )
         else:
             pending_kind = pending_kinds[0]
+            single_candidate = pending_candidates[0]
             decision = _resolve_contextual_relation(
-                state=state,
+                state=_build_task_resume_state(
+                    state=state,
+                    task=pending_task_collection.require(
+                        single_candidate["task_id"]
+                    ),
+                ),
                 pending_kind=pending_kind,
                 initial_decision=initial_decision,
                 skill_runtime=skill_runtime,
@@ -238,8 +292,31 @@ def resolve_pending_task_relation(
 
     if len(pending_kinds) == 1 and selected_candidate is None:
         pending_kind = pending_kinds[0]
+        if decision.relation in {"resume", "cancel"}:
+            selected_candidate = pending_candidates[0]
+            decision = decision.model_copy(
+                update={
+                    "selected_task_id": selected_candidate["task_id"],
+                    "candidate_task_ids": [selected_candidate["task_id"]],
+                }
+            )
+
+    selected_resume_update: dict[str, Any] = {}
+    if decision.relation == "resume" and selected_candidate is not None:
+        restored_selected_state = _build_task_resume_state(
+            state={},
+            task=pending_task_collection.require(
+                selected_candidate["task_id"]
+            ),
+        )
+        selected_resume_update = {
+            key: value
+            for key, value in restored_selected_state.items()
+            if state.get(key) != value
+        }
 
     common_update = {
+        **selected_resume_update,
         "question": decision.normalized_input,
         "task_relation_decision": decision.model_dump(mode="python"),
         "task_relation_pending_kind": pending_kind,
@@ -261,7 +338,7 @@ def resolve_pending_task_relation(
         )
         common_update.update(
             _build_skill_degraded_execution_update(
-                state=state,
+                state={**dict(state), **selected_resume_update},
                 normalized_input=decision.normalized_input,
                 raw_user_input=resolved_raw_user_input,
             )
@@ -274,11 +351,6 @@ def resolve_pending_task_relation(
         }
 
     if decision.relation == "new_task":
-        _transition_pending_task_kinds(
-            collection=pending_task_collection,
-            pending_kinds=pending_kinds,
-            target_status="cancelled",
-        )
         return {
             "action": "new_task",
             "state_update": {
@@ -301,16 +373,28 @@ def resolve_pending_task_relation(
             if targeted_cancel
             else _build_all_pending_cleanup_update("cancelled")
         )
-        cancelled_kinds = (
-            [pending_kind]
-            if targeted_cancel
-            else pending_kinds
-        )
-        _transition_pending_task_kinds(
-            collection=pending_task_collection,
-            pending_kinds=cancelled_kinds,
-            target_status="cancelled",
-        )
+        if targeted_cancel:
+            selected_task_id = str(
+                decision.selected_task_id
+                or (
+                    selected_candidate["task_id"]
+                    if selected_candidate is not None
+                    else ""
+                )
+            ).strip()
+            selected_task = pending_task_collection.require(
+                selected_task_id
+            )
+            pending_task_collection.transition(
+                task_id=selected_task.task_id,
+                target_status="cancelled",
+                expected_version=selected_task.version,
+            )
+        else:
+            _transition_all_pending_tasks(
+                collection=pending_task_collection,
+                target_status="cancelled",
+            )
         cancelled_title = (
             selected_candidate["title"]
             if selected_candidate is not None
@@ -345,9 +429,18 @@ def resolve_pending_task_relation(
             ),
         )
     else:
+        selected_pending_prompt = (
+            selected_candidate["pending_prompt"]
+            if selected_candidate is not None
+            else (
+                pending_candidates[0]["pending_prompt"]
+                if len(pending_candidates) == 1
+                else _find_pending_prompt(state, pending_kind)
+            )
+        )
         confirmation_prompt = _build_relation_confirmation_prompt(
             pending_kind=pending_kind,
-            pending_prompt=_find_pending_prompt(state, pending_kind),
+            pending_prompt=selected_pending_prompt,
         )
     return {
         "action": "ambiguous",
@@ -421,9 +514,10 @@ def _build_pending_task_collection(
     把现有业务等待字段同步为统一活动任务集合。
 
     功能：
-        优先恢复 DogState 中已经存在的统一任务快照，只保留仍有旧业务等待
-        字段作为依据的任务；尚未登记的 Tool、Skill 或 Multi-Agent 等待任务
-        会以 awaiting_input 初始状态注册。旧字段仍是迁移期的业务权威来源。
+        优先恢复 DogState 中已经存在的统一任务快照，并保留暂时没有投影到
+        全局业务字段的挂起任务；尚未登记的旧 Tool、Skill 或 Multi-Agent
+        等待状态会注册进集合。已登记任务仍在等待时，使用最新旧业务字段
+        刷新它自己的恢复 Payload。
 
     参数含义：
         state:
@@ -438,17 +532,10 @@ def _build_pending_task_collection(
             与当前旧业务等待状态一致的活动任务集合。
     """
 
-    candidate_ids = {
-        candidate["task_id"]
-        for candidate in candidates
-    }
     raw_tasks = state.get("pending_tasks")
-    filtered_raw_tasks = {
-        str(task_id): raw_task
-        for task_id, raw_task in raw_tasks.items()
-        if str(task_id) in candidate_ids
-    } if isinstance(raw_tasks, Mapping) else {}
-    collection = PendingTaskCollection.from_state(filtered_raw_tasks)
+    collection = PendingTaskCollection.from_state(
+        raw_tasks if isinstance(raw_tasks, Mapping) else None
+    )
     candidates_by_kind = {
         candidate["task_kind"]: candidate
         for candidate in candidates
@@ -456,15 +543,53 @@ def _build_pending_task_collection(
 
     for pending_kind in pending_kinds:
         candidate = candidates_by_kind[pending_kind]
-        if collection.get(candidate["task_id"]) is not None:
+        latest_task = _build_pending_task_snapshot(
+            state=state,
+            candidate=candidate,
+        )
+        existing_task = collection.get(candidate["task_id"])
+        if existing_task is None:
+            collection.register(latest_task)
             continue
-        collection.register(
-            _build_pending_task_snapshot(
-                state=state,
-                candidate=candidate,
-            )
+        if existing_task.status != "awaiting_input":
+            continue
+        if (
+            existing_task.pending_prompt == latest_task.pending_prompt
+            and existing_task.input_contracts == latest_task.input_contracts
+            and existing_task.payload == latest_task.payload
+        ):
+            continue
+        collection.refresh_waiting_task(
+            latest_task,
+            expected_version=existing_task.version,
         )
     return collection
+
+
+def _build_collection_task_candidates(
+    collection: PendingTaskCollection,
+) -> list[dict[str, str]]:
+    """
+    从统一集合构建等待用户选择的活动任务候选。
+
+    参数含义：
+        collection:
+            已恢复并同步旧业务状态的活动任务集合。
+
+    返回值含义：
+        list[dict[str, str]]:
+            只包含 awaiting_input 任务的稳定候选列表。
+    """
+
+    return [
+        {
+            "task_id": task.task_id,
+            "task_kind": task.task_kind,
+            "title": task.title,
+            "pending_prompt": task.pending_prompt,
+        }
+        for task in collection.list_tasks(status="awaiting_input")
+    ]
 
 
 def _build_pending_task_snapshot(
@@ -533,6 +658,10 @@ def _build_pending_task_snapshot(
             ),
             missing_fields=missing_fields,
             call_id=str(call.get("call_id") or "").strip() or None,
+            resume_state=_capture_pending_resume_state(
+                state=state,
+                task_kind="tool",
+            ),
         )
     elif task_kind == "multi_agent":
         raw_result = state.get("multi_agent_task_result")
@@ -547,6 +676,10 @@ def _build_pending_task_snapshot(
                 result.get("collaboration_id") or "pending"
             ),
             waiting_step_ids=_find_multi_agent_waiting_step_ids(result),
+            resume_state=_capture_pending_resume_state(
+                state=state,
+                task_kind="multi_agent",
+            ),
         )
     else:
         contracts = [_build_generic_pending_input_contract(prompt)]
@@ -561,6 +694,10 @@ def _build_pending_task_snapshot(
                 state.get("skill_target_agent")
                 or "dog_knowledge_agent"
             ),
+            resume_state=_capture_pending_resume_state(
+                state=state,
+                task_kind="skill",
+            ),
         )
 
     return PendingTaskSnapshot(
@@ -573,6 +710,108 @@ def _build_pending_task_snapshot(
         input_contracts=contracts,
         payload=payload,
     )
+
+
+def _capture_pending_resume_state(
+    *,
+    state: Mapping[str, Any],
+    task_kind: PendingTaskType,
+) -> dict[str, Any]:
+    """
+    按业务类型白名单捕获等待任务恢复所需的 DogState 字段。
+
+    参数含义：
+        state:
+            当前包含旧业务等待信息的主图状态。
+        task_kind:
+            需要捕获的 tool、skill 或 multi_agent 类型。
+
+    返回值含义：
+        dict[str, Any]:
+            只包含对应业务恢复白名单字段的普通字典。
+    """
+
+    return {
+        key: _copy_resume_value(state[key])
+        for key in _get_resume_state_keys(task_kind)
+        if key in state
+    }
+
+
+def _get_resume_state_keys(
+    task_kind: PendingTaskType,
+) -> tuple[str, ...]:
+    """
+    返回指定任务类型允许持久化和恢复的 DogState 字段白名单。
+
+    参数含义：
+        task_kind:
+            tool、skill 或 multi_agent 任务类型。
+
+    返回值含义：
+        tuple[str, ...]:
+            该业务恢复链路允许使用的固定字段名称。
+    """
+
+    return {
+        "tool": _TOOL_RESUME_STATE_KEYS,
+        "multi_agent": _MULTI_AGENT_RESUME_STATE_KEYS,
+        "skill": _SKILL_RESUME_STATE_KEYS,
+    }[task_kind]
+
+
+def _copy_resume_value(value: Any) -> Any:
+    """
+    复制可写入 Checkpoint 的常用容器，避免复用可变状态引用。
+
+    参数含义：
+        value:
+            DogState 中待保存的标量、字典或列表。
+
+    返回值含义：
+        Any:
+            字典和列表的递归副本；其他不可变值原样返回。
+    """
+
+    if isinstance(value, Mapping):
+        return {
+            str(key): _copy_resume_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_copy_resume_value(item) for item in value]
+    return value
+
+
+def _build_task_resume_state(
+    *,
+    state: Mapping[str, Any],
+    task: PendingTaskSnapshot,
+) -> dict[str, Any]:
+    """
+    把选中任务的类型化 Payload 恢复为本轮业务状态。
+
+    参数含义：
+        state:
+            当前主图状态，作为恢复结果的基础。
+        task:
+            用户明确选择的 awaiting_input 任务。
+
+    返回值含义：
+        dict[str, Any]:
+            合并目标任务恢复白名单字段后的新状态字典。
+    """
+
+    raw_resume_state = task.payload.resume_state
+    allowed_keys = frozenset(_get_resume_state_keys(task.task_kind))
+    return {
+        **dict(state),
+        **{
+            key: _copy_resume_value(value)
+            for key, value in raw_resume_state.items()
+            if key in allowed_keys
+        },
+    }
 
 
 def _build_generic_pending_input_contract(
@@ -629,6 +868,7 @@ def transition_pending_task_kind(
     raw_tasks: Mapping[str, Any] | None,
     task_kind: PendingTaskType,
     target_status: PendingTaskStatus,
+    task_id: str | None = None,
 ) -> dict[str, dict[str, Any]]:
     """
     迁移指定业务类型的唯一活动任务并返回可写入 DogState 的快照。
@@ -640,6 +880,8 @@ def transition_pending_task_kind(
             需要迁移的 tool、skill 或 multi_agent 类型。
         target_status:
             状态机允许的目标状态。
+        task_id:
+            已由任务关系门禁明确选中的任务编号；为空时仅兼容同类型唯一任务。
 
     返回值含义：
         dict[str, dict[str, Any]]:
@@ -647,11 +889,18 @@ def transition_pending_task_kind(
     """
 
     collection = PendingTaskCollection.from_state(raw_tasks)
-    matched_tasks = [
-        task
-        for task in collection.list_tasks()
-        if task.task_kind == task_kind
-    ]
+    normalized_task_id = str(task_id or "").strip()
+    if normalized_task_id:
+        selected_task = collection.require(normalized_task_id)
+        if selected_task.task_kind != task_kind:
+            raise ValueError("选中任务的 task_kind 与业务恢复类型不一致")
+        matched_tasks = [selected_task]
+    else:
+        matched_tasks = [
+            task
+            for task in collection.list_tasks()
+            if task.task_kind == task_kind
+        ]
     if not matched_tasks:
         return collection.to_state()
     if len(matched_tasks) != 1:
@@ -667,20 +916,17 @@ def transition_pending_task_kind(
     return collection.to_state()
 
 
-def _transition_pending_task_kinds(
+def _transition_all_pending_tasks(
     *,
     collection: PendingTaskCollection,
-    pending_kinds: list[PendingTaskKind],
     target_status: PendingTaskStatus,
 ) -> None:
     """
-    迁移一组旧业务类型对应的活动任务。
+    把集合中的全部活动任务迁移到同一个目标状态。
 
     参数含义：
         collection:
             已与旧等待字段同步的活动任务集合。
-        pending_kinds:
-            需要迁移的业务类型列表。
         target_status:
             状态机允许的目标状态。
 
@@ -689,18 +935,12 @@ def _transition_pending_task_kinds(
             成功迁移后原地更新集合；非法迁移时抛出领域异常。
     """
 
-    for pending_kind in pending_kinds:
-        matched_tasks = [
-            task
-            for task in collection.list_tasks()
-            if task.task_kind == pending_kind
-        ]
-        for task in matched_tasks:
-            collection.transition(
-                task_id=task.task_id,
-                target_status=target_status,
-                expected_version=task.version,
-            )
+    for task in collection.list_tasks():
+        collection.transition(
+            task_id=task.task_id,
+            target_status=target_status,
+            expected_version=task.version,
+        )
 
 
 def _resolve_pending_task_identity(
@@ -832,6 +1072,7 @@ def _find_contextually_matched_candidates(
     *,
     state: Mapping[str, Any],
     candidates: list[dict[str, str]],
+    collection: PendingTaskCollection,
     initial_decision: TaskRelationDecision,
     skill_runtime: SkillRuntime | None,
 ) -> list[dict[str, str]]:
@@ -843,6 +1084,8 @@ def _find_contextually_matched_candidates(
             当前主图状态。
         candidates:
             当前所有等待任务候选。
+        collection:
+            保存每个候选独立恢复 Payload 的统一活动任务集合。
         initial_decision:
             通用任务关系分类结果。
         skill_runtime:
@@ -855,8 +1098,12 @@ def _find_contextually_matched_candidates(
 
     matched_candidates: list[dict[str, str]] = []
     for candidate in candidates:
-        contextual_decision = _resolve_contextual_relation(
+        candidate_state = _build_task_resume_state(
             state=state,
+            task=collection.require(candidate["task_id"]),
+        )
+        contextual_decision = _resolve_contextual_relation(
+            state=candidate_state,
             pending_kind=candidate["task_kind"],
             initial_decision=initial_decision,
             skill_runtime=skill_runtime,
