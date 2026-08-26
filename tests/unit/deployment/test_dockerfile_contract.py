@@ -79,6 +79,14 @@ def test_dockerfile_should_copy_only_runtime_source_and_static_data() -> None:
         "COPY --chown=app:app scripts/api_run.py "
         "./scripts/api_run.py"
     ) in dockerfile
+    assert (
+        "COPY --chown=app:app scripts/run_long_task_worker.py "
+        "./scripts/run_long_task_worker.py"
+    ) in dockerfile
+    assert (
+        "COPY --chown=app:app scripts/smoke_long_task_worker.py "
+        "./scripts/smoke_long_task_worker.py"
+    ) in dockerfile
     assert "COPY --chown=app:app data/ ./data/" in dockerfile
     assert "COPY . ." not in dockerfile
     assert "COPY .env" not in dockerfile

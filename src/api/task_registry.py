@@ -16,6 +16,7 @@ ApiTaskStatus = Literal[
     "failed",
 ]
 AgentBusinessStatus = Literal[
+    "running",
     "completed",
     "partial",
     "failed",

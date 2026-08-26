@@ -22,6 +22,7 @@ from src.agents.collaboration import (
 )
 from src.memory.memory_schema import PetProfileRecallResult
 from src.skills import build_default_skill_runtime
+from src.agents.collaboration.workers import build_graph_agent_workers
 
 
 class FakeWorkerPetProfileService:
@@ -54,6 +55,56 @@ class FakeWorkerPetProfileService:
             selected_attributes=["breed", "age_years"],
             reason="Worker 测试档案召回成功。",
         )
+
+
+def test_build_graph_agent_workers_should_share_runtime_dependencies() -> None:
+    """
+    检查共享构建函数是否正确绑定 Agent 名称、Runner 和公共依赖。
+
+    返回值含义：
+        None。
+    """
+
+    async def dog_runner(state: Mapping[str, Any]) -> Mapping[str, Any]:
+        """返回测试使用的狗狗知识 Agent state。"""
+
+        return state
+
+    async def general_runner(
+        state: Mapping[str, Any],
+    ) -> Mapping[str, Any]:
+        """返回测试使用的通用 Agent state。"""
+
+        return state
+
+    skill_runtime = build_default_skill_runtime()
+    profile_service = FakeWorkerPetProfileService()
+    workers = build_graph_agent_workers(
+        runners={
+            "dog_knowledge_agent": dog_runner,
+            "general_agent": general_runner,
+        },
+        skill_runtime=skill_runtime,
+        pet_profile_service=profile_service,
+    )
+
+    assert set(workers) == {
+        "dog_knowledge_agent",
+        "general_agent",
+    }
+    assert workers["dog_knowledge_agent"].agent_name == (
+        "dog_knowledge_agent"
+    )
+    assert workers["dog_knowledge_agent"].runner is dog_runner
+    assert workers["general_agent"].runner is general_runner
+    assert all(
+        worker.skill_runtime is skill_runtime
+        for worker in workers.values()
+    )
+    assert all(
+        worker.pet_profile_service is profile_service
+        for worker in workers.values()
+    )
 
 
 def test_graph_worker_adapter_should_convert_completed_state() -> None:

@@ -103,6 +103,7 @@ async def _handle_http_exception(
     error_codes = {
         401: "AUTHENTICATION_FAILED",
         404: "RESOURCE_NOT_FOUND",
+        409: "RESOURCE_STATE_CONFLICT",
         503: "SERVICE_NOT_READY",
     }
     return _build_error_response(

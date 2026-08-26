@@ -35,6 +35,7 @@ REQUIRED_PRODUCTION_PACKAGES = {
     "pydantic",
     "pydantic-settings",
     "python-dotenv",
+    "redis",
     "sentence-transformers",
     "sqlalchemy",
     "torch",

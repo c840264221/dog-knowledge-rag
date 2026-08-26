@@ -115,3 +115,35 @@ def test_multi_agent_non_timeout_failure_should_use_generic_error() -> None:
         "message": "关键步骤返回失败。",
         "details": {},
     }
+
+
+def test_durable_handoff_should_build_running_business_summary() -> None:
+    """测试持久化交接会生成后台运行状态和白名单任务引用。"""
+
+    summary = build_graph_business_summary(
+        {
+            "multi_agent_task_result": {
+                "status": "running",
+                "metadata": {
+                    "durable_handoff": {
+                        "task_id": "task 001",
+                        "task_version": 1,
+                        "status": "running",
+                        "execution_mode": "durable",
+                        "owner_user_id": "user 001",
+                        "internal_secret": "不能透传",
+                    }
+                },
+            }
+        }
+    )
+
+    assert summary["business_status"] == "running"
+    assert summary["business_error"] is None
+    assert summary["long_task_handoff"] == {
+        "task_id": "task 001",
+        "task_version": 1,
+        "status": "running",
+        "execution_mode": "durable",
+        "owner_user_id": "user 001",
+    }

@@ -16,6 +16,7 @@ from src.agents.collaboration import (
     MultiAgentTaskResult,
     build_multi_agent_entry_node,
 )
+from src.runtime.long_tasks import LongTask
 
 
 class FakeMultiAgentOrchestrator:
@@ -54,6 +55,45 @@ class FakeMultiAgentOrchestrator:
         )
         return self.result
 
+
+class FakeLongTaskApplicationService:
+    """记录主图入口交给长任务应用服务的持久化快照。"""
+
+    def __init__(self, *, fail: bool = False) -> None:
+        """
+        初始化交接记录并配置可选失败行为。
+
+        参数含义：
+            fail:
+                是否模拟 Store 或 Redis Stream 交接失败。
+
+        返回值含义：
+            None。
+        """
+
+        self.fail = fail
+        self.tasks: list[LongTask] = []
+
+    async def handoff_paused_collaboration_task(
+        self,
+        task: LongTask,
+    ) -> LongTask:
+        """
+        记录准备持久化的任务并返回原快照。
+
+        参数含义：
+            task:
+                入口节点适配出的 durable LongTask。
+
+        返回值含义：
+            LongTask:
+                模拟 Store 创建成功后的任务；失败模式抛出 RuntimeError。
+        """
+
+        self.tasks.append(task)
+        if self.fail:
+            raise RuntimeError("模拟长任务交接失败")
+        return task
 
 def build_entry_task_result(
     *,
@@ -99,6 +139,240 @@ def build_entry_task_result(
         status=("awaiting_input" if is_waiting else "completed"),
         task_results=[result],
         final_answer=("综合方案已生成。" if not is_waiting else ""),
+    )
+
+
+def build_budget_paused_entry_result() -> MultiAgentTaskResult:
+    """
+    构建第一批完成、第二步等待后台继续的预算暂停结果。
+
+    返回值含义：
+        MultiAgentTaskResult:
+            可由协作适配器安全转换为 durable LongTask 的运行中结果。
+    """
+
+    plan = AgentTaskPlan(
+        plan_id="entry_paused_plan",
+        objective="读取档案并生成照护建议",
+        status="running",
+        steps=[
+            AgentTaskStep(
+                step_id="profile",
+                title="读取资料",
+                assigned_agent="dog_knowledge_agent",
+                status="completed",
+            ),
+            AgentTaskStep(
+                step_id="answer",
+                title="生成建议",
+                assigned_agent="general_agent",
+                depends_on=["profile"],
+                status="pending",
+            ),
+        ],
+    )
+    return MultiAgentTaskResult(
+        collaboration_id="entry_budget_task",
+        plan=plan,
+        status="running",
+        task_results=[
+            AgentTaskResult(
+                step_id="profile",
+                assigned_agent="dog_knowledge_agent",
+                status="completed",
+                summary="档案读取完成。",
+                metadata={"scheduler_attempt_count": 1},
+            )
+        ],
+        metadata={
+            "execution_paused": {
+                "reason": "inline_budget_exhausted",
+                "elapsed_seconds": 2.0,
+                "budget_seconds": 1.0,
+                "remaining_step_ids": ["answer"],
+            },
+            "awaiting_result_aggregation": False,
+        },
+    )
+
+
+def test_entry_node_should_handoff_budget_paused_result() -> None:
+    """
+    验证入口使用用户会话信息转换、保存并返回后台任务引用。
+
+    返回值含义：
+        None。
+    """
+
+    orchestrator = FakeMultiAgentOrchestrator(
+        build_budget_paused_entry_result()
+    )
+    application_service = FakeLongTaskApplicationService()
+    node = build_multi_agent_entry_node(
+        orchestrator=orchestrator,
+        long_task_application_service=application_service,
+    )
+
+    update = asyncio.run(
+        node(
+            {
+                "question": "根据档案生成照护建议",
+                "user_id": "user_001",
+                "session_id": "thread_001",
+                "trace_id": "trace_001",
+                "multi_agent_resume_action": "none",
+            }
+        )
+    )
+
+    assert len(application_service.tasks) == 1
+    task = application_service.tasks[0]
+    assert task.task_id == "entry_budget_task"
+    assert task.user_id == "user_001"
+    assert task.thread_id == "thread_001"
+    assert task.goal.original_request == "根据档案生成照护建议"
+    assert task.execution_mode == "durable"
+    assert [step.status for step in task.steps] == [
+        "completed",
+        "ready",
+    ]
+    handoff = update["multi_agent_task_result"]["metadata"][
+        "durable_handoff"
+    ]
+    assert handoff == {
+        "task_id": "entry_budget_task",
+        "task_version": 1,
+        "status": "running",
+        "execution_mode": "durable",
+        "owner_user_id": "user_001",
+    }
+    assert update["waiting_user_input"] is False
+    assert "entry_budget_task" in update["final_answer"]
+
+
+def test_entry_node_should_require_handoff_service_for_budget_pause() -> None:
+    """
+    验证预算暂停时没有交接服务不会被伪装成成功响应。
+
+    返回值含义：
+        None。
+    """
+
+    node = build_multi_agent_entry_node(
+        orchestrator=FakeMultiAgentOrchestrator(
+            build_budget_paused_entry_result()
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="交接服务尚未配置"):
+        asyncio.run(
+            node(
+                {
+                    "question": "根据档案生成照护建议",
+                    "user_id": "user_001",
+                    "session_id": "thread_001",
+                    "multi_agent_resume_action": "none",
+                }
+            )
+        )
+
+
+def test_entry_node_should_propagate_handoff_failure() -> None:
+    """
+    验证持久化或发布失败时入口不会返回虚假的后台任务编号。
+
+    返回值含义：
+        None。
+    """
+
+    application_service = FakeLongTaskApplicationService(fail=True)
+    node = build_multi_agent_entry_node(
+        orchestrator=FakeMultiAgentOrchestrator(
+            build_budget_paused_entry_result()
+        ),
+        long_task_application_service=application_service,
+    )
+
+    with pytest.raises(RuntimeError, match="模拟长任务交接失败"):
+        asyncio.run(
+            node(
+                {
+                    "question": "根据档案生成照护建议",
+                    "user_id": "user_001",
+                    "session_id": "thread_001",
+                    "multi_agent_resume_action": "none",
+                }
+            )
+        )
+
+
+def test_entry_node_should_not_handoff_completed_result() -> None:
+    """
+    验证普通完成结果不会调用可选长任务应用服务。
+
+    返回值含义：
+        None。
+    """
+
+    application_service = FakeLongTaskApplicationService()
+    node = build_multi_agent_entry_node(
+        orchestrator=FakeMultiAgentOrchestrator(
+            build_entry_task_result(status="completed")
+        ),
+        long_task_application_service=application_service,
+    )
+
+    update = asyncio.run(
+        node(
+            {
+                "question": "生成综合方案",
+                "multi_agent_resume_action": "none",
+            }
+        )
+    )
+
+    assert application_service.tasks == []
+    assert update["final_answer"] == "综合方案已生成。"
+
+
+def test_resumed_budget_handoff_should_preserve_plan_objective() -> None:
+    """
+    验证恢复回答触发后台交接时不会覆盖任务的完整原始目标。
+
+    返回值含义：
+        None。
+    """
+
+    application_service = FakeLongTaskApplicationService()
+    node = build_multi_agent_entry_node(
+        orchestrator=FakeMultiAgentOrchestrator(
+            build_budget_paused_entry_result()
+        ),
+        long_task_application_service=application_service,
+    )
+    previous_waiting_result = build_entry_task_result(
+        status="awaiting_input"
+    )
+
+    asyncio.run(
+        node(
+            {
+                "question": "允许继续",
+                "user_id": "user_001",
+                "session_id": "thread_001",
+                "multi_agent_resume_action": "resume",
+                "multi_agent_task_result": (
+                    previous_waiting_result.model_dump(mode="python")
+                ),
+                "multi_agent_resume_inputs": {
+                    "profile": "允许继续",
+                },
+            }
+        )
+    )
+
+    assert application_service.tasks[0].goal.original_request == (
+        "读取档案并生成照护建议"
     )
 
 

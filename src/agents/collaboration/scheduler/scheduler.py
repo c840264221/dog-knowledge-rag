@@ -314,6 +314,11 @@ class MultiAgentTaskScheduler:
         maximum_step_attempts:
             单个 Worker 最多尝试执行多少次，包含第一次执行；默认 1 表示
             不重试。
+        inline_budget_seconds:
+            请求内调度允许使用的可选秒数；None 表示不启用批次预算。预算
+            只在一整批 Worker 全部结束后检查，不会中断已经启动的步骤。
+        clock:
+            返回单调时间的函数；生产使用 perf_counter，测试可以注入。
 
     返回值含义：
         MultiAgentTaskScheduler:
@@ -327,6 +332,8 @@ class MultiAgentTaskScheduler:
         maximum_parallel_steps: int = 4,
         step_timeout_seconds: float | None = None,
         maximum_step_attempts: int = 1,
+        inline_budget_seconds: float | None = None,
+        clock: Callable[[], float] = time.perf_counter,
     ) -> None:
         if not workers:
             raise ValueError("任务调度器必须至少注册一个 Worker")
@@ -336,6 +343,10 @@ class MultiAgentTaskScheduler:
             raise ValueError("step_timeout_seconds 必须大于 0 或为 None")
         if maximum_step_attempts < 1:
             raise ValueError("maximum_step_attempts 必须大于 0")
+        if inline_budget_seconds is not None and inline_budget_seconds <= 0:
+            raise ValueError("inline_budget_seconds 必须大于 0 或为 None")
+        if not callable(clock):
+            raise ValueError("clock 必须是可调用对象")
 
         self.workers = {
             str(name).strip(): worker
@@ -353,6 +364,12 @@ class MultiAgentTaskScheduler:
             else None
         )
         self.maximum_step_attempts = maximum_step_attempts
+        self.inline_budget_seconds = (
+            float(inline_budget_seconds)
+            if inline_budget_seconds is not None
+            else None
+        )
+        self._clock = clock
 
     async def execute(
         self,
@@ -641,6 +658,11 @@ class MultiAgentTaskScheduler:
             "preflight_batches": preflight_batches,
             "batch_execution_policy": "strict_preflight",
         }
+        execution_started_at = (
+            self._clock()
+            if self.inline_budget_seconds is not None
+            else None
+        )
 
         while pending_step_ids:
             if (
@@ -805,6 +827,31 @@ class MultiAgentTaskScheduler:
                     awaiting_results=awaiting_results,
                     base_metadata=base_metadata,
                 )
+
+            if (
+                pending_step_ids
+                and self.inline_budget_seconds is not None
+                and execution_started_at is not None
+                and all(
+                    result.status in {"completed", "skipped"}
+                    for result in batch_results
+                )
+            ):
+                elapsed_seconds = max(
+                    0.0,
+                    self._clock() - execution_started_at,
+                )
+                if elapsed_seconds >= self.inline_budget_seconds:
+                    return _build_inline_budget_paused_result(
+                        plan=plan,
+                        multi_agent_task_id=multi_agent_task_id,
+                        results_by_step_id=results_by_step_id,
+                        pending_step_ids=pending_step_ids,
+                        ready_batches=ready_batches,
+                        base_metadata=base_metadata,
+                        elapsed_seconds=elapsed_seconds,
+                        budget_seconds=self.inline_budget_seconds,
+                    )
 
         ordered_results = [
             results_by_step_id[step.step_id]
@@ -1359,6 +1406,100 @@ def _build_cancellation_response_latency_ms(
     if requested_at is None:
         return None
     return round(max(0.0, (time.perf_counter() - requested_at) * 1000), 3)
+
+
+def _build_inline_budget_paused_result(
+    *,
+    plan: AgentTaskPlan,
+    multi_agent_task_id: str,
+    results_by_step_id: Mapping[str, AgentTaskResult],
+    pending_step_ids: set[str],
+    ready_batches: list[list[str]],
+    base_metadata: Mapping[str, Any],
+    elapsed_seconds: float,
+    budget_seconds: float,
+) -> MultiAgentTaskResult:
+    """
+    构建在安全批次边界暂停继续调度的结构化结果。
+
+    功能：
+        保留已经完成的 Step 结果，把未完成 Step 继续保持 pending，并记录
+        请求内预算事实，供下一层决定是否适配为 durable LongTask。本函数
+        不写 Redis，也不直接创建后台任务。
+
+    参数含义：
+        plan:
+            PlannerAgent 生成的原始任务计划。
+        multi_agent_task_id:
+            当前整次多 Agent 协作任务编号。
+        results_by_step_id:
+            预算耗尽前已经完成的步骤结果。
+        pending_step_ids:
+            尚未启动或尚未产生结果的步骤编号。
+        ready_batches:
+            当前请求内已经实际启动的批次记录。
+        base_metadata:
+            需要继续保留的 Scheduler 元数据。
+        elapsed_seconds:
+            当前调度阶段已经消耗的非负秒数。
+        budget_seconds:
+            本次请求内调度允许使用的秒数。
+
+    返回值含义：
+        MultiAgentTaskResult:
+            status 为 running、携带 execution_paused 事实且不能进入结果聚合
+            的中间结果。
+    """
+
+    updated_plan = _build_updated_plan(
+        plan=plan,
+        results_by_step_id=results_by_step_id,
+        status="running",
+    )
+    ordered_results = [
+        results_by_step_id[step.step_id]
+        for step in plan.steps
+        if step.step_id in results_by_step_id
+    ]
+    ordered_pending_step_ids = [
+        step.step_id
+        for step in plan.steps
+        if step.step_id in pending_step_ids
+    ]
+    pause_facts = {
+        "reason": "inline_budget_exhausted",
+        "elapsed_seconds": round(max(0.0, elapsed_seconds), 6),
+        "budget_seconds": budget_seconds,
+        "remaining_step_ids": ordered_pending_step_ids,
+    }
+    _log_scheduler_event(
+        level="info",
+        event="multi_agent_scheduling_paused_at_batch_boundary",
+        payload={
+            "multi_agent_task_id": multi_agent_task_id,
+            "plan_id": plan.plan_id,
+            **pause_facts,
+            "ready_batches": ready_batches,
+        },
+    )
+    return MultiAgentTaskResult(
+        collaboration_id=multi_agent_task_id,
+        plan=updated_plan,
+        status="running",
+        task_results=ordered_results,
+        metadata={
+            **base_metadata,
+            "scheduler": "MultiAgentTaskScheduler",
+            "ready_batches": ready_batches,
+            "worker_step_trace": _build_worker_step_trace(
+                plan=updated_plan,
+                results_by_step_id=results_by_step_id,
+                ready_batches=ready_batches,
+            ),
+            "execution_paused": pause_facts,
+            "awaiting_result_aggregation": False,
+        },
+    )
 
 
 def _build_worker_step_trace(

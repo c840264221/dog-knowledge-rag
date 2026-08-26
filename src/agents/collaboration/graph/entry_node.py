@@ -11,6 +11,9 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import Any, Awaitable
 
+from src.agents.collaboration.adapters import (
+    adapt_paused_collaboration_result_to_long_task,
+)
 from src.agents.collaboration.contracts import MultiAgentTaskResult
 from src.agents.collaboration.scheduler import (
     MultiAgentTaskCancellationRegistry,
@@ -30,6 +33,7 @@ def build_multi_agent_entry_node(
     *,
     orchestrator: Any,
     cancellation_registry: MultiAgentTaskCancellationRegistry | None = None,
+    long_task_application_service: Any | None = None,
 ) -> MultiAgentEntryNode:
     """
     构建注入 MultiAgentOrchestrator 的主图异步节点。
@@ -43,6 +47,9 @@ def build_multi_agent_entry_node(
             提供 run 和 resume 方法的多 Agent 总编排器。
         cancellation_registry:
             可选的运行中任务取消登记表；提供后会为每次执行登记取消令牌。
+        long_task_application_service:
+            可选长任务应用服务；预算暂停结果需要通过它创建 durable 快照
+            并发布后台执行通知。普通请求不会使用该依赖。
 
     返回值含义：
         MultiAgentEntryNode:
@@ -55,6 +62,16 @@ def build_multi_agent_entry_node(
         raise ValueError("orchestrator 缺少 run 方法")
     if not callable(getattr(orchestrator, "resume", None)):
         raise ValueError("orchestrator 缺少 resume 方法")
+    if long_task_application_service is not None and not callable(
+        getattr(
+            long_task_application_service,
+            "handoff_paused_collaboration_task",
+            None,
+        )
+    ):
+        raise ValueError(
+            "long_task_application_service 缺少协作交接方法"
+        )
 
     async def multi_agent_entry_node(
         state: DogState,
@@ -159,9 +176,165 @@ def build_multi_agent_entry_node(
                 ),
             )
 
+        if _is_inline_budget_paused(result):
+            return await _handoff_paused_collaboration_result(
+                task_result=result,
+                state=state,
+                resume_action=action,
+                long_task_application_service=(
+                    long_task_application_service
+                ),
+            )
         return build_multi_agent_state_update(result)
 
     return multi_agent_entry_node
+
+
+def _is_inline_budget_paused(
+    task_result: MultiAgentTaskResult,
+) -> bool:
+    """
+    判断协作结果是否位于请求内时间预算耗尽的批次边界。
+
+    参数含义：
+        task_result:
+            Orchestrator 返回的最新多智能体任务结果。
+
+    返回值含义：
+        bool:
+            结果仍为 running 且暂停原因为 inline_budget_exhausted 时为 True。
+    """
+
+    pause_facts = task_result.metadata.get("execution_paused")
+    return (
+        task_result.status == "running"
+        and isinstance(pause_facts, Mapping)
+        and pause_facts.get("reason") == "inline_budget_exhausted"
+    )
+
+
+async def _handoff_paused_collaboration_result(
+    *,
+    task_result: MultiAgentTaskResult,
+    state: Mapping[str, Any],
+    resume_action: str,
+    long_task_application_service: Any | None,
+) -> dict[str, Any]:
+    """
+    把预算暂停结果转换为 LongTask、完成内部交接并构建主图更新。
+
+    参数含义：
+        task_result:
+            已在完整批次边界暂停的多智能体结果。
+        state:
+            提供用户、会话和原始问题的当前 DogState。
+        resume_action:
+            本轮是新任务、恢复还是重新规划，用于选择正确的原始请求。
+        long_task_application_service:
+            提供 durable 快照创建和 Redis Stream 发布能力的应用服务。
+
+    返回值含义：
+        dict[str, Any]:
+            包含后台任务引用和用户可见提示的主图局部状态。
+    """
+
+    if long_task_application_service is None:
+        raise RuntimeError("多智能体长任务交接服务尚未配置")
+    original_request = _resolve_handoff_original_request(
+        state=state,
+        task_result=task_result,
+        resume_action=resume_action,
+    )
+    long_task = adapt_paused_collaboration_result_to_long_task(
+        task_result=task_result,
+        user_id=str(state.get("user_id") or "").strip(),
+        thread_id=str(state.get("session_id") or "").strip(),
+        original_request=original_request,
+    )
+    saved_task = await (
+        long_task_application_service.handoff_paused_collaboration_task(
+            long_task
+        )
+    )
+    return _build_durable_handoff_state_update(
+        task_result=task_result,
+        saved_task=saved_task,
+    )
+
+
+def _resolve_handoff_original_request(
+    *,
+    state: Mapping[str, Any],
+    task_result: MultiAgentTaskResult,
+    resume_action: str,
+) -> str:
+    """
+    选择交接快照中应长期保留的原始用户目标。
+
+    参数含义：
+        state:
+            当前主图状态，其中 question 可能是原始问题或恢复回答。
+        task_result:
+            包含规范化 Plan 目标的预算暂停结果。
+        resume_action:
+            当前是否由 resume 或 replan 路径产生暂停。
+
+    返回值含义：
+        str:
+            新请求优先使用本轮 question；恢复路径使用 Plan objective，避免
+            把“允许继续”等简短回答误存成完整任务目标。
+    """
+
+    if resume_action in {"resume", "replan"}:
+        return task_result.plan.objective
+    return str(state.get("question") or "").strip()
+
+
+def _build_durable_handoff_state_update(
+    *,
+    task_result: MultiAgentTaskResult,
+    saved_task: Any,
+) -> dict[str, Any]:
+    """
+    构建已转入后台执行后的主图局部状态。
+
+    参数含义：
+        task_result:
+            请求内暂停的多智能体结果，用于保留计划和已完成历史。
+        saved_task:
+            应用服务已经写入 Store 的 LongTask 快照。
+
+    返回值含义：
+        dict[str, Any]:
+            清空人工恢复字段、携带 durable_handoff 引用和用户提示的状态。
+    """
+
+    result_data = task_result.model_dump(mode="python")
+    metadata = dict(result_data.get("metadata") or {})
+    metadata["durable_handoff"] = {
+        "task_id": saved_task.task_id,
+        "task_version": saved_task.version,
+        "status": saved_task.status,
+        "execution_mode": saved_task.execution_mode,
+        "owner_user_id": saved_task.user_id,
+    }
+    result_data["metadata"] = metadata
+    return {
+        "multi_agent_task_result": result_data,
+        "multi_agent_resume_action": "none",
+        "multi_agent_resume_inputs": {},
+        "multi_agent_step_resume_decisions": {},
+        "multi_agent_resume_ready": False,
+        "multi_agent_clarification_extraction": {},
+        "multi_agent_pending_prompt": "",
+        "pending_prompt": "",
+        "waiting_user_input": False,
+        "current_agent": "multi_agent",
+        "final_answer": (
+            "任务已转入后台执行，可使用任务编号 "
+            f"{saved_task.task_id} 查询状态。"
+        ),
+    }
 
 
 def _build_worker_runtime_context(

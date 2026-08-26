@@ -3,12 +3,14 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
+from urllib.parse import quote
 from uuid import uuid4
 
 from src.agents.collaboration.scheduler import build_multi_agent_task_id
 from src.api.schemas import (
     CancellationResponse,
     GraphRunResponse,
+    LongTaskHandoffResponse,
     TaskStatusResponse,
 )
 from src.api.task_registry import ApiTaskRegistry
@@ -433,13 +435,21 @@ class AgentApiService:
                 不暴露内部 dataclass 的稳定 HTTP 响应。
         """
 
+        result_metadata = dict(result.metadata)
+        raw_long_task_handoff = result_metadata.pop(
+            "long_task_handoff",
+            None,
+        )
         common_fields = {
             "session_id": session_id,
             "thread_id": result.thread_id,
             "trace_id": trace_id,
             "multi_agent_task_id": build_multi_agent_task_id(trace_id),
             "checkpoint_ns": result.checkpoint_ns,
-            "metadata": dict(result.metadata),
+            "metadata": result_metadata,
+            "long_task": _build_long_task_handoff_response(
+                raw_long_task_handoff
+            ),
         }
         if isinstance(result, GraphFinalResult):
             business_status = str(
@@ -462,3 +472,45 @@ class AgentApiService:
                 **common_fields,
             )
         raise TypeError("主图返回了不支持的结果类型")
+
+
+def _build_long_task_handoff_response(
+    raw_handoff: Any,
+) -> LongTaskHandoffResponse | None:
+    """
+    把主图内部交接摘要转换成前端可直接使用的长任务引用。
+
+    参数含义：
+        raw_handoff:
+            GraphRunResult metadata 中经过主图白名单提取的内部摘要。
+
+    返回值含义：
+        LongTaskHandoffResponse | None:
+            包含查询和 SSE 相对地址的公开对象；没有交接时返回 None。
+    """
+
+    if not isinstance(raw_handoff, dict):
+        return None
+    task_id = str(raw_handoff.get("task_id") or "").strip()
+    owner_user_id = str(
+        raw_handoff.get("owner_user_id") or ""
+    ).strip()
+    if not task_id or not owner_user_id:
+        return None
+    encoded_task_id = quote(task_id, safe="")
+    encoded_user_id = quote(owner_user_id, safe="")
+    status_url = (
+        f"/v1/long-tasks/{encoded_task_id}"
+        f"?user_id={encoded_user_id}"
+    )
+    return LongTaskHandoffResponse(
+        task_id=task_id,
+        task_version=raw_handoff.get("task_version"),
+        status=raw_handoff.get("status"),
+        execution_mode=raw_handoff.get("execution_mode"),
+        status_url=status_url,
+        events_url=(
+            f"/v1/long-tasks/{encoded_task_id}/events"
+            f"?user_id={encoded_user_id}"
+        ),
+    )

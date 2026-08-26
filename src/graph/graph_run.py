@@ -1813,7 +1813,7 @@ def build_graph_business_summary(
     功能：
         区分“主图已经执行结束”和“用户业务任务是否成功”。普通 Agent
         默认返回 completed；多 Agent 结果会透传 completed、partial、
-        failed 或 cancelled，并为失败、取消构建精简结构化原因。
+        failed、cancelled 或后台 running，并为失败、取消构建精简原因。
 
     参数：
         state:
@@ -1834,6 +1834,12 @@ def build_graph_business_summary(
 
     raw_task_result = state.get("multi_agent_task_result")
     if not isinstance(raw_task_result, Mapping) or not raw_task_result:
+        return summary
+
+    durable_handoff = _extract_durable_handoff_summary(raw_task_result)
+    if durable_handoff is not None:
+        summary["business_status"] = "running"
+        summary["long_task_handoff"] = durable_handoff
         return summary
 
     raw_status = str(raw_task_result.get("status") or "").strip()
@@ -1860,6 +1866,60 @@ def build_graph_business_summary(
             "details": {},
         }
     return summary
+
+
+def _extract_durable_handoff_summary(
+    task_result: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """
+    从多智能体结果中提取已完成持久化交接的最小内部摘要。
+
+    功能：
+        只接受 running、durable、正版本和完整归属信息，避免把任意任务
+        metadata 原样透传到 API；无合法交接时返回 None。
+
+    参数含义：
+        task_result:
+            DogState 中保存的可序列化 MultiAgentTaskResult。
+
+    返回值含义：
+        dict[str, Any] | None:
+            供 API 层生成公开路径的内部交接摘要；不存在时返回 None。
+    """
+
+    raw_metadata = task_result.get("metadata")
+    if not isinstance(raw_metadata, Mapping):
+        return None
+    raw_handoff = raw_metadata.get("durable_handoff")
+    if not isinstance(raw_handoff, Mapping):
+        return None
+
+    task_id = str(raw_handoff.get("task_id") or "").strip()
+    owner_user_id = str(
+        raw_handoff.get("owner_user_id") or ""
+    ).strip()
+    task_version = raw_handoff.get("task_version")
+    status = str(raw_handoff.get("status") or "").strip()
+    execution_mode = str(
+        raw_handoff.get("execution_mode") or ""
+    ).strip()
+    if (
+        not task_id
+        or not owner_user_id
+        or not isinstance(task_version, int)
+        or isinstance(task_version, bool)
+        or task_version < 1
+        or status != "running"
+        or execution_mode != "durable"
+    ):
+        return None
+    return {
+        "task_id": task_id,
+        "task_version": task_version,
+        "status": status,
+        "execution_mode": execution_mode,
+        "owner_user_id": owner_user_id,
+    }
 
 
 def _build_multi_agent_failure_summary(

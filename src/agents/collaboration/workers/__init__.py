@@ -9,6 +9,7 @@ from src.agents.collaboration.workers.graph_agent_worker_adapter import (
     AgentStateBuilder,
     AgentStateRunner,
     GraphAgentWorkerAdapter,
+    build_graph_agent_workers,
     build_default_agent_state,
 )
 
@@ -16,5 +17,6 @@ __all__ = [
     "AgentStateBuilder",
     "AgentStateRunner",
     "GraphAgentWorkerAdapter",
+    "build_graph_agent_workers",
     "build_default_agent_state",
 ]

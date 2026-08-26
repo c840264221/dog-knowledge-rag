@@ -15,9 +15,16 @@ from src.api.middleware import (
 )
 from src.api.routes.chat import router as chat_router
 from src.api.routes.health import router as health_router
+from src.api.routes.long_tasks import router as long_tasks_router
 from src.api.services import AgentApiService
+from src.api.long_task_services import LongTaskApiQueryService
 from src.api.task_registry import ApiTaskRegistry
 from src.runtime.container.init import container as default_container
+from src.runtime.long_tasks.store import RedisLongTaskStore
+from src.runtime.long_tasks.application_service import (
+    LongTaskApplicationService,
+)
+from src.runtime.long_tasks.stream import RedisLongTaskStream
 from src.settings import settings
 from src.settings.api import ApiSettings
 
@@ -26,6 +33,8 @@ def create_app(
     *,
     runtime_container: Any = default_container,
     agent_api_service: AgentApiService | None = None,
+    long_task_query_service: LongTaskApiQueryService | None = None,
+    long_task_application_service: LongTaskApplicationService | None = None,
     api_settings: ApiSettings | None = None,
 ) -> FastAPI:
     """
@@ -40,6 +49,12 @@ def create_app(
             管理 LLM、RAG、Checkpoint 和 GraphRuntimeService 的运行时容器。
         agent_api_service:
             可选 API 服务替身；未提供时使用容器中的 graph_runtime 创建真实服务。
+        long_task_query_service:
+            可选长任务查询服务替身；未提供时尝试复用容器中的 RedisProvider
+            构建真实只读服务，Redis 未启用时保持不可用。
+        long_task_application_service:
+            可选长任务命令服务替身；未提供时复用 RedisProvider 构建带 Store
+            和 Stream Publisher 的真实应用服务。
         api_settings:
             可选 API 配置；未提供时使用全局 settings.api。测试可以注入开启
             或关闭认证的确定性配置。
@@ -71,6 +86,14 @@ def create_app(
                 graph_runtime=runtime_container.get("graph_runtime"),
                 task_registry=ApiTaskRegistry(),
             )
+        )
+        app.state.long_task_query_service = (
+            long_task_query_service
+            or _build_long_task_query_service(runtime_container)
+        )
+        app.state.long_task_application_service = (
+            long_task_application_service
+            or _build_long_task_application_service(runtime_container)
         )
         app.state.ready = True
         try:
@@ -135,7 +158,64 @@ def create_app(
     register_exception_handlers(application)
     application.include_router(health_router)
     application.include_router(chat_router)
+    application.include_router(long_tasks_router)
     return application
+
+
+def _build_long_task_query_service(
+    runtime_container: Any,
+) -> LongTaskApiQueryService | None:
+    """
+    使用容器中已经启动的 RedisProvider 装配长任务查询服务。
+
+    参数含义：
+        runtime_container:
+            当前 FastAPI 应用共享的运行时容器或测试替身。
+
+    返回值含义：
+        LongTaskApiQueryService | None:
+            Redis 已注册且启用时返回真实查询服务；测试替身没有 Redis 或
+            Redis 配置关闭时返回 None，由依赖层对查询请求返回 HTTP 503。
+    """
+
+    try:
+        redis_provider = runtime_container.get("redis")
+    except (AttributeError, ValueError):
+        return None
+    if not redis_provider.enabled:
+        return None
+    return LongTaskApiQueryService(
+        RedisLongTaskStore(redis_provider.client)
+    )
+
+
+def _build_long_task_application_service(
+    runtime_container: Any,
+) -> LongTaskApplicationService | None:
+    """
+    使用容器中已经启动的 RedisProvider 装配长任务命令服务。
+
+    参数含义：
+        runtime_container:
+            当前 FastAPI 应用共享的运行时容器或测试替身。
+
+    返回值含义：
+        LongTaskApplicationService | None:
+            Redis 已启用时返回同时持有 Store 和 Stream Publisher 的应用
+            服务；依赖不可用时返回 None，由 API 依赖层返回 HTTP 503。
+    """
+
+    try:
+        redis_provider = runtime_container.get("redis")
+    except (AttributeError, ValueError):
+        return None
+    if not redis_provider.enabled:
+        return None
+    redis_client = redis_provider.client
+    return LongTaskApplicationService(
+        RedisLongTaskStore(redis_client),
+        queue_publisher=RedisLongTaskStream(redis_client),
+    )
 
 
 app = create_app()
