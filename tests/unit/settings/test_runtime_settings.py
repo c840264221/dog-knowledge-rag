@@ -29,6 +29,7 @@ def test_runtime_settings_should_provide_multi_agent_defaults() -> None:
     assert runtime_settings.multi_agent_maximum_parallel_steps == 4
     assert runtime_settings.multi_agent_step_timeout_seconds == 120.0
     assert runtime_settings.multi_agent_maximum_step_attempts == 2
+    assert runtime_settings.multi_agent_inline_budget_seconds == 0.0
 
 
 @pytest.mark.parametrize(
@@ -58,3 +59,30 @@ def test_runtime_settings_should_reject_non_positive_multi_agent_values(
 
     with pytest.raises(ValidationError):
         RuntimeSettings(**{field_name: invalid_value})
+
+
+def test_runtime_settings_should_accept_positive_inline_budget() -> None:
+    """
+    检查正数软预算可以通过环境配置契约进入 Runtime Settings。
+
+    返回值含义：
+        None。
+    """
+
+    runtime_settings = RuntimeSettings(
+        multi_agent_inline_budget_seconds=2.5,
+    )
+
+    assert runtime_settings.multi_agent_inline_budget_seconds == 2.5
+
+
+def test_runtime_settings_should_reject_negative_inline_budget() -> None:
+    """
+    检查负数软预算会被 Pydantic 配置契约拒绝。
+
+    返回值含义：
+        None。
+    """
+
+    with pytest.raises(ValidationError):
+        RuntimeSettings(multi_agent_inline_budget_seconds=-0.1)

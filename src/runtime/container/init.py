@@ -37,6 +37,7 @@ from src.runtime.container.providers.sqlite_mcp_provider import (
 from src.runtime.container.providers.retriever_provider import (
     RetrieverProvider
 )
+from src.runtime.container.providers.redis_provider import RedisProvider
 
 from src.settings import settings
 
@@ -46,6 +47,11 @@ container = RuntimeContainer()
 # =========================
 # 注册 Provider
 # =========================
+
+container.register(
+    "redis",
+    RedisProvider(settings.redis),
+)
 
 container.register(
 
@@ -154,6 +160,9 @@ container.register(
         ),
         sqlite_mcp_provider=(
             container.get("sqlite_mcp")
+        ),
+        redis_provider=(
+            container.get("redis")
         ),
     )
 )

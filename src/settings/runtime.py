@@ -45,6 +45,9 @@ class RuntimeSettings(BaseAppSettings):
     # 单个 Worker 总尝试次数，包含第一次执行
     multi_agent_maximum_step_attempts: int = Field(default=2, ge=1)
 
+    # 请求内多 Agent 调度软预算秒数；0 表示关闭自动后台交接
+    multi_agent_inline_budget_seconds: float = Field(default=0.0, ge=0)
+
     # =========================
     # Middleware
     # =========================

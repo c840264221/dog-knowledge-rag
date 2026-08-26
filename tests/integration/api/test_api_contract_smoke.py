@@ -202,6 +202,9 @@ def test_api_openapi_and_route_contract_smoke() -> None:
             "/v1/chat/resume",
             "/v1/multi-agent/tasks/{multi_agent_task_id}/cancel",
             "/v1/tasks/{multi_agent_task_id}",
+            "/v1/long-tasks/{task_id}",
+            "/v1/long-tasks/{task_id}/events",
+            "/v1/long-tasks/{task_id}/interactions/{interaction_id}/responses",
         }
         assert expected_paths <= set(openapi["paths"])
         graph_response_schema = openapi["components"]["schemas"][

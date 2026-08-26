@@ -15,6 +15,7 @@ from src.settings.observability import ObservabilitySettings
 from src.settings.mcp import McpSettings
 from src.settings.api import ApiSettings
 from src.settings.pet_profile_access import PetProfileAccessSettings
+from src.settings.redis import RedisSettings
 
 
 class Settings:
@@ -51,6 +52,8 @@ class Settings:
         self.api = ApiSettings()
 
         self.pet_profile_access = PetProfileAccessSettings()
+
+        self.redis = RedisSettings()
 
 
 settings = Settings()

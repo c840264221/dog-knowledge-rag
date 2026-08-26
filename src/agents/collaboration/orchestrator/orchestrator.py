@@ -221,6 +221,15 @@ class MultiAgentOrchestrator:
                 stage_started_at=stage_started_at,
             )
 
+        if _is_inline_budget_paused(scheduled_result):
+            paused_result = _attach_orchestration_metadata(
+                task_result=scheduled_result,
+                visited_stages=visited_stages,
+                stage_metrics=stage_metrics,
+            )
+            _log_orchestration_finished(paused_result)
+            return paused_result
+
         if scheduled_result.status in {
             "awaiting_input",
             "failed",
@@ -351,6 +360,15 @@ class MultiAgentOrchestrator:
                 stage_started_at=stage_started_at,
             )
 
+        if _is_inline_budget_paused(scheduled_result):
+            paused_result = _attach_orchestration_metadata(
+                task_result=scheduled_result,
+                visited_stages=visited_stages,
+                stage_metrics=stage_metrics,
+            )
+            _log_orchestration_finished(paused_result)
+            return paused_result
+
         if scheduled_result.status in {
             "awaiting_input",
             "failed",
@@ -452,6 +470,29 @@ def _attach_worker_runtime_context(
             **runtime_identity,
         }
     return type(plan).model_validate(plan_data)
+
+
+def _is_inline_budget_paused(
+    task_result: MultiAgentTaskResult,
+) -> bool:
+    """
+    判断 Scheduler 是否在完整批次结束后因请求内预算暂停。
+
+    参数含义：
+        task_result:
+            Scheduler 返回的多 Agent 中间结果。
+
+    返回值含义：
+        bool:
+            execution_paused.reason 为 inline_budget_exhausted 时返回 True，
+            其他正常、等待、失败或取消结果返回 False。
+    """
+
+    pause_facts = task_result.metadata.get("execution_paused")
+    return bool(
+        isinstance(pause_facts, Mapping)
+        and pause_facts.get("reason") == "inline_budget_exhausted"
+    )
 
 
 def _attach_orchestration_metadata(

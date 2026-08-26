@@ -1,3 +1,5 @@
+from collections.abc import Mapping
+
 from langgraph.checkpoint.sqlite.aio import (
     AsyncSqliteSaver,
 )
@@ -70,12 +72,18 @@ from src.agents.collaboration.planner import PlannerAgent
 from src.agents.collaboration.scheduler import (
     MultiAgentTaskCancellationRegistry,
     MultiAgentTaskScheduler,
+    WorkerHandler,
 )
-from src.agents.collaboration.workers import GraphAgentWorkerAdapter
+from src.agents.collaboration.workers import build_graph_agent_workers
 from src.agents.collaboration.adapters import (
     build_default_multi_agent_clarification_field_resolver,
 )
 from src.skills.default_catalog import build_default_skill_runtime
+from src.runtime.long_tasks.application_service import (
+    LongTaskApplicationService,
+)
+from src.runtime.long_tasks.store import RedisLongTaskStore
+from src.runtime.long_tasks.stream import RedisLongTaskStream
 
 
 def _build_multi_agent_scheduler_options() -> dict[str, int | float | None]:
@@ -108,6 +116,11 @@ def _build_multi_agent_scheduler_options() -> dict[str, int | float | None]:
             runtime_settings.multi_agent_maximum_step_attempts
             if runtime_settings.enable_retry
             else 1
+        ),
+        "inline_budget_seconds": (
+            runtime_settings.multi_agent_inline_budget_seconds
+            if runtime_settings.multi_agent_inline_budget_seconds > 0
+            else None
         ),
     }
 
@@ -149,6 +162,7 @@ class GraphRuntimeService:
             retriever_provider=None,
             reranker_provider=None,
             sqlite_mcp_provider=None,
+            redis_provider=None,
             tool_parser=None,
     ):
         """
@@ -183,6 +197,10 @@ class GraphRuntimeService:
                 SQLiteMcpProvider 实例。
                 中文释义：统一管理 SQLite MCP 工具定义和工具客户端能力。
 
+            redis_provider:
+                RedisProvider 实例。Redis 启用时为多智能体预算暂停交接提供
+                共享客户端；禁用或为空时普通请求保持原行为。
+
             tool_parser:
                 可选 ToolAgent Parser（工具解析器）。
                 默认使用 llm_provider 构建真实 LLM 解析链；测试或 Smoke 可注入固定解析器。
@@ -204,6 +222,8 @@ class GraphRuntimeService:
 
         self.sqlite_mcp_provider = sqlite_mcp_provider
 
+        self.redis_provider = redis_provider
+
         self.tool_parser = tool_parser
 
         self._graph = None
@@ -215,6 +235,7 @@ class GraphRuntimeService:
         self._multi_agent_cancellation_registry = (
             MultiAgentTaskCancellationRegistry()
         )
+        self._collaboration_workers: dict[str, WorkerHandler] = {}
 
     def cancel_multi_agent_task(self, multi_agent_task_id: str) -> bool:
         """
@@ -332,6 +353,25 @@ class GraphRuntimeService:
             )
 
         return self._graph
+
+    @property
+    def collaboration_workers(self) -> Mapping[str, WorkerHandler]:
+        """
+        返回主图启动时创建的标准多 Agent Worker 映射。
+
+        功能：
+            让独立长任务 Runtime 复用与短任务 Scheduler 相同的 Worker
+            创建结果；返回浅复制，避免外层修改主图内部注册表。
+
+        返回值含义：
+            Mapping[str, WorkerHandler]:
+                Agent 名称到标准 Worker 的只读语义映射。主图尚未构建时
+                抛出 RuntimeError。
+        """
+
+        if not self._collaboration_workers:
+            raise RuntimeError("多 Agent Worker 尚未完成构建")
+        return dict(self._collaboration_workers)
 
     async def _build_graph(self):
         """
@@ -608,21 +648,17 @@ class GraphRuntimeService:
             if self.memory_provider is not None
             else None
         )
-        scheduler = MultiAgentTaskScheduler(
-            workers={
-                "dog_knowledge_agent": GraphAgentWorkerAdapter(
-                    agent_name="dog_knowledge_agent",
-                    runner=dog_knowledge_agent.ainvoke,
-                    skill_runtime=skill_runtime,
-                    pet_profile_service=pet_profile_service,
-                ),
-                "general_agent": GraphAgentWorkerAdapter(
-                    agent_name="general_agent",
-                    runner=general_agent.ainvoke,
-                    skill_runtime=skill_runtime,
-                    pet_profile_service=pet_profile_service,
-                ),
+        collaboration_workers = build_graph_agent_workers(
+            runners={
+                "dog_knowledge_agent": dog_knowledge_agent.ainvoke,
+                "general_agent": general_agent.ainvoke,
             },
+            skill_runtime=skill_runtime,
+            pet_profile_service=pet_profile_service,
+        )
+        self._collaboration_workers = collaboration_workers
+        scheduler = MultiAgentTaskScheduler(
+            workers=collaboration_workers,
             **_build_multi_agent_scheduler_options(),
         )
         result_aggregator = ResultAggregator(
@@ -638,6 +674,36 @@ class GraphRuntimeService:
             cancellation_registry=(
                 self._multi_agent_cancellation_registry
             ),
+            long_task_application_service=(
+                self._build_long_task_application_service()
+            ),
+        )
+
+    def _build_long_task_application_service(
+        self,
+    ) -> LongTaskApplicationService | None:
+        """
+        使用已启动的 RedisProvider 组装多智能体长任务交接服务。
+
+        功能：
+            Redis 启用时让 Store 和 Stream Publisher 复用同一个异步客户端；
+            Redis 未注入或未启用时返回 None，不影响普通请求级任务。
+
+        参数含义：
+            无。
+
+        返回值含义：
+            LongTaskApplicationService | None:
+                可执行持久化和消息发布的应用服务；Redis 不可用时为 None。
+        """
+
+        redis_provider = self.redis_provider
+        if redis_provider is None or not redis_provider.enabled:
+            return None
+        redis_client = redis_provider.client
+        return LongTaskApplicationService(
+            RedisLongTaskStore(redis_client),
+            queue_publisher=RedisLongTaskStream(redis_client),
         )
 
     def _build_tool_agent_node(self):

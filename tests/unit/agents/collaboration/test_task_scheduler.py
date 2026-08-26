@@ -240,6 +240,58 @@ def test_scheduler_should_execute_steps_by_dependency_batches() -> None:
     ]
 
 
+def test_scheduler_should_pause_only_after_completed_batch_budget() -> None:
+    """
+    检查请求内预算耗尽时只停止下一批，不中断已经启动的当前批次。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    calls: list[tuple[str, list[str]]] = []
+    worker = build_success_worker(calls)
+    clock_values = iter([0.0, 2.0])
+    scheduler = MultiAgentTaskScheduler(
+        workers={
+            "profile_agent": worker,
+            "health_agent": worker,
+            "training_agent": worker,
+            "general_agent": worker,
+        },
+        inline_budget_seconds=1.0,
+        clock=lambda: next(clock_values),
+    )
+
+    result = asyncio.run(
+        scheduler.execute(
+            build_scheduler_plan(),
+            collaboration_id="task_budget_001",
+        )
+    )
+
+    assert calls == [("load_profile", [])]
+    assert result.status == "running"
+    assert result.plan.status == "running"
+    assert [item.step_id for item in result.task_results] == [
+        "load_profile"
+    ]
+    assert result.metadata["ready_batches"] == [["load_profile"]]
+    assert result.metadata["awaiting_result_aggregation"] is False
+    assert result.metadata["execution_paused"] == {
+        "reason": "inline_budget_exhausted",
+        "elapsed_seconds": 2.0,
+        "budget_seconds": 1.0,
+        "remaining_step_ids": [
+            "query_health",
+            "query_training",
+            "build_plan",
+        ],
+    }
+
+
 def test_scheduler_should_skip_steps_blocked_by_failure() -> None:
     """
     检查不允许失败的前置步骤出错后是否跳过其全部后续步骤。

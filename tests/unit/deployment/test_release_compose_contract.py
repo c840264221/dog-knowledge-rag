@@ -53,6 +53,10 @@ def test_release_compose_should_pull_instead_of_building() -> None:
     assert "pull_policy: always" in compose
     assert "context:" not in compose
     assert "dockerfile:" not in compose
+    assert "long-task-worker:" in compose
+    assert compose.count("build: !reset null") == 2
+    assert compose.count("pull_policy: always") == 2
+    assert compose.count("DOG_AGENT_API_IMAGE:?") == 2
 
 
 def test_env_example_should_select_a_fixed_ghcr_image() -> None:

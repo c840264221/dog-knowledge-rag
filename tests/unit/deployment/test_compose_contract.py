@@ -123,3 +123,56 @@ def test_compose_should_mount_all_mutable_runtime_directories() -> None:
 
     for mount in expected_mounts:
         assert f"- {mount}" in compose
+
+
+def test_compose_should_provide_healthy_persistent_redis() -> None:
+    """
+    验证 Compose 使用固定 Redis 镜像、持久化数据并等待健康检查。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    compose = _read_compose()
+
+    assert "image: redis:8.2.8-alpine" in compose
+    assert "REDIS_ENABLED: \"true\"" in compose
+    assert "REDIS_URL: redis://redis:6379/0" in compose
+    assert '"127.0.0.1:${REDIS_PORT:-6379}:6379"' in compose
+    assert "condition: service_healthy" in compose
+    assert '["CMD", "redis-cli", "ping"]' in compose
+    assert "redis_data:/data" in compose
+    assert "--appendonly" in compose
+
+
+def test_compose_should_run_long_task_worker_as_independent_service() -> None:
+    """
+    验证长任务 Worker 使用独立进程命令且不暴露 API 端口。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    compose = _read_compose()
+    worker_section = compose.split("\n  long-task-worker:\n", 1)[1].split(
+        "\n  redis:\n",
+        1,
+    )[0]
+
+    assert "scripts.run_long_task_worker" in worker_section
+    assert 'REDIS_ENABLED: "true"' in worker_section
+    assert "REDIS_URL: redis://redis:6379/0" in worker_section
+    assert "LONG_TASK_WORKER_NAME:" in worker_section
+    assert "condition: service_healthy" in worker_section
+    assert "healthcheck:" in worker_section
+    assert "disable: true" in worker_section
+    assert "init: true" in worker_section
+    assert "restart: unless-stopped" in worker_section
+    assert "stop_grace_period: 45s" in worker_section
+    assert "ports:" not in worker_section

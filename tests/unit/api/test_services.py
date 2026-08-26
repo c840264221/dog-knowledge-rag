@@ -124,6 +124,61 @@ async def test_service_should_keep_business_failure_reason() -> None:
 
 
 @pytest.mark.asyncio
+async def test_service_should_return_structured_long_task_handoff() -> None:
+    """测试后台交接会返回查询和 SSE 地址且不泄露内部归属字段。"""
+
+    async def fake_graph_runner(
+        question: str,
+        **kwargs: Any,
+    ) -> GraphFinalResult:
+        """返回携带合法长任务交接摘要的主图结果。"""
+
+        return GraphFinalResult(
+            answer="任务已转入后台执行。",
+            thread_id=kwargs["thread_id"],
+            trace_id=kwargs["trace_id"],
+            metadata={
+                "business_status": "running",
+                "business_error": None,
+                "long_task_handoff": {
+                    "task_id": "task 001",
+                    "task_version": 1,
+                    "status": "running",
+                    "execution_mode": "durable",
+                    "owner_user_id": "user 001",
+                },
+            },
+        )
+
+    service = AgentApiService(
+        graph_runtime=FakeGraphRuntime(),
+        graph_runner=fake_graph_runner,
+    )
+
+    response = await service.chat(
+        question="生成长期照护方案",
+        session_id="session_long_task",
+        trace_id="trace_long_task",
+    )
+
+    assert response.business_status == "running"
+    assert response.long_task is not None
+    assert response.long_task.task_id == "task 001"
+    assert response.long_task.status_url == (
+        "/v1/long-tasks/task%20001?user_id=user%20001"
+    )
+    assert response.long_task.events_url == (
+        "/v1/long-tasks/task%20001/events?user_id=user%20001"
+    )
+    assert "long_task_handoff" not in response.metadata
+    task_status = service.get_task_status(
+        "multi_agent_task_trace_long_task"
+    )
+    assert task_status is not None
+    assert task_status.business_status == "running"
+
+
+@pytest.mark.asyncio
 async def test_service_should_convert_interrupt_graph_result() -> None:
     """测试 API 服务把主图中断结果转换成等待输入契约。"""
 
@@ -216,3 +271,61 @@ async def test_stream_service_should_emit_identity_heartbeat_and_result() -> Non
     assert task_status is not None
     assert task_status.status == "completed"
     assert task_status.business_status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_stream_service_should_emit_long_task_handoff() -> None:
+    """测试聊天 SSE 完成事件会携带结构化后台任务引用。"""
+
+    async def handoff_graph_runner(
+        question: str,
+        **kwargs: Any,
+    ) -> GraphFinalResult:
+        """返回已经完成长任务交接的主图结果。"""
+
+        return GraphFinalResult(
+            answer="任务已转入后台执行。",
+            thread_id=kwargs["thread_id"],
+            trace_id=kwargs["trace_id"],
+            metadata={
+                "business_status": "running",
+                "long_task_handoff": {
+                    "task_id": "task_stream_001",
+                    "task_version": 1,
+                    "status": "running",
+                    "execution_mode": "durable",
+                    "owner_user_id": "user_stream_001",
+                },
+            },
+        )
+
+    service = AgentApiService(
+        graph_runtime=FakeGraphRuntime(),
+        graph_runner=handoff_graph_runner,
+    )
+
+    events = [
+        event
+        async for event in service.stream_chat(
+            question="生成后台方案",
+            session_id="session_stream_handoff",
+            trace_id="trace_stream_handoff",
+        )
+    ]
+
+    assert events[-1]["event"] == "completed"
+    assert events[-1]["data"]["business_status"] == "running"
+    assert events[-1]["data"]["long_task"] == {
+        "task_id": "task_stream_001",
+        "task_version": 1,
+        "status": "running",
+        "execution_mode": "durable",
+        "status_url": (
+            "/v1/long-tasks/task_stream_001"
+            "?user_id=user_stream_001"
+        ),
+        "events_url": (
+            "/v1/long-tasks/task_stream_001/events"
+            "?user_id=user_stream_001"
+        ),
+    }

@@ -24,6 +24,8 @@ services:
       API_RATE_LIMIT_REQUESTS: "${API_RATE_LIMIT_REQUESTS:-60}"
       API_RATE_LIMIT_WINDOW_SECONDS: "${API_RATE_LIMIT_WINDOW_SECONDS:-60}"
       API_TRUSTED_PROXY_CIDRS: "${API_TRUSTED_PROXY_CIDRS:-[]}"
+      REDIS_ENABLED: "true"
+      REDIS_URL: redis://redis:6379/0
       LOG_BACKTRACE: "false"
       LOG_DIAGNOSE: "false"
       BASE_DIR: /app
@@ -31,6 +33,9 @@ services:
       OLLAMA_HOST: http://host.docker.internal:11434
     ports:
       - "${API_PORT:-8000}:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
     volumes:
       - ./chroma_db:/app/chroma_db
       - ./chroma_memory_db:/app/chroma_memory_db
@@ -44,3 +49,66 @@ services:
     init: true
     restart: unless-stopped
     stop_grace_period: 30s
+
+  long-task-worker:
+    image: dog-agent-api:v1.22.0-dev
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command:
+      - python
+      - -m
+      - scripts.run_long_task_worker
+    env_file:
+      - .env
+    environment:
+      API_ENVIRONMENT: production
+      REDIS_ENABLED: "true"
+      REDIS_URL: redis://redis:6379/0
+      LONG_TASK_WORKER_NAME: "${LONG_TASK_WORKER_NAME:-long-task-worker-1}"
+      LOG_BACKTRACE: "false"
+      LOG_DIAGNOSE: "false"
+      BASE_DIR: /app
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      OLLAMA_HOST: http://host.docker.internal:11434
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./chroma_db:/app/chroma_db
+      - ./chroma_memory_db:/app/chroma_memory_db
+      - ./models_cache:/app/models_cache
+      - ./logs:/app/logs
+      - ./data/checkpoints_db:/app/data/checkpoints_db
+      - ./data/memory_db:/app/data/memory_db
+      - ./data/user:/app/data/user
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      disable: true
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 45s
+
+  redis:
+    image: redis:8.2.8-alpine
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+volumes:
+  redis_data:

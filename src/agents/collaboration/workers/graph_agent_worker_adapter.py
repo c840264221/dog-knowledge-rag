@@ -378,6 +378,56 @@ class GraphAgentWorkerAdapter:
             )
 
 
+def build_graph_agent_workers(
+    *,
+    runners: Mapping[str, AgentStateRunner],
+    skill_runtime: SkillRuntime | None = None,
+    pet_profile_service: PetProfileRecallService | None = None,
+) -> dict[str, GraphAgentWorkerAdapter]:
+    """
+    使用统一依赖把多个 Agent Runner 包装成标准 Worker 映射。
+
+    功能：
+        规范化 Agent 名称并创建 GraphAgentWorkerAdapter，供短任务 Scheduler
+        与长任务 Step Executor 复用同一套 Worker 创建规则。
+
+    参数含义：
+        runners:
+            Agent 名称到图调用函数的映射，通常传入 compiled_graph.ainvoke。
+        skill_runtime:
+            多个无会话状态 Worker 可以共享的可选 SkillRuntime。
+        pet_profile_service:
+            Worker Preflight 按权限补全宠物档案时使用的可选服务。
+
+    返回值含义：
+        dict[str, GraphAgentWorkerAdapter]:
+            Agent 名称到已完成依赖注入的标准 Worker 映射。
+    """
+
+    if not runners:
+        raise ValueError("至少需要一个 Agent Runner 才能构建 Worker")
+    normalized_runners: dict[str, AgentStateRunner] = {}
+    for raw_agent_name, runner in runners.items():
+        agent_name = str(raw_agent_name or "").strip()
+        if not agent_name:
+            raise ValueError("Agent Runner 名称不能为空")
+        if agent_name in normalized_runners:
+            raise ValueError(f"Agent Runner 名称重复: {agent_name}")
+        if not callable(runner):
+            raise ValueError(f"Agent Runner 必须可调用: {agent_name}")
+        normalized_runners[agent_name] = runner
+
+    return {
+        agent_name: GraphAgentWorkerAdapter(
+            agent_name=agent_name,
+            runner=runner,
+            skill_runtime=skill_runtime,
+            pet_profile_service=pet_profile_service,
+        )
+        for agent_name, runner in normalized_runners.items()
+    }
+
+
 def _prepare_step_skill(
     *,
     skill_runtime: SkillRuntime | None,

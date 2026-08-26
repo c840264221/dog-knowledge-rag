@@ -307,6 +307,68 @@ def test_orchestrator_should_run_complete_multi_agent_flow() -> None:
     )
 
 
+def test_orchestrator_should_not_aggregate_inline_budget_pause() -> None:
+    """
+    检查 Scheduler 在批次边界暂停后，编排器不会生成不完整最终答案。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None。
+    """
+
+    provider = FakeOrchestrationLLMProvider(
+        [build_orchestration_plan_json()]
+    )
+    calls: list[str] = []
+    worker = build_success_worker(calls)
+    clock_values = iter([0.0, 2.0])
+    scheduler = MultiAgentTaskScheduler(
+        workers={
+            "profile_agent": worker,
+            "health_agent": worker,
+        },
+        inline_budget_seconds=1.0,
+        clock=lambda: next(clock_values),
+    )
+    orchestrator = MultiAgentOrchestrator(
+        planner=PlannerAgent(
+            llm_provider=provider,
+            available_agents={
+                "profile_agent": "读取狗狗资料。",
+                "health_agent": "查询狗狗健康知识。",
+            },
+            maximum_plan_attempts=1,
+        ),
+        scheduler=scheduler,
+        result_aggregator=ResultAggregator(
+            llm_provider=provider,
+            maximum_aggregation_attempts=1,
+        ),
+    )
+
+    result = asyncio.run(
+        orchestrator.run(
+            "为幼犬制定健康建议",
+            plan_id="plan_orchestration_001",
+            multi_agent_task_id="task_budget_orchestration_001",
+        )
+    )
+
+    assert calls == ["load_profile"]
+    assert len(provider.prompts) == 1
+    assert result.status == "running"
+    assert result.final_answer == ""
+    assert result.metadata["execution_paused"]["reason"] == (
+        "inline_budget_exhausted"
+    )
+    assert result.metadata["orchestration"]["visited_stages"] == [
+        "planning",
+        "scheduling",
+    ]
+
+
 def test_orchestrator_should_not_aggregate_cancelled_task() -> None:
     """
     检查 Scheduler 返回 cancelled 后总编排器是否直接结束且不调用聚合器。

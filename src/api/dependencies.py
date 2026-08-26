@@ -5,6 +5,10 @@ from fastapi import HTTPException, Request, Security, status
 from fastapi.security import APIKeyHeader
 
 from src.api.services import AgentApiService
+from src.api.long_task_services import LongTaskApiQueryService
+from src.runtime.long_tasks.application_service import (
+    LongTaskApplicationService,
+)
 from src.settings.api import ApiSettings
 
 
@@ -34,6 +38,64 @@ def get_agent_api_service(request: Request) -> AgentApiService:
     """
 
     return request.app.state.agent_api_service
+
+
+def get_long_task_query_service(
+    request: Request,
+) -> LongTaskApiQueryService:
+    """
+    从 FastAPI 应用状态中获取长任务只读查询服务。
+
+    参数含义：
+        request:
+            FastAPI 当前 HTTP 请求对象。
+
+    返回值含义：
+        LongTaskApiQueryService:
+            应用启动时使用 Redis LongTaskStore 装配的查询服务；Redis 未启用
+            或测试未注入服务时返回 HTTP 503。
+    """
+
+    service = getattr(
+        request.app.state,
+        "long_task_query_service",
+        None,
+    )
+    if service is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="长任务查询服务尚未启用",
+        )
+    return service
+
+
+def get_long_task_application_service(
+    request: Request,
+) -> LongTaskApplicationService:
+    """
+    从 FastAPI 应用状态中获取长任务命令应用服务。
+
+    参数含义：
+        request:
+            FastAPI 当前 HTTP 请求对象。
+
+    返回值含义：
+        LongTaskApplicationService:
+            已注入 Store 和 Redis Stream Publisher 的命令服务；Redis 未启用
+            或测试未注入时返回 HTTP 503。
+    """
+
+    service = getattr(
+        request.app.state,
+        "long_task_application_service",
+        None,
+    )
+    if service is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="长任务交互服务尚未启用",
+        )
+    return service
 
 
 def require_api_key(
