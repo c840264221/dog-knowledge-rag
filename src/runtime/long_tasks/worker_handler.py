@@ -9,6 +9,7 @@ from typing import Protocol
 from uuid import uuid4
 
 from src.runtime.long_tasks.claim_service import LongTaskStepClaimService
+from src.runtime.long_tasks.commit_service import supports_reliable_commit
 from src.runtime.long_tasks.contracts import (
     LongTask,
     LongTaskBatchResult,
@@ -215,18 +216,22 @@ class LongTaskQueueMessageHandler:
             batch_result=LongTaskBatchResult(
                 batch_id=self._batch_id_factory(),
                 task_id=task.task_id,
+                actor_type="worker",
+                actor_id=self._worker_name,
                 step_results=list(step_results),
-                metadata={"worker_name": self._worker_name},
             ),
             execution_context=LongTaskExecutionContext(
                 elapsed_ms=elapsed_ms,
                 inline_budget_ms=1,
             ),
-        )
-        await self._publish_continuation_if_ready(
-            task=saved_task,
+            publish_ready_message=supports_reliable_commit(self._store),
             correlation_id=message.correlation_id,
         )
+        if not supports_reliable_commit(self._store):
+            await self._publish_continuation_if_ready(
+                task=saved_task,
+                correlation_id=message.correlation_id,
+            )
 
     async def _publish_continuation_if_ready(
         self,

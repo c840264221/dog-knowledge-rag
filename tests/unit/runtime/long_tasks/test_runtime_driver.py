@@ -219,6 +219,44 @@ async def test_driver_should_commit_batch_and_expose_next_ready_step() -> None:
 
 
 @pytest.mark.asyncio
+async def test_driver_should_keep_trace_refs_without_diagnostic_metadata(
+) -> None:
+    """验证权威 Step 只保存 Trace 引用，不复制批次诊断详情。"""
+
+    store = InMemoryDriverStore(build_running_task())
+    task = await LongTaskRuntimeDriver(store).handle_batch_result(
+        task_id="task_001",
+        batch_result=LongTaskBatchResult(
+            batch_id="batch_trace_001",
+            task_id="task_001",
+            actor_type="agent",
+            actor_id="profile_agent",
+            trace_id="trace_001",
+            step_results=[
+                LongTaskBatchStepResult(
+                    step_id="step_1",
+                    status="completed",
+                    output_summary="档案读取完成",
+                    span_id="span_step_1",
+                    metadata={
+                        "duration_ms": 1200,
+                        "runtime_host": "worker-node-1",
+                    },
+                )
+            ],
+            metadata={"token_usage": {"input": 800, "output": 200}},
+        ),
+        execution_context=execution_context(),
+    )
+
+    committed_step = task.steps[0]
+    assert committed_step.last_trace_id == "trace_001"
+    assert committed_step.last_span_id == "span_step_1"
+    assert "last_batch_result" not in committed_step.metadata
+    assert "duration_ms" not in committed_step.metadata
+
+
+@pytest.mark.asyncio
 async def test_driver_should_complete_last_step() -> None:
     """验证 complete_task 动作会通过状态机结束整份任务。"""
 

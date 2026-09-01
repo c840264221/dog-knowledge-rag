@@ -7,7 +7,14 @@ from typing import Any, Protocol
 
 from src.runtime.long_tasks.contracts import (
     LongTask,
+    LongTaskEventActorType,
     LongTaskQueueMessage,
+)
+from src.runtime.long_tasks.commit_service import (
+    build_commit_request,
+    build_long_task_fingerprint_view,
+    calculate_request_fingerprint,
+    supports_reliable_commit,
 )
 from src.runtime.long_tasks.interaction_service import (
     InvalidLongTaskInteractionError,
@@ -16,6 +23,7 @@ from src.runtime.long_tasks.interaction_service import (
     LongTaskMissingInputAction,
 )
 from src.runtime.long_tasks.store import (
+    LongTaskCommitFingerprintConflictError,
     LongTaskNotFoundError,
     LongTaskStore,
 )
@@ -46,8 +54,9 @@ class LongTaskApplicationService:
 
     功能：
         为统一执行入口提供面向用例的异步 API，隐藏 LongTask 字段联动、
-        Store 加载和 expected_version 保存细节。当前编排创建任务、人工批准
-        和输入恢复，不负责 Event、Artifact 或 Worker 内部调度。
+        Store 加载和 expected_version 保存细节。可靠 Store 会把业务事件、
+        回执和可选队列消息与快照一起提交；本服务不负责 Artifact 或
+        Worker 内部调度。
 
     参数含义：
         store:
@@ -89,7 +98,18 @@ class LongTaskApplicationService:
                 Store 创建成功后的任务快照。
         """
 
-        return await self._store.create(task)
+        fingerprint_payload = {
+            "action": "create_task",
+            "task": build_long_task_fingerprint_view(task),
+        }
+        return await self._create_business_task(
+            task=task,
+            commit_id=f"create:{task.task_id}",
+            fingerprint_payload=fingerprint_payload,
+            actor_type="system",
+            actor_id="long_task_application_service",
+            correlation_id=task.thread_id,
+        )
 
     async def handoff_paused_collaboration_task(
         self,
@@ -116,23 +136,38 @@ class LongTaskApplicationService:
         if publisher is None:
             raise RuntimeError("长任务提交队列尚未配置")
         ready_step_ids = self._validate_paused_collaboration_handoff(task)
-        saved_task = await self._store.create(task)
         source_correlation_id = task.metadata.get(
             "source_collaboration_id"
         )
-        await publisher.publish(
-            LongTaskQueueMessage(
-                task_id=saved_task.task_id,
-                task_version=saved_task.version,
-                reason="submitted",
-                ready_step_ids=ready_step_ids,
-                correlation_id=(
-                    str(source_correlation_id)
-                    if source_correlation_id is not None
-                    else None
-                ),
-            )
+        correlation_id = (
+            str(source_correlation_id)
+            if source_correlation_id is not None
+            else None
         )
+        queue_message = LongTaskQueueMessage(
+            task_id=task.task_id,
+            task_version=task.version,
+            reason="submitted",
+            ready_step_ids=ready_step_ids,
+            correlation_id=correlation_id,
+        )
+        fingerprint_payload = {
+            "action": "handoff_paused_collaboration_task",
+            "task_id": task.task_id,
+            "source_collaboration_id": correlation_id,
+            "ready_step_ids": ready_step_ids,
+        }
+        saved_task = await self._create_business_task(
+            task=task,
+            commit_id=f"handoff:{task.task_id}",
+            fingerprint_payload=fingerprint_payload,
+            actor_type="system",
+            actor_id="collaboration_handoff",
+            correlation_id=correlation_id,
+            queue_message=queue_message,
+        )
+        if not supports_reliable_commit(self._store):
+            await publisher.publish(queue_message)
         return saved_task
 
     async def wait_for_approval(
@@ -161,6 +196,24 @@ class LongTaskApplicationService:
                 已持久化为 awaiting_input 的最新任务快照。
         """
 
+        fingerprint_payload = {
+            "action": "wait_for_approval",
+            "task_id": task_id,
+            "source_step_ids": list(source_step_ids),
+            "target_step_ids": list(target_step_ids),
+            "prompt": prompt,
+        }
+        commit_id = _derived_commit_id(
+            "wait-approval",
+            fingerprint_payload,
+        )
+        committed_task = await self._load_idempotent_task_if_committed(
+            task_id=task_id,
+            commit_id=commit_id,
+            fingerprint_payload=fingerprint_payload,
+        )
+        if committed_task is not None:
+            return committed_task
         current_task = await self._require_task(task_id)
         awaiting_task = self._interaction_service.wait_for_approval(
             current_task,
@@ -168,9 +221,14 @@ class LongTaskApplicationService:
             target_step_ids=target_step_ids,
             prompt=prompt,
         )
-        return await self._store.save(
-            awaiting_task,
-            expected_version=current_task.version,
+        return await self._update_business_task(
+            previous_task=current_task,
+            next_task=awaiting_task,
+            commit_id=commit_id,
+            fingerprint_payload=fingerprint_payload,
+            actor_type="system",
+            actor_id="long_task_application_service",
+            correlation_id=commit_id,
         )
 
     async def resume_after_approval(
@@ -196,15 +254,34 @@ class LongTaskApplicationService:
                 已持久化为 running 或 cancelled 的最新任务快照。
         """
 
+        fingerprint_payload = {
+            "action": "resume_after_approval",
+            "task_id": task_id,
+            "interaction_id": interaction_id,
+            "approval_action": action,
+        }
+        commit_id = f"approval:{interaction_id}:{action}"
+        committed_task = await self._load_idempotent_task_if_committed(
+            task_id=task_id,
+            commit_id=commit_id,
+            fingerprint_payload=fingerprint_payload,
+        )
+        if committed_task is not None:
+            return committed_task
         current_task = await self._require_task(task_id)
         resumed_task = self._interaction_service.resume_after_approval(
             current_task,
             interaction_id=interaction_id,
             action=action,
         )
-        return await self._store.save(
-            resumed_task,
-            expected_version=current_task.version,
+        return await self._update_business_task(
+            previous_task=current_task,
+            next_task=resumed_task,
+            commit_id=commit_id,
+            fingerprint_payload=fingerprint_payload,
+            actor_type="user",
+            actor_id=current_task.user_id,
+            correlation_id=interaction_id,
         )
 
     async def respond_to_missing_input(
@@ -236,9 +313,25 @@ class LongTaskApplicationService:
                 已通过乐观锁保存的 running 或 cancelled 最新任务快照。
         """
 
+        fingerprint_payload = {
+            "action": "respond_to_missing_input",
+            "task_id": task_id,
+            "user_id": user_id,
+            "interaction_id": interaction_id,
+            "input_action": action,
+            "answers": dict(answers),
+        }
+        commit_id = f"interaction:{interaction_id}:{action}"
         current_task = await self._require_task(task_id)
         if current_task.user_id != user_id:
             raise LongTaskNotFoundError("没有找到对应的长任务")
+        committed_task = await self._load_idempotent_task_if_committed(
+            task_id=task_id,
+            commit_id=commit_id,
+            fingerprint_payload=fingerprint_payload,
+        )
+        if committed_task is not None:
+            return committed_task
         if action == "submit_input":
             if current_task.execution_mode != "durable":
                 raise InvalidLongTaskInteractionError(
@@ -261,24 +354,171 @@ class LongTaskApplicationService:
                 answers=answers,
             )
         )
-        saved_task = await self._store.save(
-            resumed_task,
-            expected_version=current_task.version,
-        )
+        queue_message = None
         if action == "submit_input":
+            queue_message = LongTaskQueueMessage(
+                task_id=resumed_task.task_id,
+                task_version=resumed_task.version,
+                reason="resumed",
+                ready_step_ids=target_step_ids,
+                correlation_id=interaction_id,
+            )
+        saved_task = await self._update_business_task(
+            previous_task=current_task,
+            next_task=resumed_task,
+            commit_id=commit_id,
+            fingerprint_payload=fingerprint_payload,
+            actor_type="user",
+            actor_id=user_id,
+            correlation_id=interaction_id,
+            queue_message=queue_message,
+        )
+        if queue_message is not None and not supports_reliable_commit(
+            self._store
+        ):
             publisher = self._queue_publisher
             if publisher is None:
                 raise RuntimeError("长任务恢复队列尚未配置")
-            await publisher.publish(
-                LongTaskQueueMessage(
-                    task_id=saved_task.task_id,
-                    task_version=saved_task.version,
-                    reason="resumed",
-                    ready_step_ids=target_step_ids,
-                    correlation_id=interaction_id,
-                )
-            )
+            await publisher.publish(queue_message)
         return saved_task
+
+    async def _create_business_task(
+        self,
+        *,
+        task: LongTask,
+        commit_id: str,
+        fingerprint_payload: Mapping[str, Any],
+        actor_type: LongTaskEventActorType,
+        actor_id: str | None,
+        correlation_id: str | None,
+        queue_message: LongTaskQueueMessage | None = None,
+    ) -> LongTask:
+        """
+        使用可靠提交创建业务任务，并为旧 Store 保留 create 兼容路径。
+
+        参数含义：
+            task：准备创建的版本 1 快照。
+            commit_id/fingerprint_payload：稳定幂等身份与关键业务输入。
+            actor_type/actor_id：直接触发创建的可信主体。
+            correlation_id：创建链路编号。
+            queue_message：需要与快照一起写入的可选通知。
+
+        返回值含义：
+            LongTask：已经成为权威状态的版本 1 任务。
+        """
+
+        if supports_reliable_commit(self._store):
+            request = build_commit_request(
+                previous_task=None,
+                next_task=task,
+                commit_id=commit_id,
+                fingerprint_payload=fingerprint_payload,
+                actor_type=actor_type,
+                actor_id=actor_id,
+                correlation_id=correlation_id,
+                queue_message=queue_message,
+            )
+            await self._store.commit(request)  # type: ignore[attr-defined]
+            authoritative_task = await self._store.load(task.task_id)
+            if authoritative_task is None:
+                raise LongTaskNotFoundError(
+                    "提交回执已经产生但权威任务不存在: "
+                    f"{task.task_id}"
+                )
+            return authoritative_task
+        return await self._store.create(task)
+
+    async def _update_business_task(
+        self,
+        *,
+        previous_task: LongTask,
+        next_task: LongTask,
+        commit_id: str,
+        fingerprint_payload: Mapping[str, Any],
+        actor_type: LongTaskEventActorType,
+        actor_id: str | None,
+        correlation_id: str | None,
+        queue_message: LongTaskQueueMessage | None = None,
+    ) -> LongTask:
+        """
+        使用可靠提交更新业务任务，并为旧 Store 保留 save 兼容路径。
+
+        参数含义：
+            previous_task/next_task：业务变化前后的任务快照。
+            commit_id/fingerprint_payload：稳定幂等身份与关键业务输入。
+            actor_type/actor_id：直接触发更新的可信主体。
+            correlation_id：本次更新链路编号。
+            queue_message：需要与快照一起写入的可选通知。
+
+        返回值含义：
+            LongTask：已经持久化的新版本权威任务。
+        """
+
+        if supports_reliable_commit(self._store):
+            request = build_commit_request(
+                previous_task=previous_task,
+                next_task=next_task,
+                commit_id=commit_id,
+                fingerprint_payload=fingerprint_payload,
+                actor_type=actor_type,
+                actor_id=actor_id,
+                correlation_id=correlation_id,
+                queue_message=queue_message,
+            )
+            await self._store.commit(request)  # type: ignore[attr-defined]
+            authoritative_task = await self._store.load(next_task.task_id)
+            if authoritative_task is None:
+                raise LongTaskNotFoundError(
+                    "提交回执已经产生但权威任务不存在: "
+                    f"{next_task.task_id}"
+                )
+            return authoritative_task
+        return await self._store.save(
+            next_task,
+            expected_version=previous_task.version,
+        )
+
+    async def _load_idempotent_task_if_committed(
+        self,
+        *,
+        task_id: str,
+        commit_id: str,
+        fingerprint_payload: Mapping[str, Any],
+    ) -> LongTask | None:
+        """
+        在重新执行领域迁移前查询同一逻辑提交是否已经成功。
+
+        参数含义：
+            task_id/commit_id：准备重试的任务和稳定提交编号。
+            fingerprint_payload：本次重试的规范化关键业务输入。
+
+        返回值含义：
+            LongTask | None：已提交时返回最新快照，否则返回 None。
+        """
+
+        load_receipt = getattr(self._store, "load_receipt", None)
+        if not callable(load_receipt):
+            return None
+        receipt = await load_receipt(
+            task_id=task_id,
+            commit_id=commit_id,
+        )
+        if receipt is None:
+            return None
+        fingerprint = calculate_request_fingerprint(
+            fingerprint_payload
+        )
+        if receipt.request_fingerprint != fingerprint:
+            raise LongTaskCommitFingerprintConflictError(
+                "commit_id 已用于不同业务动作: "
+                f"task_id={task_id}, commit_id={commit_id}"
+            )
+        task = await self._store.load(task_id)
+        if task is None:
+            raise LongTaskNotFoundError(
+                f"回执存在但长任务不存在: {task_id}"
+            )
+        return task
 
     async def _require_task(self, task_id: str) -> LongTask:
         """
@@ -360,3 +600,24 @@ class LongTaskApplicationService:
         if not ready_step_ids:
             raise ValueError("协作交接任务至少需要一个 Ready Step")
         return ready_step_ids
+
+
+def _derived_commit_id(
+    prefix: str,
+    fingerprint_payload: Mapping[str, Any],
+) -> str:
+    """
+    根据稳定业务输入派生不包含随机时间的提交编号。
+
+    参数含义：
+        prefix：用于区分业务动作的可读前缀。
+        fingerprint_payload：能够唯一描述该逻辑动作的关键输入。
+
+    返回值含义：
+        str：可在网络重试时重新生成的稳定 commit_id。
+    """
+
+    fingerprint = calculate_request_fingerprint(
+        fingerprint_payload
+    )
+    return f"{prefix}:{fingerprint.removeprefix('sha256:')[:24]}"

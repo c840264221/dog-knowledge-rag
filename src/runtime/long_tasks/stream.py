@@ -13,9 +13,9 @@ from typing import Any
 from redis.exceptions import ResponseError
 
 from src.runtime.long_tasks.contracts import LongTaskQueueMessage
+from src.runtime.long_tasks.store import DEFAULT_LONG_TASK_STREAM_KEY
 
 
-DEFAULT_LONG_TASK_STREAM_KEY = "dog-agent:long-task:v1:stream"
 DEFAULT_LONG_TASK_CONSUMER_GROUP = "long-task-workers"
 
 

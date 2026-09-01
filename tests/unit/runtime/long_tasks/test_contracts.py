@@ -244,6 +244,8 @@ def test_long_task_event_should_store_small_structured_fact() -> None:
     event = LongTaskEvent(
         event_id="event_001",
         task_id="task_001",
+        task_version=2,
+        commit_id="batch:task_001:batch_001",
         step_id="step_1",
         sequence=1,
         event_type="step_completed",
@@ -258,6 +260,8 @@ def test_long_task_event_should_store_small_structured_fact() -> None:
         LongTaskEvent(
             event_id="event_002",
             task_id="task_001",
+            task_version=2,
+            commit_id="batch:task_001:batch_001",
             sequence=0,
             event_type="task_created",
             actor_type="system",
@@ -369,16 +373,67 @@ def test_batch_step_result_should_require_failure_details() -> None:
         LongTaskBatchStepResult(
             step_id="step_2",
             status="completed",
+            error_code="STALE_ERROR",
             error_message="不应残留的旧错误",
         )
 
     result = LongTaskBatchStepResult(
         step_id="step_2",
         status="failed",
+        error_code="PROFILE_SERVICE_UNAVAILABLE",
         error_message="健康数据服务暂时不可用",
     )
 
+    assert result.error_code == "PROFILE_SERVICE_UNAVAILABLE"
     assert "暂时不可用" in result.error_message
+
+
+def test_batch_diagnostics_should_validate_actor_and_trace_relations() -> None:
+    """验证操作者成对出现，步骤 Span 必须关联批次 Trace。"""
+
+    with pytest.raises(ValidationError, match="必须同时提供"):
+        LongTaskBatchResult(
+            batch_id="batch_actor_invalid",
+            task_id="task_001",
+            actor_type="worker",
+            step_results=[
+                LongTaskBatchStepResult(
+                    step_id="step_1",
+                    status="completed",
+                )
+            ],
+        )
+
+    with pytest.raises(ValidationError, match="span_id"):
+        LongTaskBatchResult(
+            batch_id="batch_span_invalid",
+            task_id="task_001",
+            step_results=[
+                LongTaskBatchStepResult(
+                    step_id="step_1",
+                    status="completed",
+                    span_id="span-step-1",
+                )
+            ],
+        )
+
+    batch_result = LongTaskBatchResult(
+        batch_id="batch_diagnostics_valid",
+        task_id="task_001",
+        actor_type="worker",
+        actor_id="worker-1",
+        trace_id="trace-batch-1",
+        step_results=[
+            LongTaskBatchStepResult(
+                step_id="step_1",
+                status="completed",
+                span_id="span-step-1",
+            )
+        ],
+    )
+
+    assert batch_result.actor_id == "worker-1"
+    assert batch_result.step_results[0].span_id == "span-step-1"
 
 
 def test_batch_result_should_reject_duplicate_step_results() -> None:
