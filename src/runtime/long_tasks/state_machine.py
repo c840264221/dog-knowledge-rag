@@ -160,6 +160,13 @@ def transition_long_task_step(
                 "lease_expires_at": None,
             }
         )
+    if target_status != "failed":
+        step_data.update(
+            {
+                "last_error_code": None,
+                "last_error_message": None,
+            }
+        )
     return LongTaskStep.model_validate(step_data)
 
 

@@ -195,6 +195,13 @@ def test_step_transition_should_increment_attempt_when_running() -> None:
         running_step,
         target_status="failed",
     )
+    failed_step = LongTaskStep.model_validate(
+        {
+            **failed_step.model_dump(mode="python"),
+            "last_error_code": "TOOL_TIMEOUT",
+            "last_error_message": "工具调用超时",
+        }
+    )
     ready_retry_step = transition_long_task_step(
         failed_step,
         target_status="ready",
@@ -206,6 +213,8 @@ def test_step_transition_should_increment_attempt_when_running() -> None:
 
     assert step.attempt_count == 0
     assert running_step.attempt_count == 1
+    assert ready_retry_step.last_error_code is None
+    assert ready_retry_step.last_error_message is None
     assert retrying_step.attempt_count == 2
     assert retrying_step.version == 5
 

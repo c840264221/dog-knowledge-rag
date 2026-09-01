@@ -60,6 +60,7 @@ LongTaskExecutionAction = Literal[
     "handle_failure",
     "promote_to_durable",
 ]
+LongTaskCommitOperation = Literal["create", "update"]
 
 
 def utc_now() -> datetime:
@@ -153,6 +154,10 @@ class LongTaskStep(LongTaskContractModel):
             当前领取批次的唯一令牌，用于拒绝旧 Worker 的迟到结果。
         lease_expires_at:
             当前领取租约的 UTC 到期时间；到期后其他 Worker 可以接管。
+        last_error_code/last_error_message:
+            最近一次被正式接受的结构化错误代码和可读错误说明。
+        last_trace_id/last_span_id:
+            最近一次被正式接受的执行结果对应的诊断链路和步骤片段引用。
 
     返回值含义：
         LongTaskStep:
@@ -177,6 +182,10 @@ class LongTaskStep(LongTaskContractModel):
     claimed_by: str | None = Field(default=None, min_length=1)
     claim_id: str | None = Field(default=None, min_length=1)
     lease_expires_at: datetime | None = None
+    last_error_code: str | None = Field(default=None, min_length=1)
+    last_error_message: str | None = Field(default=None, min_length=1)
+    last_trace_id: str | None = Field(default=None, min_length=1)
+    last_span_id: str | None = Field(default=None, min_length=1)
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -222,6 +231,18 @@ class LongTaskStep(LongTaskContractModel):
             or self.lease_expires_at.utcoffset() is None
         ):
             raise ValueError("lease_expires_at 必须包含时区")
+        if self.status != "failed" and (
+            self.last_error_code is not None
+            or self.last_error_message is not None
+        ):
+            raise ValueError("只有 failed Step 可以保存最近错误事实")
+        if (
+            self.last_error_code is not None
+            and self.last_error_message is None
+        ):
+            raise ValueError("last_error_code 必须同时提供错误说明")
+        if self.last_span_id is not None and self.last_trace_id is None:
+            raise ValueError("last_span_id 必须关联 last_trace_id")
         return self
 
 
@@ -488,6 +509,10 @@ class LongTaskBatchStepResult(LongTaskContractModel):
             等待用户时可以展示的明确问题。
         error_message:
             步骤失败时的具体错误说明。
+        error_code:
+            步骤失败时供程序治理使用的可选稳定错误代码。
+        span_id:
+            当前步骤执行在批次 Trace 中的可选诊断片段编号。
         metadata:
             Agent、Worker、Trace 和耗时等非核心扩展信息。
         claim_id:
@@ -504,8 +529,10 @@ class LongTaskBatchStepResult(LongTaskContractModel):
     output_ref: str | None = None
     waiting_reason: LongTaskWaitingReason | None = None
     user_prompt: str = ""
+    error_code: str | None = Field(default=None, min_length=1)
     error_message: str | None = None
     claim_id: str | None = None
+    span_id: str | None = Field(default=None, min_length=1)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
@@ -537,9 +564,12 @@ class LongTaskBatchStepResult(LongTaskContractModel):
                 raise ValueError(
                     "failed 批次步骤结果必须提供 error_message"
                 )
-        elif self.error_message is not None:
+        elif (
+            self.error_code is not None
+            or self.error_message is not None
+        ):
             raise ValueError(
-                "只有 failed 批次步骤结果可以设置 error_message"
+                "只有 failed 批次步骤结果可以设置错误代码和说明"
             )
         return self
 
@@ -553,6 +583,10 @@ class LongTaskBatchResult(LongTaskContractModel):
             当前执行批次的唯一编号。
         task_id:
             当前批次所属的长任务编号。
+        actor_type/actor_id:
+            直接提交本批结果的稳定主体类型和逻辑身份；同时为空兼容旧数据。
+        trace_id:
+            整批执行对应的可选诊断链路编号。
         step_results:
             本批次每个步骤各自的执行结果；单 Agent 批次只有一项。
         metadata:
@@ -565,6 +599,9 @@ class LongTaskBatchResult(LongTaskContractModel):
 
     batch_id: str = Field(..., min_length=1)
     task_id: str = Field(..., min_length=1)
+    actor_type: LongTaskEventActorType | None = None
+    actor_id: str | None = Field(default=None, min_length=1)
+    trace_id: str | None = Field(default=None, min_length=1)
     step_results: list[LongTaskBatchStepResult] = Field(
         ...,
         min_length=1,
@@ -584,6 +621,12 @@ class LongTaskBatchResult(LongTaskContractModel):
         step_ids = [result.step_id for result in self.step_results]
         if len(step_ids) != len(set(step_ids)):
             raise ValueError("同一批次不能包含重复的 step_id")
+        if (self.actor_type is None) != (self.actor_id is None):
+            raise ValueError("actor_type 和 actor_id 必须同时提供或同时为空")
+        if self.trace_id is None and any(
+            result.span_id is not None for result in self.step_results
+        ):
+            raise ValueError("步骤 span_id 必须关联批次 trace_id")
         return self
 
 
@@ -804,6 +847,38 @@ class LongTaskExecutionDecision(LongTaskContractModel):
         return self
 
 
+class LongTaskEventDraft(LongTaskContractModel):
+    """
+    保存一次业务提交准备追加、但尚未分配序号的事件草稿。
+
+    参数含义：
+        event_type:
+            已经发生的业务事实类型，例如 step_completed。
+        actor_type:
+            直接触发该业务事实的是系统、用户、Worker 还是 Agent。
+        actor_id:
+            可选的可信操作者编号。
+        step_id:
+            可选的关联步骤编号。
+        payload:
+            小型结构化事实或固定 Artifact 引用。
+        correlation_id:
+            可选的请求、交互或消息链路编号。
+
+    返回值含义：
+        LongTaskEventDraft:
+            可以交给可靠提交 Store 原子分配事件身份和 sequence 的草稿。
+    """
+
+    event_type: str = Field(..., min_length=1)
+    actor_type: LongTaskEventActorType
+    actor_id: str | None = None
+    step_id: str | None = None
+    payload: dict[str, Any] = Field(default_factory=dict)
+    correlation_id: str | None = None
+    schema_version: int = Field(default=1, ge=1)
+
+
 class LongTaskEvent(LongTaskContractModel):
     """
     保存一条不可变的长任务业务事件。
@@ -813,6 +888,10 @@ class LongTaskEvent(LongTaskContractModel):
             当前事件的唯一编号。
         task_id:
             事件所属任务编号。
+        task_version:
+            接受该事件的 LongTask 提交版本。
+        commit_id:
+            同一批原子业务提交的稳定编号。
         step_id:
             可选的关联步骤编号。
         sequence:
@@ -833,6 +912,8 @@ class LongTaskEvent(LongTaskContractModel):
 
     event_id: str = Field(..., min_length=1)
     task_id: str = Field(..., min_length=1)
+    task_version: int = Field(..., ge=1)
+    commit_id: str = Field(..., min_length=1)
     step_id: str | None = None
     sequence: int = Field(..., ge=1)
     event_type: str = Field(..., min_length=1)
@@ -884,4 +965,127 @@ class LongTaskQueueMessage(LongTaskContractModel):
 
         if len(self.ready_step_ids) != len(set(self.ready_step_ids)):
             raise ValueError("ready_step_ids 不能包含重复编号")
+        return self
+
+
+class LongTaskCommitRequest(LongTaskContractModel):
+    """
+    描述一次需要原子保存的长任务业务提交。
+
+    参数含义：
+        operation:
+            create 创建版本 1 快照，update 使用 expected_version 更新快照。
+        task:
+            已完成领域校验、准备成为权威状态的新 LongTask 快照。
+        expected_version:
+            update 开始时读取的旧版本；create 必须为空。
+        commit_id:
+            同一次逻辑提交跨网络重试保持稳定的唯一编号。
+        request_fingerprint:
+            规范化业务动作输入的指纹，用于在重做领域迁移前识别相同请求。
+        submission_fingerprint:
+            最终快照、事件草稿、消息和版本条件的稳定语义内容指纹；
+            不包含框架自动生成且不改变业务含义的易变时间。
+        event_drafts:
+            与快照一起提交的一条或多条不可变业务事实草稿。
+        queue_message:
+            可选的后续 Redis Stream 通知；存在时与快照一起提交。
+
+    返回值含义：
+        LongTaskCommitRequest:
+            可以交给支持可靠提交的 Store 执行的完整输入。
+    """
+
+    operation: LongTaskCommitOperation
+    task: LongTask
+    expected_version: int | None = Field(default=None, ge=1)
+    commit_id: str = Field(..., min_length=1)
+    request_fingerprint: str = Field(..., min_length=1)
+    submission_fingerprint: str = Field(..., min_length=1)
+    event_drafts: list[LongTaskEventDraft] = Field(..., min_length=1)
+    queue_message: LongTaskQueueMessage | None = None
+
+    @model_validator(mode="after")
+    def validate_commit_boundary(self) -> Self:
+        """
+        检查创建、更新版本和可选队列消息属于同一提交边界。
+
+        返回值含义：
+            LongTaskCommitRequest:
+                版本和消息引用一致时返回当前请求，否则抛出 ValueError。
+        """
+
+        if self.operation == "create":
+            if self.expected_version is not None:
+                raise ValueError("create 提交不能包含 expected_version")
+            if self.task.version != 1:
+                raise ValueError("create 提交的 LongTask version 必须为 1")
+        else:
+            if self.expected_version is None:
+                raise ValueError("update 提交必须包含 expected_version")
+            if self.task.version != self.expected_version + 1:
+                raise ValueError(
+                    "update 提交的 task.version 必须等于 expected_version + 1"
+                )
+        message = self.queue_message
+        if message is not None and (
+            message.task_id != self.task.task_id
+            or message.task_version != self.task.version
+        ):
+            raise ValueError("queue_message 必须引用本次提交的任务和版本")
+        return self
+
+
+class LongTaskCommitReceipt(LongTaskContractModel):
+    """
+    保存一次已经成功提交的可查询业务回执。
+
+    参数含义：
+        commit_id:
+            调用方提供的稳定逻辑提交编号。
+        request_fingerprint:
+            首次成功提交时接受的规范化业务动作指纹。
+        submission_fingerprint:
+            首次成功提交时接受的稳定语义内容指纹；不包含框架自动生成
+            且不改变业务含义的易变时间。
+        task_id/task_version:
+            本次提交实际写入的任务及版本。
+        event_ids/event_sequence_start/event_sequence_end:
+            本次原子追加的事件身份和序号区间。
+        queue_message_id:
+            可选 Redis Stream 消息编号；未入队时为空。
+        committed_at:
+            Store 接受该提交的 UTC 时间。
+
+    返回值含义：
+        LongTaskCommitReceipt:
+            可以证明该 commit_id 已成功提交并支持安全重试的持久化回执。
+    """
+
+    commit_id: str = Field(..., min_length=1)
+    request_fingerprint: str = Field(..., min_length=1)
+    submission_fingerprint: str = Field(..., min_length=1)
+    task_id: str = Field(..., min_length=1)
+    task_version: int = Field(..., ge=1)
+    event_ids: list[str] = Field(..., min_length=1)
+    event_sequence_start: int = Field(..., ge=1)
+    event_sequence_end: int = Field(..., ge=1)
+    queue_message_id: str | None = None
+    committed_at: datetime = Field(default_factory=utc_now)
+
+    @model_validator(mode="after")
+    def validate_event_range(self) -> Self:
+        """
+        检查事件数量与连续序号区间一致。
+
+        返回值含义：
+            LongTaskCommitReceipt:
+                事件区间合法时返回当前回执，否则抛出 ValueError。
+        """
+
+        expected_count = (
+            self.event_sequence_end - self.event_sequence_start + 1
+        )
+        if expected_count != len(self.event_ids):
+            raise ValueError("回执事件数量与 sequence 区间不一致")
         return self
