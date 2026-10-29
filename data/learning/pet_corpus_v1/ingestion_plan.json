@@ -1,0 +1,24 @@
+{
+  "plan_version": 1,
+  "collection_name": "pet_care_v1",
+  "chunk_size": 1200,
+  "chunk_overlap": 150,
+  "documents": [
+    {
+      "doc_id": "cp_bringing_cat_home",
+      "title": "Bringing your cat home",
+      "path": "data/learning/pet_corpus_v1/bringing-your-cat-home-2025.pdf",
+      "source_sha256": "81e79fd8a44fd2572fe5833b1a00eafe6102532f8b94f0461462e92001125654",
+      "included_pages": [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18],
+      "metadata": {
+        "species": "cat",
+        "publisher": "Cats Protection",
+        "source_url": "https://www.cats.org.uk/media/cypfc3nz/bringing-your-cat-home-2025.pdf",
+        "language": "en",
+        "source_region": "GB",
+        "review_status": "experiment_selected_not_pagewise_reviewed",
+        "topic": "new_pet_home"
+      }
+    }
+  ]
+}

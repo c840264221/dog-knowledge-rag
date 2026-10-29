@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from src.graph.tools.implementations.date_tool import DateTool
 from src.graph.tools.implementations.weather_tool import WeatherTool
+from src.graph.tools.implementations.supply_budget_tool import SupplyBudgetTool
 from src.graph.tools.registry.tool_registry import ToolRegistry
 
 
@@ -27,6 +28,7 @@ def register_default_tools(
         向传入的 ToolRegistry 注册当前项目默认启用的本地工具：
         1. WeatherTool：天气查询工具。
         2. DateTool：日期查询工具。
+        3. SupplyBudgetTool：用品预算工具，无外部副作用。
 
     参数：
         tool_registry:
@@ -43,6 +45,7 @@ def register_default_tools(
     tool_registry.register(
         DateTool()
     )
+    tool_registry.register(SupplyBudgetTool())
 
     return tool_registry
 

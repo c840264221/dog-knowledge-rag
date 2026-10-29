@@ -9,7 +9,16 @@ from src.logger import logger
 
 class EmbeddingProvider:
 
-    def __init__(self):
+    def __init__(self, *, enable_memory: bool = True, embedding_settings=None):
+        """初始化向量服务。
+
+        参数：enable_memory表示是否初始化记忆服务；embedding_settings为可选的
+            普通知识向量配置，仅影响embedding属性，不覆盖全局或记忆配置。
+        返回值：无；默认仍使用settings.embedding，兼容既有调用。
+        """
+
+        self.enable_memory = enable_memory
+        self._embedding_settings = settings.embedding if embedding_settings is None else embedding_settings
 
         self._embedding = None
 
@@ -71,11 +80,11 @@ class EmbeddingProvider:
             )
 
             self._embedding = self._create_embedding(
-                provider=settings.embedding.provider,
-                model_name=settings.embedding.model_name,
-                device=settings.embedding.device,
+                provider=self._embedding_settings.provider,
+                model_name=self._embedding_settings.model_name,
+                device=self._embedding_settings.device,
                 normalize_embeddings=(
-                    settings.embedding.normalize_embeddings
+                    self._embedding_settings.normalize_embeddings
                 ),
             )
 
@@ -139,7 +148,8 @@ class EmbeddingProvider:
 
     async def startup(self):
         _ = self.embedding
-        _ = self.memory_embedding_service
+        if self.enable_memory:
+            _ = self.memory_embedding_service
 
         logger.info(
             "EmbeddingProvider 启动完成"

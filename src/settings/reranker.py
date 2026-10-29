@@ -5,7 +5,7 @@ from pydantic import SecretStr, Field
 class RerankerSettings(BaseAppSettings):
 
     model_name: str = (
-        "cross-encoder/ms-marco-MiniLM-L-6-v2"
+        "BAAI/bge-reranker-v2-m3"
     )
 
     device: str = "cpu"

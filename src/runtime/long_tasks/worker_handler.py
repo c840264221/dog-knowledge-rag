@@ -15,6 +15,7 @@ from src.runtime.long_tasks.contracts import (
     LongTaskBatchResult,
     LongTaskBatchStepResult,
     LongTaskExecutionContext,
+    LongTaskFailureCategory,
     LongTaskQueueMessage,
     LongTaskStep,
 )
@@ -30,6 +31,10 @@ LongTaskStepExecutor = Callable[
     Awaitable[LongTaskBatchStepResult],
 ]
 IdFactory = Callable[[], str]
+LongTaskStepExceptionClassifier = Callable[
+    [Exception],
+    tuple[LongTaskFailureCategory, str],
+]
 
 
 class _LongTaskQueuePublisher(Protocol):
@@ -76,6 +81,29 @@ def _default_batch_id_factory() -> str:
     return f"batch_{uuid4()}"
 
 
+def classify_long_task_step_exception(
+    error: Exception,
+) -> tuple[LongTaskFailureCategory, str]:
+    """
+    把执行器直接抛出的常见异常转换成失败类别和稳定错误代码。
+
+    参数含义：
+        error:
+            Step 执行期间抛出的普通程序异常。
+
+    返回值含义：
+        tuple[LongTaskFailureCategory, str]：
+            第一项是失败类别，第二项是供失败治理使用的稳定错误代码。
+            超时和连接错误默认视为临时错误，其他异常按 unknown 处理。
+    """
+
+    if isinstance(error, TimeoutError):
+        return "transient", "LONG_TASK_STEP_TIMEOUT"
+    if isinstance(error, ConnectionError):
+        return "transient", "LONG_TASK_STEP_CONNECTION_ERROR"
+    return "unknown", "LONG_TASK_STEP_EXECUTION_ERROR"
+
+
 class LongTaskQueueMessageHandler:
     """
     把一条轻量队列通知桥接到 Step 领取、执行和批次结果提交。
@@ -101,6 +129,9 @@ class LongTaskQueueMessageHandler:
             可选领取令牌工厂，测试可以注入确定值。
         batch_id_factory:
             可选批次编号工厂，测试可以注入确定值。
+        exception_classifier:
+            可选异常分类函数；执行器直接抛出异常时负责返回失败类别和
+            稳定错误代码。当前 MVP 只转换单步骤批次中的异常。
 
     返回值含义：
         LongTaskQueueMessageHandler:
@@ -119,6 +150,7 @@ class LongTaskQueueMessageHandler:
         queue_publisher: _LongTaskQueuePublisher | None = None,
         claim_id_factory: IdFactory | None = None,
         batch_id_factory: IdFactory | None = None,
+        exception_classifier: LongTaskStepExceptionClassifier | None = None,
     ) -> None:
         normalized_worker = str(worker_name or "").strip()
         if not normalized_worker:
@@ -137,6 +169,9 @@ class LongTaskQueueMessageHandler:
         )
         self._batch_id_factory = (
             batch_id_factory or _default_batch_id_factory
+        )
+        self._exception_classifier = (
+            exception_classifier or classify_long_task_step_exception
         )
 
     async def __call__(self, message: LongTaskQueueMessage) -> None:
@@ -189,16 +224,26 @@ class LongTaskQueueMessageHandler:
             step.step_id: step for step in claimed_task.steps
         }
         started_at = time.monotonic()
-        step_results = await asyncio.gather(
-            *(
-                self._step_executor(
-                    claimed_task,
-                    claimed_steps_by_id[step_id],
-                    claim_id_by_step_id[step_id],
+        if len(candidate_step_ids) == 1:
+            step_id = candidate_step_ids[0]
+            step_results = [
+                await self._execute_single_step(
+                    task=claimed_task,
+                    step=claimed_steps_by_id[step_id],
+                    claim_id=claim_id_by_step_id[step_id],
                 )
-                for step_id in candidate_step_ids
+            ]
+        else:
+            step_results = await asyncio.gather(
+                *(
+                    self._step_executor(
+                        claimed_task,
+                        claimed_steps_by_id[step_id],
+                        claim_id_by_step_id[step_id],
+                    )
+                    for step_id in candidate_step_ids
+                )
             )
-        )
         for step_id, result in zip(
             candidate_step_ids,
             step_results,
@@ -231,6 +276,49 @@ class LongTaskQueueMessageHandler:
             await self._publish_continuation_if_ready(
                 task=saved_task,
                 correlation_id=message.correlation_id,
+            )
+
+    async def _execute_single_step(
+        self,
+        *,
+        task: LongTask,
+        step: LongTaskStep,
+        claim_id: str,
+    ) -> LongTaskBatchStepResult:
+        """
+        执行当前 MVP 的单个 Step，并把普通异常转换成失败结果。
+
+        参数含义：
+            task:
+                已经原子领取目标步骤后的权威任务快照。
+            step:
+                当前准备执行且已经持有领取令牌的步骤。
+            claim_id:
+                本次步骤执行获得的领取令牌。
+
+        返回值含义：
+            LongTaskBatchStepResult：
+                执行器正常返回时保留原结果；直接抛出普通异常时返回包含
+                当前 claim_id、错误类别和稳定错误代码的 failed 结果。
+        """
+
+        try:
+            return await self._step_executor(task, step, claim_id)
+        except Exception as error:
+            failure_category, error_code = self._exception_classifier(error)
+            normalized_error_code = str(error_code or "").strip()
+            if not normalized_error_code:
+                raise ValueError(
+                    "异常分类器返回的 error_code 不能为空"
+                ) from error
+            error_message = str(error).strip() or type(error).__name__
+            return LongTaskBatchStepResult(
+                step_id=step.step_id,
+                status="failed",
+                error_code=normalized_error_code,
+                error_message=error_message,
+                failure_category=failure_category,
+                claim_id=claim_id,
             )
 
     async def _publish_continuation_if_ready(

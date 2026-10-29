@@ -8,8 +8,16 @@ from src.logger import logger
 
 class RerankerProvider:
 
-    def __init__(self):
+    def __init__(self, reranker_settings=None):
+        """初始化重排服务，允许实验注入独立配置而不修改全局设置。
 
+        参数：reranker_settings 为可选的重排配置；省略时使用项目现有配置。
+        返回：无；模型仍按需加载。
+        """
+
+        self._settings = (
+            settings.reranker if reranker_settings is None else reranker_settings
+        )
         self._reranker = None
         self._initialization_lock = Lock()
 
@@ -27,7 +35,7 @@ class RerankerProvider:
                     model_kwargs = {}
 
                     token = (
-                        settings.reranker.huggingface_token
+                        self._settings.huggingface_token
                     )
 
                     if token:
@@ -38,11 +46,11 @@ class RerankerProvider:
 
                     self._reranker = CrossEncoder(
 
-                        settings.reranker.model_name,
+                        self._settings.model_name,
 
                         model_kwargs=model_kwargs,
 
-                        device=settings.reranker.device
+                        device=self._settings.device
                     )
 
         return self._reranker

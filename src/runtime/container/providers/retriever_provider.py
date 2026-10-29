@@ -50,6 +50,8 @@ class RetrieverProvider:
             self,
             vectorstore_provider,
             default_top_k: int = 5,
+            collection_providers: dict | None = None,
+            collection_descriptions: dict[str, str] | None = None,
     ):
         """
         初始化 RetrieverProvider。
@@ -64,6 +66,10 @@ class RetrieverProvider:
 
             default_top_k:
                 默认召回数量。
+            collection_providers:
+                可选的可信集合标识到向量库提供者映射；查询时懒加载，由本提供者关闭。
+            collection_descriptions:
+                可选的同标识内容说明，供查询理解选择资料范围，不包含访问授权。
 
         返回值：
             None。
@@ -76,9 +82,23 @@ class RetrieverProvider:
 
         self.vectorstore_provider = vectorstore_provider
         self.default_top_k = default_top_k
+        # 子提供者归此服务管理，按实际选中的集合懒加载，不新增Agent。
+        self.collection_providers = dict(collection_providers or {})
+        self.collection_descriptions = dict(collection_descriptions or {})
 
         self._metadata_filter_retriever = None
         self._dog_query_filter_parser = None
+
+    def knowledge_catalog(self) -> dict[str, str]:
+        """提供当前可用公共集合说明；无参数；返回标识到说明，不暴露路径或授予权限。"""
+        return {key: self.collection_descriptions.get(key, key) for key in self.collection_providers}
+
+    def get_collection_retriever(self, collection_id: str) -> MetadataFilterRetriever:
+        """按可信目录解析检索器；参数为集合标识；返回禁止放宽条件的检索器，未知集合报错。"""
+        if collection_id not in self.collection_providers:
+            raise ValueError(f"不允许查询未知集合：{collection_id}")
+        return MetadataFilterRetriever(self.collection_providers[collection_id].db,
+            default_top_k=self.default_top_k, allow_filter_relaxation=False)
 
     @property
     def metadata_filter_retriever(self) -> MetadataFilterRetriever:
@@ -174,6 +194,8 @@ class RetrieverProvider:
             None。
         """
 
+        for provider in self.collection_providers.values():
+            await provider.shutdown()
         logger.info(
             "RetrieverProvider 已关闭"
         )

@@ -42,18 +42,29 @@ class SQLiteMcpSettings(BaseAppSettings):
     max_limit: int = 100
 
 
+class ExpenseMcpSettings(BaseAppSettings):
+    """本机教学记账配置；enabled为显式开关，默认关闭；不提供生产认证。"""
+
+    model_config = SettingsConfigDict(env_prefix="MCP_EXPENSE_", extra="ignore")
+    enabled: bool = False
+
+
 class McpSettings(BaseAppSettings):
     """
     McpSettings：MCP 总配置。
 
     功能：
-        作为 MCP 配置聚合对象，当前先聚合 SQLite MCP 配置。
+        聚合SQLite只读工具与默认关闭的本机教学记账配置。
 
     字段说明：
         sqlite:
             SQLite MCP 配置对象。
+        expense:
+            记账MCP配置；MCP_EXPENSE_ENABLED=true时显式启用。
     """
 
     sqlite: SQLiteMcpSettings = Field(
         default_factory=SQLiteMcpSettings
     )
+
+    expense: ExpenseMcpSettings = Field(default_factory=ExpenseMcpSettings)

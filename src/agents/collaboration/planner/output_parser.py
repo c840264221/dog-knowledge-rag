@@ -41,6 +41,7 @@ def parse_planner_output(
     expected_objective: str,
     allowed_agent_names: set[str],
     maximum_steps: int,
+    allowed_tool_names: set[str] | None = None,
 ) -> AgentTaskPlan:
     """
     把 LLM 输出解析并校验成正式任务计划。
@@ -60,6 +61,8 @@ def parse_planner_output(
             当前运行环境已注册的 Agent 名称。
         maximum_steps:
             一份计划最多允许包含的步骤数量。
+        allowed_tool_names:
+            可选的当前工具目录名称集合；提供时预检明确工具绑定，不提供时由执行边界检查。
 
     返回值含义：
         AgentTaskPlan:
@@ -87,6 +90,7 @@ def parse_planner_output(
                 expected_objective=expected_objective,
                 allowed_agent_names=allowed_agent_names,
                 maximum_steps=maximum_steps,
+                allowed_tool_names=allowed_tool_names,
             )
             return _order_plan_steps(plan)
         except (TypeError, ValueError) as exc:
@@ -106,6 +110,7 @@ def _validate_generated_plan(
     expected_objective: str,
     allowed_agent_names: set[str],
     maximum_steps: int,
+    allowed_tool_names: set[str] | None = None,
 ) -> None:
     """
     检查 LLM 计划是否遵守本次调用的固定边界。
@@ -125,6 +130,8 @@ def _validate_generated_plan(
             当前允许分配任务的 Agent 名称集合。
         maximum_steps:
             当前 PlannerAgent 允许的最大步骤数。
+        allowed_tool_names:
+            可选的当前工具目录名称；仅约束明确工具步骤，不限制能力级步骤的局部选择。
 
     返回值含义：
         None:
@@ -149,6 +156,13 @@ def _validate_generated_plan(
     )
     if unknown_agents:
         raise ValueError(f"计划使用了未注册 Agent: {unknown_agents}")
+
+    for step in plan.steps:
+        if (step.execution_mode == "tool" and allowed_tool_names is not None
+                and step.tool_name not in allowed_tool_names):
+            raise ValueError(f"计划绑定了当前目录不存在的工具: {step.tool_name}")
+        if any(key.startswith("multi_agent_") for key in step.input_data):
+            raise ValueError("新计划不能声明调度器专用的multi_agent_恢复字段")
 
     invalid_step_statuses = sorted(
         step.step_id

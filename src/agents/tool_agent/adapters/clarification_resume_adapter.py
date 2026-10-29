@@ -17,6 +17,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any, Literal
+import json
+
+from src.agents.tool_agent.adapters.argument_fields import (
+    parse_clarification_value, replace_argument_field,
+)
 
 
 ClarificationResumeAction = Literal[
@@ -104,7 +109,7 @@ def resolve_tool_clarification_input(
             {},
         )
         normalized_args = dict(args) if isinstance(args, Mapping) else {}
-        normalized_args[field_name] = field_value
+        normalized_args = replace_argument_field(normalized_args, field_name, field_value)
 
         resumed_tool_call = {
             **dict(pending_tool_call),
@@ -173,6 +178,21 @@ def resolve_tool_clarification_input(
             },
         }
 
+    # 已明确关联旧任务的补充若不合法，保留原调用，不能清理后当作新问题执行。
+    relation = state.get("task_relation_decision") or {}
+    if relation.get("relation") == "resume":
+        request = dict(clarification_request)
+        request["question"] = "补充信息未能唯一匹配缺失字段或不符合参数格式。" + str(request.get("question", ""))
+        return {
+            "action": "partial",
+            "state_update": {
+                "tool_agent_clarification_request": request,
+                "tool_agent_clarification_resolution": {"action": "partial"},
+                "tool_agent_clarification_resume_ready": False,
+                "tool_calls": [], "need_tool": False, "tool_agent_response": {},
+            },
+        }
+
     return {
         "action": "new_question",
         "state_update": build_clarification_cleanup_update(
@@ -219,6 +239,22 @@ def match_clarification_candidate(
         return None
 
     normalized_user_input = user_input.casefold()
+    schemas = clarification_request.get("field_schemas", {})
+    # 多个缺失字段时，允许一次明确指定一个字段，不凭输入先后猜测归属。
+    if user_input.startswith("{"):
+        try:
+            supplied = json.loads(user_input)
+        except ValueError:
+            return None
+        if not isinstance(supplied, dict) or len(supplied) != 1:
+            return None
+        field, value = next(iter(supplied.items()))
+        if field not in missing_fields:
+            return None
+        valid, value = parse_clarification_value(value, schemas.get(field, {}))
+        if valid and (not options.get(field) or value in options[field]):
+            return field, value
+        return None
     matches: list[tuple[str, Any]] = []
     for raw_field_name in missing_fields:
         field_name = str(
@@ -254,7 +290,9 @@ def match_clarification_candidate(
         if not field_options and is_safe_free_text_parameter(
             user_input
         ):
-            return field_name, user_input
+            valid, value = parse_clarification_value(user_input, schemas.get(field_name, {}))
+            if valid:
+                return field_name, value
 
     return None
 

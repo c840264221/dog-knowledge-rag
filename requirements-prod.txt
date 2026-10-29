@@ -28,3 +28,9 @@ aiohttp==3.13.5
 SQLAlchemy==2.0.49
 loguru==0.7.3
 redis==8.0.1
+
+# File skills, MCP tools and PDF ingestion
+PyYAML==6.0.3
+jsonschema==4.26.0
+mcp==2.3.0
+pypdf==6.18.1

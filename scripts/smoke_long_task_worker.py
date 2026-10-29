@@ -10,6 +10,10 @@ from typing import Any
 from uuid import uuid4
 
 from src.runtime.container.providers.redis_provider import RedisProvider
+from src.runtime.long_tasks.commit_service import (
+    build_commit_request,
+    supports_reliable_commit,
+)
 from src.runtime.long_tasks.contracts import (
     LongTask,
     LongTaskGoal,
@@ -79,7 +83,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--keep-data",
         action="store_true",
-        help="测试完成后保留本次 Task Key 和 Stream Entry 供人工检查。",
+        help="保留本次任务和消息；可靠提交模式始终保留数据及回执，便于审计。",
     )
     return parser
 
@@ -188,9 +192,35 @@ async def run_long_task_worker_smoke(
     final_task: LongTask | None = None
     acknowledged = False
 
-    await store.create(task)
+    reliable_commit = supports_reliable_commit(store)
+    # 可靠提交还保存事件和回执，不沿用旧清理逻辑只删除任务与消息。
+    retain_data = keep_data or reliable_commit
+    receipt = None
+    if reliable_commit:
+        request = build_commit_request(
+            previous_task=None,
+            next_task=task,
+            commit_id=f"smoke-submit:{task.task_id}",
+            fingerprint_payload={
+                "action": "submit_worker_smoke",
+                "task_id": task.task_id,
+                "objective": task.goal.objective,
+            },
+            actor_type="system",
+            actor_id="long_task_worker_smoke",
+            correlation_id=task.thread_id,
+            queue_message=message,
+        )
+        receipt = await store.commit(request)
+        stream_id = receipt.queue_message_id
+        if stream_id is None:
+            raise RuntimeError("可靠提交回执缺少消息编号；保留数据，请勿盲目重新提交")
+    else:
+        # 保留旧 Store / 测试替身的兼容入口；真实 Redis 使用上面的可靠提交。
+        await store.create(task)
     try:
-        stream_id = await stream.publish(message)
+        if not reliable_commit:
+            stream_id = await stream.publish(message)
         while resolved_clock() < deadline:
             current_task = await store.load(task.task_id)
             if current_task is None:
@@ -239,6 +269,8 @@ async def run_long_task_worker_smoke(
         )
         return {
             "success": success,
+            "submission_mode": "reliable_commit" if reliable_commit else "legacy_create_publish",
+            "submission_receipt": receipt.model_dump(mode="json") if receipt is not None else None,
             "task_id": task.task_id,
             "stream_id": stream_id,
             "task_status": (
@@ -260,12 +292,12 @@ async def run_long_task_worker_smoke(
             ),
             "acknowledged": acknowledged,
             "cleaned": bool(
-                not keep_data and final_task is not None and acknowledged
+                not retain_data and final_task is not None and acknowledged
             ),
         }
     finally:
         should_clean = bool(
-            not keep_data
+            not retain_data
             and final_task is not None
             and acknowledged
             and stream_id is not None
@@ -278,7 +310,7 @@ async def run_long_task_worker_smoke(
             await redis_client.delete(
                 f"{DEFAULT_LONG_TASK_KEY_PREFIX}:task:{task.task_id}"
             )
-        elif stream_id is None:
+        elif stream_id is None and not reliable_commit:
             await redis_client.delete(
                 f"{DEFAULT_LONG_TASK_KEY_PREFIX}:task:{task.task_id}"
             )

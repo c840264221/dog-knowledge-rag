@@ -8,6 +8,8 @@ from src.rag.evaluators import (
 )
 from src.rag.query_builders import resolve_question_from_state
 from src.runtime.context import runtime_ctx
+from src.rag.pipelines.grouped_knowledge_retrieval import combine_group_contexts
+from src.rag.adapters import rag_context_to_documents
 
 # 导入rag诊断工具
 from src.rag.observation.diagnostics import (
@@ -76,9 +78,23 @@ def evaluate_retrieval_node(
         f"filters={state.get('filters')}"
     )
 
-    quality_result = evaluate_retrieval_quality(
-        state=state
-    )
+    groups = state.get("rag_sub_query_results") or []
+    evaluated_groups = []
+    if groups:
+        results = []
+        for group in groups:
+            context = combine_group_contexts(group["query"]["question"], [group])
+            result = evaluate_retrieval_quality(state={**state,
+                "retrieval_question": group["query"]["question"],
+                "rag_query": group["query"], "filters": group["query"]["filters"],
+                "dog_name": None, "rag_context": context.model_dump(),
+                "docs": rag_context_to_documents(context)})
+            results.append(result)
+            evaluated_groups.append({**group, "quality_evaluation": result.model_dump(mode="json")})
+        # 允许有资料的部分继续，但每组结果单独保留，不声称整题均有依据。
+        quality_result = max(results, key=lambda result: (result.is_usable, result.quality_score))
+    else:
+        quality_result = evaluate_retrieval_quality(state=state)
 
     failure_type = str(
         quality_result.failure_type
@@ -110,6 +126,8 @@ def evaluate_retrieval_node(
         is_usable=quality_result.is_usable,
         failure_type=failure_type,
     )
+    if groups:
+        decision = "rerank" if quality_result.is_usable else "generate"
 
     evaluate_diagnostics = build_retrieval_diagnostics(
         state=state,
@@ -162,6 +180,7 @@ def evaluate_retrieval_node(
     )
 
     return {
+        **({"rag_sub_query_results": evaluated_groups} if groups else {}),
         "retrieval_ok": quality_result.is_usable,
         "retrieval_evaluated": True,
         "retrieval_quality": retrieval_quality,

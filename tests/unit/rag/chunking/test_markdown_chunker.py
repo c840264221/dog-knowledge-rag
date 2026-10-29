@@ -4,6 +4,70 @@ from src.rag.chunking.markdown_chunker import MarkdownChunker
 from src.rag.schemas import RagDocument
 
 
+@pytest.mark.parametrize(
+    ("content", "expected_titles", "expected_paths"),
+    [
+        (
+            "# 金毛\n## 养护指南\n### 运动\n运动正文\n"
+            "### 营养\n营养正文\n## 历史\n历史正文\n",
+            ["运动", "营养", "历史"],
+            ["金毛 > 养护指南 > 运动", "金毛 > 养护指南 > 营养", "金毛 > 历史"],
+        ),
+        ("# 金毛\n\n## 养护指南\n\n", [], []),
+        ("无标题正文", ["默认标题"], ["默认标题"]),
+        (
+            "# 金毛\n概述正文\n### 运动\n运动正文",
+            ["金毛", "运动"],
+            ["金毛", "金毛 > 运动"],
+        ),
+    ],
+)
+def test_chunk_skips_heading_only_sections_and_preserves_paths(
+    content, expected_titles, expected_paths,
+):
+    """验证纯标题跳过、兄弟层级切换、无标题正文和跨级标题。
+
+    参数：content 为文档文本；expected_titles 和 expected_paths 为预期章节及路径。
+    返回：无；通过断言验证正文保留和标题路径正确，不访问索引库。
+    """
+    document = RagDocument(
+        doc_id="heading_path_test",
+        source="test.md",
+        title="默认标题",
+        content=content,
+        metadata={},
+    )
+    chunks = MarkdownChunker().chunk(document)
+
+    assert [chunk.metadata["section_title"] for chunk in chunks] == expected_titles
+    assert [chunk.metadata["heading_path"] for chunk in chunks] == expected_paths
+    assert all("正文" in chunk.content for chunk in chunks)
+
+
+def test_long_section_chunks_share_heading_path():
+    """验证长度切分后的所有子片段都继承同一标题路径。
+
+    参数：无。
+    返回：无；断言路径、最大长度和重叠内容保持正确。
+    """
+    document = RagDocument(
+        doc_id="long_heading_path_test",
+        source="test.md",
+        title="金毛",
+        content="# 金毛\n## 养护指南\n### 运动\n" + "运动说明。" * 40,
+        metadata={},
+    )
+    chunks = MarkdownChunker(chunk_size=60, chunk_overlap=10).chunk(document)
+
+    assert len(chunks) > 1
+    assert all(
+        chunk.metadata["heading_path"] == "金毛 > 养护指南 > 运动"
+        for chunk in chunks
+    )
+    assert all(len(chunk.content) <= 60 for chunk in chunks)
+    assert chunks[0].content[-10:] == chunks[1].content[:10]
+
+
 @pytest.fixture
 def sample_markdown_document() -> RagDocument:
     """

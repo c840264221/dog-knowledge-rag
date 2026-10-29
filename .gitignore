@@ -35,3 +35,27 @@ evaluation/reports/
 !data/dog_markdown/**/*.md
 
 .codex_doc_staging/
+
+# 本地运行产物、私人文档与凭据
+/output/
+/docs/面试准备/
+.env.*
+!.env.example
+*.db
+*.sqlite
+*.sqlite3-*
+*.pem
+*.key
+.pytest_cache/
+
+# 技能、公开说明及评估输入需要随代码分发
+!/skills/**/SKILL.md
+!/docs/project/
+!/docs/project/**/*.md
+!/data/evaluation/
+!/data/evaluation/*.json
+!/data/learning/
+/data/learning/*
+!/data/learning/pet_corpus_v1/
+/data/learning/pet_corpus_v1/*
+!/data/learning/pet_corpus_v1/ingestion_plan.json

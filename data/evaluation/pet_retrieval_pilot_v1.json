@@ -1,0 +1,16 @@
+{
+  "dataset_version": "pet_retrieval_pilot_v1",
+  "description": "10道人工编写的试验题，来自金毛Markdown和新猫到家PDF，不是独立保留测试集。每题固定集合，两组均不加主体过滤。",
+  "cases": [
+    {"case_id": "golden_exercise", "collection_name": "breed_no_heading_v1", "question": "金毛日常运动有什么要求？", "expected_chunk_ids": ["chunk_46d049fe6e716d96"], "evidence_note": "Exercise：每天需要充足运动，运动不足可能出现不良行为。", "review_points": "保留金毛、日常运动需求，不添加时长。"},
+    {"case_id": "golden_nutrition", "collection_name": "breed_no_heading_v1", "question": "给金毛喂零食时，为什么需要控制数量？", "expected_chunk_ids": ["chunk_f120ac2ec74fde7a"], "evidence_note": "Nutrition：零食应适量，过多可能导致肥胖。", "review_points": "保留金毛、零食数量及原因，不变成药物剂量。"},
+    {"case_id": "golden_grooming", "collection_name": "breed_no_heading_v1", "question": "金毛需要每天洗澡吗？换毛期应该怎样梳理？", "expected_chunk_ids": ["chunk_e3057be496310327"], "evidence_note": "Grooming：只需偶尔洗澡，换毛期梳理可能需要每天进行。", "review_points": "保留每天洗澡是否必要这个疑问，以及换毛期梳理，不能改成每天洗澡的建议。"},
+    {"case_id": "golden_training", "collection_name": "breed_no_heading_v1", "question": "金毛幼犬的早期社会化和训练课程有什么作用？", "expected_chunk_ids": ["chunk_9aca724b2b585551"], "evidence_note": "Training：早期社会化与幼犬训练，帮助适应、识别和纠正不良习惯。", "review_points": "保留金毛幼犬、社会化和训练作用，不添加确切年龄。"},
+    {"case_id": "golden_health", "collection_name": "breed_no_heading_v1", "question": "金毛的耳朵日常应该检查什么？牙齿需要怎样护理？", "expected_chunk_ids": ["chunk_56a88451736578c3"], "evidence_note": "Health：每周检查耳部感染迹象，经常刷牙。", "review_points": "耳朵检查和牙齿护理两个方面都保留，不改成已确诊感染。"},
+    {"case_id": "cat_supplies", "collection_name": "pet_care_v1", "question": "新猫到家前，独立房间里需要准备哪些用品？", "expected_chunk_ids": ["chunk_96d1e4328c7d42bb"], "evidence_note": "PDF第4页：食水碗、猫砂盆、躲藏处、高处、睡眠处、抓柱和玩具。", "review_points": "保留新猫到家前和房间用品，不添加猫年龄。"},
+    {"case_id": "cat_scent", "collection_name": "pet_care_v1", "question": "接新猫回家之前，怎样用家里的衣物或毯子帮助它熟悉气味？", "expected_chunk_ids": ["chunk_0b02d434fcd2b9a9"], "evidence_note": "PDF第5页：提前留下衣物或毯子，接猫时带回并放入提篮和房间。", "review_points": "保留回家之前、衣物或毯子以及熟悉气味。"},
+    {"case_id": "cat_carrier", "collection_name": "pet_care_v1", "question": "接猫回家时，使用提篮内的信息素喷雾，需要至少提前15分钟吗？", "expected_chunk_ids": ["chunk_faf151f581caaf63"], "evidence_note": "PDF第6页：使用提篮前至少15分钟喷洒。", "review_points": "保留至少、15分钟、提篮内喷雾和疑问语气，不改为给猫直接喷洒。"},
+    {"case_id": "cat_introductions", "collection_name": "pet_care_v1", "question": "新猫和家里原有的猫见面前，应该怎样交换气味？", "expected_chunk_ids": ["chunk_343e722f68df3a92"], "evidence_note": "PDF第12页：分别用干净软布收集面部气味，交换放置并观察反应。", "review_points": "主体是两只猫，不要改成猫和狗。"},
+    {"case_id": "cat_dog_escape", "collection_name": "pet_care_v1", "question": "猫狗第一次接触时，为什么不能强迫猫接近狗？应该给猫保留什么退路？", "expected_chunk_ids": ["chunk_bf0c0f012619f20c"], "evidence_note": "PDF第17页：不限制猫或强迫接近狗，留安全逃离路线，优先狗够不到的高处。", "review_points": "保留不能强迫、安全退路和猫狗主体，不反转成必须靠近。"}
+  ]
+}

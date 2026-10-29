@@ -38,7 +38,7 @@ def test_register_default_tools_should_register_local_tools() -> None:
     测试默认工具注册函数。
 
     功能：
-        验证 register_default_tools 会向传入 registry 注册 weather 和 date。
+        验证默认注册表包含天气、日期与无副作用的用品预算工具。
 
     参数：
         无。
@@ -59,6 +59,7 @@ def test_register_default_tools_should_register_local_tools() -> None:
     ) == {
         "weather",
         "date",
+        "calculate_supply_budget",
     }
 
 
@@ -84,6 +85,7 @@ def test_build_default_tool_registry_should_return_registered_registry() -> None
     assert tool_registry.get_tool(
         "date"
     ) is not None
+    assert tool_registry.get_tool("calculate_supply_budget") is not None
 
 
 def test_build_default_tool_registry_should_create_new_registry_each_time() -> None:

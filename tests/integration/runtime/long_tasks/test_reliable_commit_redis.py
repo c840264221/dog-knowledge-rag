@@ -208,6 +208,85 @@ async def test_real_redis_commit_should_retry_without_duplicate_writes(
 
 
 @pytest.mark.asyncio
+async def test_real_redis_step_result_retry_should_not_advance_twice(
+    real_redis_store: tuple[Redis, RedisLongTaskStore],
+) -> None:
+    """验证步骤结果重复提交不会重复推进任务或发送下游通知。
+
+    参数含义：
+        real_redis_store：使用随机隔离命名空间的真实 Redis 客户端和存储层。
+    返回值含义：
+        None：重复提交返回原回执，快照、事件和通知均保持不变时通过。
+    验证边界：
+        首次提交后故意不使用返回值，模拟调用方没有取得提交确认。
+        不制造真实断网，不调用智能体，不验证领取令牌或完整 Worker 恢复。
+    """
+    client, store = real_redis_store
+    current_task = _build_initial_task()
+    await store.commit(
+        build_commit_request(
+            previous_task=None,
+            next_task=current_task,
+            commit_id="create:task_real_redis",
+            fingerprint_payload={"action": "create"},
+            actor_type="system",
+            actor_id="integration_test",
+            correlation_id=None,
+        )
+    )
+    next_task = _build_advanced_task(current_task)
+    request = build_commit_request(
+        previous_task=current_task,
+        next_task=next_task,
+        commit_id="batch:task_real_redis:retry-demo",
+        fingerprint_payload={
+            "action": "batch",
+            "batch_id": "retry-demo",
+            "output_summary": "档案读取完成",
+        },
+        actor_type="worker",
+        actor_id="worker-real-1",
+        correlation_id="retry-demo",
+        queue_message=LongTaskQueueMessage(
+            task_id=next_task.task_id,
+            task_version=next_task.version,
+            reason="continued",
+            ready_step_ids=["step_2"],
+            correlation_id="retry-demo",
+        ),
+    )
+
+    # 服务端已完成首次提交，但模拟调用方未拿到这次返回值。
+    await store.commit(request)
+    # 以下读取仅作为测试证据，不是替调用方重新执行步骤。
+    saved_receipt = await store.load_receipt(
+        task_id=current_task.task_id,
+        commit_id=request.commit_id,
+    )
+    events_before_retry = await store.load_events(current_task.task_id)
+    messages_before_retry = await client.xrange(store._stream_key)
+
+    # 保持原提交编号、原 expected_version 和已有结果，重试保存而非重做业务。
+    retry_receipt = await store.commit(request)
+
+    assert saved_receipt is not None
+    assert retry_receipt == saved_receipt
+    saved_task = await store.load(current_task.task_id)
+    assert saved_task == next_task
+    assert saved_task.version == 2
+    assert saved_task.steps[0].status == "completed"
+    assert saved_task.steps[1].status == "ready"
+
+    assert [event.event_type for event in events_before_retry] == [
+        "task_submitted", "step_completed", "step_became_ready",
+    ]
+    assert await store.load_events(current_task.task_id) == events_before_retry
+    assert len(messages_before_retry) == 1
+    assert await client.xrange(store._stream_key) == messages_before_retry
+    assert retry_receipt.queue_message_id == messages_before_retry[0][0]
+
+
+@pytest.mark.asyncio
 async def test_real_redis_update_should_allocate_ordered_events(
     real_redis_store: tuple[Redis, RedisLongTaskStore],
 ) -> None:

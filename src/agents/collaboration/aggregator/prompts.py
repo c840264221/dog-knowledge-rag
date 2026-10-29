@@ -14,6 +14,7 @@ from src.agents.collaboration.aggregator.schemas import (
     ResultAggregationDraft,
 )
 from src.agents.collaboration.contracts import MultiAgentTaskResult
+from src.agents.collaboration.aggregator.evidence_presentation import collect_citation_catalog
 
 
 def build_result_aggregation_prompt(
@@ -63,6 +64,7 @@ def build_result_aggregation_prompt(
         indent=2,
         ensure_ascii=False,
     )
+    citation_text = json.dumps(collect_citation_catalog(task_result), ensure_ascii=False, indent=2)
     return f"""
 你是 Dog Agent Framework 的结果聚合器。
 
@@ -75,6 +77,12 @@ def build_result_aggregation_prompt(
 4. used_step_ids 必须包含全部 completed 步骤，而且不能包含失败或跳过步骤。
 5. 如果存在 failed 或 skipped 步骤，必须在 limitations 中说明影响。
 6. 只输出一个 JSON 对象，不要输出 Markdown、解释或代码块。
+7. 存在知识来源时，final_answer的资料结论必须引用下方全局编号，格式为[步骤编号/S编号]，
+   不用局部[S1]，避免不同步骤来源混淆；不能把推断、待核实或未覆盖项写成原文明确支持。
+   保留适用条件与替代方案，不把部分核算总价说成完整采购价格。
+
+可用全局来源（没有来源时不编造引用）：
+{citation_text}
 
 原始目标：
 {task_result.plan.objective}

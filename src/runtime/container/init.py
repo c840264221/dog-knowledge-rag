@@ -40,6 +40,8 @@ from src.runtime.container.providers.retriever_provider import (
 from src.runtime.container.providers.redis_provider import RedisProvider
 
 from src.settings import settings
+from src.runtime.container.providers.expense_mcp_provider import ExpenseMcpProvider
+from src.mcp.tool_dispatcher import McpToolDispatcher
 
 # 创建容器
 container = RuntimeContainer()
@@ -92,7 +94,13 @@ container.register(
     RetrieverProvider(
         vectorstore_provider=(
             container.get("vectorstore")
-        )
+        ),
+        collection_providers={key: VectorStoreProvider(
+            container.get("embedding"), collection_name=spec["collection_name"],
+            enable_memory=False, create_collection_if_not_exists=False,
+        ) for key, spec in settings.rag.knowledge_collections.items()},
+        collection_descriptions={key: spec["description"]
+                                 for key, spec in settings.rag.knowledge_collections.items()},
     )
 )
 
@@ -138,6 +146,14 @@ container.register(
     )
 )
 
+container.register("expense_mcp", ExpenseMcpProvider(enabled=settings.mcp.expense.enabled))
+
+# 具体服务只在装配层注册，GraphRuntimeService和ToolAgent只依赖统一入口。
+container.register("mcp_tools", McpToolDispatcher(providers={
+    "sqlite": container.get("sqlite_mcp") if settings.mcp.sqlite.enabled else None,
+    "expenses": container.get("expense_mcp"),
+}))
+
 container.register(
 
     "graph_runtime",
@@ -158,9 +174,7 @@ container.register(
         reranker_provider=(
             container.get("reranker")
         ),
-        sqlite_mcp_provider=(
-            container.get("sqlite_mcp")
-        ),
+        mcp_provider=container.get("mcp_tools"),
         redis_provider=(
             container.get("redis")
         ),

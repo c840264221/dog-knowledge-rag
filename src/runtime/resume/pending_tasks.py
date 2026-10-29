@@ -16,7 +16,7 @@ from pydantic import (
 )
 
 
-PendingTaskType = Literal["tool", "skill", "multi_agent"]
+PendingTaskType = Literal["tool", "skill", "multi_agent", "intent"]
 PendingTaskStatus = Literal[
     "awaiting_input",
     "running",
@@ -157,8 +157,30 @@ class MultiAgentPendingPayload(BaseModel):
     resume_state: dict[str, Any] = Field(default_factory=dict)
 
 
+class IntentPendingPayload(BaseModel):
+    """
+    功能：
+        定义意图澄清等待任务的业务恢复载荷，不管理任务生命周期。
+        仅扩展共享契约，根意图任务的门卫匹配和主图恢复需另行接入。
+    参数含义：
+        payload_kind：固定为 intent，标识载荷类型，不是用户意图分类结果。
+        original_question：发起本次意图澄清的问题或已累计的业务输入。
+        context_summary：识别该问题时使用的可选会话背景。
+        clarification_question：当前向用户提出的澄清问题。
+    返回值含义：
+        IntentPendingPayload 实例：保存通过基础校验的恢复资料；
+        model_dump() 可转为字典，但不会自行登记任务或持久化。
+    """
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    payload_kind: Literal["intent"] = "intent"
+    original_question: str = Field(min_length=1)
+    context_summary: str | None = None
+    clarification_question: str = Field(min_length=1)
+
+
 PendingTaskPayload = Annotated[
-    ToolPendingPayload | SkillPendingPayload | MultiAgentPendingPayload,
+    ToolPendingPayload | SkillPendingPayload | MultiAgentPendingPayload | IntentPendingPayload,
     Field(discriminator="payload_kind"),
 ]
 
@@ -589,7 +611,7 @@ def build_pending_task_id(
             形如 pending_tool_<uuid> 的统一任务编号。
     """
 
-    if task_kind not in {"tool", "skill", "multi_agent"}:
+    if task_kind not in {"tool", "skill", "multi_agent", "intent"}:
         raise ValueError(f"不支持的等待任务类型: {task_kind}")
     raw_token = (
         token_factory()

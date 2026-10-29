@@ -216,6 +216,10 @@ def route_after_dog_knowledge_evaluate(
     if retrieval_ok is True:
         return "rerank"
 
+    if state.get("rag_sub_query_results"):
+        # 分组已有各自质量结果，不用全局过滤放宽去改变不同子题的语义。
+        return "generate"
+
     if retrieval_failure_type in {
         "ambiguous_query",
         "need_user_clarification",

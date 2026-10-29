@@ -41,8 +41,8 @@ class FakeSQLiteMcpProvider:
     测试用 SQLite MCP Provider。
 
     功能：
-        作为占位对象验证 GraphRuntimeService 会把 sqlite_mcp_provider
-        继续传给 ToolAgent。
+        作为占位对象验证旧sqlite_mcp_provider参数会映射到通用入口，
+        再传给ToolAgent。
 
     参数：
         无。
@@ -361,7 +361,7 @@ def test_graph_runtime_should_pass_sqlite_mcp_provider_to_tool_agent(
     monkeypatch,
 ) -> None:
     """
-    测试 GraphRuntimeService 会把 SQLite MCP Provider 注入 ToolAgent。
+    测试 GraphRuntimeService 将旧SQLite参数兼容为通用MCP入口再注入ToolAgent。
 
     功能：
         monkeypatch build_tool_agent_graph，捕获 GraphRuntimeService
@@ -424,9 +424,26 @@ def test_graph_runtime_should_pass_sqlite_mcp_provider_to_tool_agent(
     assert tool_agent == "fake_tool_agent"
     assert captured_kwargs["llm_provider"] is llm_provider
     assert captured_kwargs["checkpoint_manager"] is checkpoint_provider.manager
-    assert captured_kwargs["sqlite_mcp_provider"] is sqlite_mcp_provider
+    assert captured_kwargs["mcp_provider"] is sqlite_mcp_provider
     assert captured_kwargs["parser"] is tool_parser
     assert captured_kwargs["interrupt_func"] is graph_runtime_service.interrupt
+
+
+def test_graph_runtime_should_accept_generic_mcp_entry(monkeypatch) -> None:
+    """验证主图只依赖统一入口；monkeypatch替换构图函数；无返回值，不了解入口内具体服务。"""
+    captured = {}
+
+    def capture_graph(**kwargs):
+        """捕获装配参数；kwargs为构图参数；返回占位节点，不运行真实图。"""
+        captured.update(kwargs)
+        return "generic_tool_agent"
+
+    monkeypatch.setattr(graph_runtime_service, "build_tool_agent_graph", capture_graph)
+    unified_entry = object()
+    service = GraphRuntimeService(mcp_provider=unified_entry)
+    assert service._build_tool_agent_node() == "generic_tool_agent"
+    assert captured["mcp_provider"] is unified_entry
+    assert "sqlite_mcp_provider" not in captured
 
 
 @pytest.mark.asyncio

@@ -25,6 +25,9 @@ from collections.abc import Iterable, Mapping
 from datetime import datetime, timezone
 from typing import Any
 
+from jsonschema import Draft202012Validator
+from src.agents.tool_agent.adapters.argument_fields import field_schema_at_path
+
 from src.agents.tool_agent.adapters.registry_adapter import (
     TOOL_AGENT_TOOL_CATALOG_STATE_KEY,
 )
@@ -32,6 +35,7 @@ from src.agents.tool_agent.contracts.clarification_schema import (
     ToolClarificationRequest,
 )
 from src.graph.tools.schemas.tool_call_schema import ToolCall
+from src.graph.tools.runtime.execution_contract import validate_bound_tool_calls
 
 
 TOOL_CALL_VALIDATION_OK_STATE_KEY = "tool_call_validation_ok"
@@ -97,6 +101,19 @@ def validate_tool_calls_from_state(
         ),
     )
 
+    try:
+        validate_bound_tool_calls(
+            [normalize_tool_call_for_validation(call) for call in state.get("tool_calls", [])],
+            state.get("tool_agent_execution_contract"),
+        )
+    except ValueError as exc:
+        error = build_validation_error(code="tool_binding_mismatch", message=str(exc))
+        validation_result = {
+            "is_valid": False, "validation_skipped": False, "valid_tool_calls": [],
+            "invalid_tool_calls": [{"tool_call": normalize_tool_call_for_validation(call), "errors": [error]}
+                                   for call in state.get("tool_calls", [])],
+            "errors": [error],
+        }
     return build_tool_call_validation_state_update(
         validation_result=validation_result,
         tool_catalog=state.get(
@@ -401,6 +418,10 @@ def build_clarification_state_update(
         if isinstance(input_schema, Mapping)
         else {},
     )
+    properties = {**properties, **{
+        field: field_schema_at_path(dict(input_schema), field)
+        for field in missing_fields
+    }}
     options = {
         field_name: read_schema_allowed_values(
             field_schema=properties.get(
@@ -421,6 +442,7 @@ def build_clarification_state_update(
         missing_fields=missing_fields,
         question=question,
         options=options,
+        field_schemas={field: dict(properties[field]) for field in missing_fields},
     )
 
     sanitized_pending_tool_call = dict(
@@ -742,8 +764,8 @@ def validate_args_against_input_schema(
     根据 input_schema 校验工具参数。
 
     功能：
-        当前 MVP 校验 required 必填字段和常见基础类型。
-        暂不实现完整 JSON Schema 引擎，避免过度复杂。
+        保留原显式输入规则，复用 JSON Schema 校验器检查必填字段、
+        嵌套清单、类型和格式约束，并转成项目统一错误结构。
 
     参数：
         tool_name:
@@ -863,6 +885,24 @@ def validate_args_against_input_schema(
                 )
             )
 
+    # 补齐嵌套对象、数组及格式约束校验，避免批量数据内部缺参穿过顶层检查。
+    known_errors = {(error["code"], error.get("field")) for error in errors}
+    for error in Draft202012Validator(dict(input_schema)).iter_errors(dict(args)):
+        path = [str(part) for part in error.absolute_path]
+        if error.validator == "required":
+            missing = [key for key in error.validator_value if key not in error.instance]
+            fields = [".".join([*path, key]) for key in missing]
+            code = "missing_required_arg"
+        else:
+            fields = [".".join(path)]
+            code = "invalid_arg_type" if error.validator == "type" else "invalid_arg_value"
+        for field in fields:
+            if (code, field) not in known_errors:
+                errors.append(build_validation_error(
+                    code=code, message=f"工具 {tool_name} 的参数 {field} 未通过 {error.validator} 校验。",
+                    tool_name=tool_name, field=field,
+                ))
+                known_errors.add((code, field))
     return errors
 
 

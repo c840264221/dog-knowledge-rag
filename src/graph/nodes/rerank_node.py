@@ -10,6 +10,10 @@ from src.graph.states.dog_state import DogState
 from src.logger import logger
 from src.rag.query_builders import resolve_question_from_state
 from src.runtime.context import runtime_ctx
+from src.settings import settings
+from src.rag.pipelines.grouped_knowledge_retrieval import rank_and_select_groups
+from src.rag.adapters import rag_context_to_documents
+from src.rag.schemas import RagContext
 
 
 # 导入rag诊断工具
@@ -205,6 +209,24 @@ def execute_rerank(
     rag_context = get_rag_context_from_state(
         state=state
     )
+
+    groups = state.get("rag_sub_query_results") or []
+    if groups:
+        if state.get("rag_sub_query_result_scope") != {"question": question, "filters": state.get("filters") or {}}:
+            raise ValueError("分组候选与当前问题或过滤条件不一致，拒绝采用旧结果。")
+        grouped = rank_and_select_groups(question, groups, reranker=reranker_model,
+            max_chunks=resolve_top_k_from_state(state), max_characters=settings.rag.context_max_characters)
+        context_model = RagContext.model_validate(grouped["rag_context"])
+        result = {"rag_context": grouped["rag_context"],
+                  "docs": rag_context_to_documents(context_model),
+                  "rag_sub_query_results": grouped["groups"],
+                  "rag_sub_query_coverage": grouped["coverage"],
+                  "rag_sub_query_citations": grouped["citation_map"],
+                  "rag_sub_query_selection": grouped["selection_decisions"]}
+        result = attach_rerank_diagnostics(state, result, "按子问题分别重排并分配证据。")
+        if checkpoint_provider is not None:
+            checkpoint_provider.manager.save_checkpoint()
+        return result
 
     chunks = get_chunks_from_rag_context(
         rag_context=rag_context

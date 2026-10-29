@@ -32,6 +32,7 @@ RUN groupadd --system --gid 10001 app \
         --home-dir /app --shell /usr/sbin/nologin app
 
 COPY --chown=app:app src/ ./src/
+COPY --chown=app:app skills/ ./skills/
 COPY --chown=app:app scripts/api_run.py ./scripts/api_run.py
 COPY --chown=app:app scripts/run_long_task_worker.py ./scripts/run_long_task_worker.py
 COPY --chown=app:app scripts/smoke_long_task_worker.py ./scripts/smoke_long_task_worker.py
