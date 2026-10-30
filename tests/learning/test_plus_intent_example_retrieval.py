@@ -10,7 +10,6 @@ from functools import partial
 from typing import Any
 from uuid import uuid4
 
-from chromadb.proto.convert import to_proto_knn
 from langchain_core.documents import Document
 from langchain_core.vectorstores import InMemoryVectorStore
 from sympy.codegen.ast import continue_
