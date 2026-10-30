@@ -228,7 +228,8 @@ def test_load_text_pdf_should_preserve_real_page_numbers() -> None:
 
     sample_pdf_path = (
             project_root
-            / "output"
+            / "tests"
+            / "fixtures"
             / "pdf"
             / "day10_text_sample.pdf"
     )
@@ -278,7 +279,8 @@ def test_load_text_pdf_should_record_pages_without_text() -> None:
     project_root = Path(__file__).resolve().parents[2]
     sample_pdf_path = (
         project_root
-        / "output"
+        / "tests"
+        / "fixtures"
         / "pdf"
         / "day10_partial_text_sample.pdf"
     )
