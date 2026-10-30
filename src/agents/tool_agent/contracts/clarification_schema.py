@@ -36,6 +36,8 @@ class ToolClarificationRequest(BaseModel):
             按字段保存的候选值；没有候选值时对应列表为空。
         reason:
             为什么需要澄清的内部说明。
+        field_schemas:
+            每个缺失字段的输入契约，包含类型、候选及格式；旧快照可为空。
 
     返回值：
         ToolClarificationRequest:
@@ -47,4 +49,6 @@ class ToolClarificationRequest(BaseModel):
     missing_fields: list[str] = Field(default_factory=list)
     question: str
     options: dict[str, list[Any]] = Field(default_factory=dict)
+    # 保存字段契约用于下一轮补参；旧检查点没有该字段时保持原候选匹配行为。
+    field_schemas: dict[str, dict[str, Any]] = Field(default_factory=dict)
     reason: str = "工具调用缺少必填参数。"

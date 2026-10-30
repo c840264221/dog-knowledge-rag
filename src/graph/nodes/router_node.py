@@ -196,9 +196,7 @@ async def semantic_router_node(
         **resolved_state,
         **pending_task_update,
     }
-    root_update = await root_supervisor_node(
-        resolved_state,
-    )
+    root_update = await root_supervisor_node(resolved_state)
 
     return {
         **dict(task_relation_update),
@@ -232,6 +230,7 @@ def build_semantic_router_node(
     """
 
     async def _semantic_router_node(state: DogState) -> dict[str, Any]:
+        """转交宿主注入的选择能力；state为图状态；返回原语义路由节点的局部更新。"""
         return await semantic_router_node(
             state,
             multi_agent_field_resolver=multi_agent_field_resolver,

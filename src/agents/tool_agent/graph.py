@@ -90,6 +90,9 @@ def build_tool_agent_graph(
     checkpoint_manager: Any | None = None,
     runtime_context_getter: Callable[[], Any] | None = None,
     interrupt_func: Callable[[str], Any] | None = None,
+    before_execute: Callable[[Mapping[str, Any]], dict[str, Any]] | None = None,
+    mcp_provider: Any | None = None,
+    checkpointer: Any | None = None,
 ):
     """
     构建 ToolAgent LangGraph 子图。
@@ -117,8 +120,12 @@ def build_tool_agent_graph(
             MCP 工具定义集合。工具目录节点用它合并本地工具和 MCP 工具。
 
         sqlite_mcp_provider:
-            SQLite MCP Provider。未显式传入 mcp_tool_definitions 时，
-            工具目录节点会尝试读取它的 tool_definitions。
+            旧调用方的兼容参数；新主图使用mcp_provider。
+
+        mcp_provider:
+            通用MCP入口，可合并多个服务。向既有目录与执行节点提供tool_definitions和tool_client。
+        checkpointer:
+            独立运行子图时可注入LangGraph检查点存储；主图内省略并继续继承主图检查点。
 
         executor:
             工具执行器。执行节点会把它传给 runtime_adapter。
@@ -136,6 +143,8 @@ def build_tool_agent_graph(
         interrupt_func:
             Interrupt 函数。传入 LangGraph interrupt 时，
             tool_confirm 节点会真正暂停子图并等待用户确认。
+        before_execute:
+            可选执行前检查节点，用于步骤恢复时核对已确认调用；默认不改变旧链路。
 
     返回值：
         CompiledStateGraph:
@@ -143,6 +152,12 @@ def build_tool_agent_graph(
     """
 
     logger.info("构建 tool_agent 中...")
+
+    if mcp_provider is not None:
+        if sqlite_mcp_provider is not None and sqlite_mcp_provider is not mcp_provider:
+            raise ValueError("通用与旧MCP参数不能同时注入不同对象。")
+        # 仅在装配边界兼容既有内部节点参数名，不在主图继续暴露业务专属依赖。
+        sqlite_mcp_provider = mcp_provider
 
     graph = StateGraph(
         DogState
@@ -270,6 +285,10 @@ def build_tool_agent_graph(
         "response_adapter",
     )
 
+    if before_execute is not None:
+        graph.add_node("execution_guard", before_execute)
+        graph.add_edge("execution_guard", "tool_execute")
+
     # 确认节点之后根据权限状态决定是否执行工具。
     graph.add_conditional_edges(
         "tool_confirm",
@@ -277,7 +296,7 @@ def build_tool_agent_graph(
         {
             "pending_confirmation": "response_adapter",
             "rejected": "tool_answer",
-            "allowed": "tool_execute",
+            "allowed": "execution_guard" if before_execute is not None else "tool_execute",
         },
     )
 
@@ -300,7 +319,7 @@ def build_tool_agent_graph(
 
     logger.info("✅ tool_agent 构建完成")
 
-    return graph.compile()
+    return graph.compile() if checkpointer is None else graph.compile(checkpointer=checkpointer)
 
 
 def route_after_tool_catalog(

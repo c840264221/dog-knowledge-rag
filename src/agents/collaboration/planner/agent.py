@@ -171,6 +171,10 @@ class PlannerAgent:
                     expected_objective=normalized_objective,
                     allowed_agent_names=set(self.available_agents),
                     maximum_steps=self.maximum_steps,
+                    allowed_tool_names=(
+                        {item["name"] for item in context["tool_catalog"] if isinstance(item, Mapping) and item.get("name")}
+                        if context is not None and "tool_catalog" in context else None
+                    ),
                 )
             except Exception as exc:
                 last_error = exc

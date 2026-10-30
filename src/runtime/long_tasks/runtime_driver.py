@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from datetime import datetime, timezone
 from typing import Any
 
 from src.runtime.long_tasks.contracts import (
@@ -10,9 +12,11 @@ from src.runtime.long_tasks.contracts import (
     LongTaskBatchStepResult,
     LongTaskExecutionContext,
     LongTaskExecutionDecision,
+    LongTaskFailureCategory,
     LongTaskQueueMessage,
     LongTaskStep,
     LongTaskWaitingReason,
+    utc_now,
 )
 from src.runtime.long_tasks.commit_service import (
     build_batch_result_fingerprint_view,
@@ -31,6 +35,10 @@ from src.runtime.long_tasks.execution_policy import (
 from src.runtime.long_tasks.interaction_service import (
     LongTaskInteractionService,
 )
+from src.runtime.long_tasks.failure_service import (
+    build_long_task_failure_commit_request,
+    prepare_long_task_failure_commit,
+)
 from src.runtime.long_tasks.state_machine import (
     promote_long_task_to_durable,
     revise_long_task_runtime_state,
@@ -48,6 +56,9 @@ class UnsupportedLongTaskDriverActionError(RuntimeError):
     """表示当前 Driver 尚未接入某项决策要求的专用业务处理器。"""
 
 
+Clock = Callable[[], datetime]
+
+
 class LongTaskRuntimeDriver:
     """
     加载任务、运行 PDP、执行已支持动作并以乐观锁保存新快照。
@@ -55,6 +66,14 @@ class LongTaskRuntimeDriver:
     参数含义：
         store:
             提供最新 LongTask 快照和 expected_version 保存能力的 Store。
+        interaction_service:
+            可选的人工交互服务，未提供时使用默认实现。
+        failure_base_delay_seconds/failure_max_delay_seconds:
+            自动重试指数退避使用的基础秒数和最大秒数。
+        retry_deadline:
+            可选的自动重试最晚时间，超过后进入死信。
+        clock:
+            可注入的当前时间函数，测试可提供固定 UTC 时间。
 
     返回值含义：
         LongTaskRuntimeDriver:
@@ -66,11 +85,34 @@ class LongTaskRuntimeDriver:
         store: LongTaskStore,
         *,
         interaction_service: LongTaskInteractionService | None = None,
+        failure_base_delay_seconds: float = 10.0,
+        failure_max_delay_seconds: float = 300.0,
+        retry_deadline: datetime | None = None,
+        clock: Clock | None = None,
     ) -> None:
+        if failure_base_delay_seconds <= 0:
+            raise ValueError("failure_base_delay_seconds 必须大于 0")
+        if failure_max_delay_seconds < failure_base_delay_seconds:
+            raise ValueError(
+                "failure_max_delay_seconds 不能小于基础等待秒数"
+            )
+        if retry_deadline is not None and (
+            retry_deadline.tzinfo is None
+            or retry_deadline.utcoffset() is None
+        ):
+            raise ValueError("retry_deadline 必须包含时区")
         self._store = store
         self._interaction_service = (
             interaction_service or LongTaskInteractionService()
         )
+        self._failure_base_delay_seconds = failure_base_delay_seconds
+        self._failure_max_delay_seconds = failure_max_delay_seconds
+        self._retry_deadline = (
+            retry_deadline.astimezone(timezone.utc)
+            if retry_deadline is not None
+            else None
+        )
+        self._clock = clock or utc_now
 
     async def handle_batch_result(
         self,
@@ -101,13 +143,25 @@ class LongTaskRuntimeDriver:
                 已执行受支持 Decision 并成功保存的最新任务快照。
         """
 
-        fingerprint_payload = {
-            "action": "handle_batch_result",
-            "task_id": task_id,
-            "batch_result": build_batch_result_fingerprint_view(
-                batch_result
-            ),
-        }
+        failure_category = _resolve_batch_failure_category(batch_result)
+        fingerprint_payload = (
+            {
+                "action": "handle_failure",
+                "task_id": task_id,
+                "batch_result": build_batch_result_fingerprint_view(
+                    batch_result
+                ),
+                "failure_category": failure_category,
+            }
+            if failure_category is not None
+            else {
+                "action": "handle_batch_result",
+                "task_id": task_id,
+                "batch_result": build_batch_result_fingerprint_view(
+                    batch_result
+                ),
+            }
+        )
         commit_id = f"batch:{task_id}:{batch_result.batch_id}"
         committed_task = await self._load_idempotent_result_if_committed(
             task_id=task_id,
@@ -124,7 +178,15 @@ class LongTaskRuntimeDriver:
             execution_context=execution_context,
         )
         decision = decide_long_task_execution(facts)
-        self._require_supported_action(decision)
+        if decision.action == "handle_failure":
+            if failure_category is None:
+                raise ValueError("失败决策缺少 failure_category")
+            return await self._handle_failure(
+                task=current_task,
+                batch_result=batch_result,
+                failure_category=failure_category,
+                failure_commit_id=commit_id,
+            )
         next_task = self._apply_supported_decision(
             task=current_task,
             batch_result=batch_result,
@@ -239,25 +301,55 @@ class LongTaskRuntimeDriver:
             )
         return task
 
-    @staticmethod
-    def _require_supported_action(
-        decision: LongTaskExecutionDecision,
-    ) -> None:
+    async def _handle_failure(
+        self,
+        *,
+        task: LongTask,
+        batch_result: LongTaskBatchResult,
+        failure_category: LongTaskFailureCategory,
+        failure_commit_id: str,
+    ) -> LongTask:
         """
-        拒绝尚未接入交互聚合器或失败治理器的决策动作。
+        构造失败决定并通过可靠 Store 原子保存失败治理记录。
 
         参数含义：
-            decision:
-                PDP 根据当前预测事实返回的结构化决策。
+            task:
+                Worker 提交失败结果前读取到的权威运行中任务。
+            batch_result:
+                包含一个失败步骤、错误和执行身份的批次结果。
+            failure_category:
+                Worker 明确提供或由兼容规则得到的错误类别。
+            failure_commit_id:
+                当前批次对应的稳定失败提交编号。
 
         返回值含义：
-            None。动作已支持时正常返回，否则抛出明确边界异常。
+            LongTask：失败结果、计划或死信原子保存后的权威任务。
         """
 
-        if decision.action == "handle_failure":
+        commit_failure = getattr(self._store, "commit_failure", None)
+        if not callable(commit_failure):
             raise UnsupportedLongTaskDriverActionError(
-                "handle_failure 尚未接入重试与降级策略"
+                "当前 Store 不支持可靠失败提交，无法执行重试与降级策略"
             )
+        preparation = prepare_long_task_failure_commit(
+            task=task,
+            batch_result=batch_result,
+            failure_category=failure_category,
+            failure_commit_id=failure_commit_id,
+            now=self._clock(),
+            base_delay_seconds=self._failure_base_delay_seconds,
+            max_delay_seconds=self._failure_max_delay_seconds,
+            retry_deadline=self._retry_deadline,
+        )
+        request = build_long_task_failure_commit_request(preparation)
+        await commit_failure(request)
+        authoritative_task = await self._store.load(task.task_id)
+        if authoritative_task is None:
+            raise LongTaskNotFoundError(
+                "失败提交回执已经产生但权威任务不存在: "
+                f"{task.task_id}"
+            )
+        return authoritative_task
 
     def _apply_supported_decision(
         self,
@@ -324,6 +416,34 @@ class LongTaskRuntimeDriver:
         raise UnsupportedLongTaskDriverActionError(
             f"Runtime Driver 不认识决策动作: {decision.action}"
         )
+
+
+def _resolve_batch_failure_category(
+    batch_result: LongTaskBatchResult,
+) -> LongTaskFailureCategory | None:
+    """
+    读取当前单步骤失败批次的错误类别。
+
+    参数含义：
+        batch_result:
+            Worker 返回的完整批次结果。
+
+    返回值含义：
+        LongTaskFailureCategory | None：
+            没有失败结果时返回 None；有失败结果时返回明确类别，旧执行器
+            没有填写 failure_category 时按 unknown 处理。
+    """
+
+    failed_results = [
+        result
+        for result in batch_result.step_results
+        if result.status == "failed"
+    ]
+    if not failed_results:
+        return None
+    if len(batch_result.step_results) != 1 or len(failed_results) != 1:
+        raise ValueError("当前失败治理 MVP 只支持单步骤失败批次")
+    return failed_results[0].failure_category or "unknown"
 
 
 def _build_transition_base(

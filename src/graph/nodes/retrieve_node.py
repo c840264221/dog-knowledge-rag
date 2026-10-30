@@ -12,6 +12,10 @@ from src.rag.query_builders import (
 )
 from src.runtime.context import runtime_ctx
 from src.runtime.scopes.retrieval_scope import RetrievalScope
+from src.settings import settings
+from src.rag.pipelines.query_variant_retrieval import retrieve_query_variants
+from src.rag.retrievers.metadata_filter_retriever import MetadataFilterRetriever
+from src.rag.pipelines.grouped_knowledge_retrieval import retrieve_groups, combine_group_contexts
 
 # 导入rag召回诊断工具
 from src.rag.observation.diagnostics import (
@@ -212,9 +216,36 @@ async def execute_new_rag_retrieve(
         f"新版 RAG RagQuery 构建完成: {json.dumps(rag_query.model_dump(), indent=4, ensure_ascii=False)}"
     )
 
-    rag_context = await retriever.async_retrieve(
-        query=rag_query
-    )
+    translation = state.get("rag_query_translation") or {}
+    english = str(translation.get("english_question") or "").strip()
+    matches_source = translation.get("source_question") == rag_query.question
+    groups = state.get("rag_sub_queries") or []
+    scope = state.get("rag_sub_query_scope") or {}
+    grouped_results = []
+    if groups and callable(getattr(retriever_provider, "knowledge_catalog", None)):
+        if scope != {"question": rag_query.question, "filters": rag_query.filters}:
+            raise ValueError("子查询计划与当前检索条件不一致，需重新进行查询理解。")
+        # 身份和本轮每路数量由宿主请求覆盖，不能从模型提议中取得。
+        groups = [{**g, "query": {**g["query"], "user_id": rag_query.user_id,
+                                   "top_k": rag_query.top_k}} for g in groups]
+        grouped_results = await retrieve_groups(groups, provider=retriever_provider,
+            bilingual=settings.rag.bilingual_enabled, concurrency=settings.rag.retrieval_concurrency,
+            max_groups=settings.rag.max_sub_queries)
+        rag_context = combine_group_contexts(rag_query.question, grouped_results)
+        bilingual_audit = {"mode": "grouped", "group_count": len(grouped_results)}
+    elif settings.rag.bilingual_enabled and english and matches_source:
+        # 使用独立配置对象，避免更改容器共享检索器；两路都不能放宽犬种条件。
+        strict_retriever = retriever
+        if isinstance(retriever, MetadataFilterRetriever):
+            strict_retriever = MetadataFilterRetriever(retriever.vector_store,
+                default_top_k=retriever.default_top_k, allow_filter_relaxation=False)
+        rag_context, bilingual_audit = await retrieve_query_variants(
+            rag_query, english, retriever=strict_retriever)
+    else:
+        rag_context = await retriever.async_retrieve(query=rag_query)
+        bilingual_audit = {"mode": "chinese_only", "reason": (
+            "disabled_by_configuration" if not settings.rag.bilingual_enabled else
+            "translation_unavailable" if not english else "translation_source_changed")}
 
     docs = rag_context_to_documents(
         rag_context=rag_context
@@ -265,6 +296,8 @@ async def execute_new_rag_retrieve(
         **state,
         "rag_query": rag_query_dump,
         "rag_context": rag_context_dump,
+
+        "rag_bilingual_retrieval": bilingual_audit,
         "filters": filters,
         "intent": intent,
         "top_k": top_k,
@@ -298,6 +331,10 @@ async def execute_new_rag_retrieve(
         # 新版 RAG 结构化字段
         "rag_query": rag_query_dump,
         "rag_context": rag_context_dump,
+        "rag_bilingual_retrieval": bilingual_audit,
+        "rag_sub_query_results": grouped_results,
+        "rag_sub_query_coverage": [],
+        "rag_sub_query_result_scope": {"question": rag_query.question, "filters": rag_query.filters},
 
         # v1.5 filters 字段补齐重点：
         # 将 parser / query_builder 最终生成的 filters 回写到 DogState。

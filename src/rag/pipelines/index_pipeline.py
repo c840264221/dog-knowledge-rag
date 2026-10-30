@@ -78,6 +78,7 @@ class RagIndexPipeline:
                 Metadata Extractor（元数据提取器）。
                 当前预期是 DogBreedMetadataExtractor。
                 需要提供 extract_many(documents=...) 方法。
+                显式传入None时保留加载器提供的元数据，不执行领域专用提取。
 
             chunker: Any
                 Chunker（切块器）。
@@ -234,6 +235,9 @@ class RagIndexPipeline:
             list[RagDocument]：
                 metadata 增强后的文档列表。
         """
+
+        if self.metadata_extractor is None:
+            return documents
 
         if not hasattr(
                 self.metadata_extractor,

@@ -221,6 +221,9 @@ class DogState(TypedDict, total=False):
     # LLM 解析出的旧版工具调用列表，单项通常包含工具 name 和调用 args。
     tool_calls: List[Dict[str, Any]]
 
+    # 由宿主步骤适配器写入的执行模式和工具绑定，不由模型提议设置。
+    tool_agent_execution_contract: Dict[str, Any]
+
     # 工具执行结果列表，顺序通常与实际执行的 tool_calls 对应。
     tool_results: List[Any]
 
@@ -486,6 +489,15 @@ class DogState(TypedDict, total=False):
 
     # DogKnowledgeAgent 对本轮问题执行规则与 LLM 合并后的查询理解结果。
     dog_query_understanding_result: Dict[str, Any]
+    rag_query_translation: Dict[str, Any]  # 检索改写文本及其英文翻译，绑定源问题。
+    rag_bilingual_retrieval: Dict[str, Any]  # 实际召回通道及降级原因。
+    rag_sub_queries: List[Dict[str, Any]]  # 子查询及已校验集合标识。
+    rag_sub_query_scope: Dict[str, Any]  # 子查询计划所依据的问题与条件。
+    rag_sub_query_results: List[Dict[str, Any]]  # 分组召回及重排候选。
+    rag_sub_query_result_scope: Dict[str, Any]  # 本轮候选所属范围。
+    rag_sub_query_coverage: List[Dict[str, Any]]  # 各子问题证据选择结果。
+    rag_sub_query_citations: Dict[str, Any]  # 全局来源映射。
+    rag_sub_query_selection: List[Dict[str, Any]]  # 证据选择记录。
 
     # =========================
     # 13. 错误字段

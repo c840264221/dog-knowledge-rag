@@ -64,6 +64,8 @@ class MetadataFilterRetriever:
             self,
             vector_store: Any,
             default_top_k: int = 5,
+            *,
+            allow_filter_relaxation: bool = True,
     ):
         """
         初始化 MetadataFilterRetriever。
@@ -78,6 +80,10 @@ class MetadataFilterRetriever:
                 默认召回数量。
                 当外部没有传 top_k 时使用。
 
+            allow_filter_relaxation: bool
+                是否允许无结果时放宽过滤条件；默认True兼容旧调用。
+                False表示保留全部条件，查不到就返回空，不跨越主体限制。
+
         返回值：
             None：
                 构造函数无返回值。
@@ -90,6 +96,7 @@ class MetadataFilterRetriever:
 
         self.vector_store = vector_store
         self.default_top_k = default_top_k
+        self.allow_filter_relaxation = allow_filter_relaxation
 
     def retrieve(
             self,
@@ -657,7 +664,7 @@ class MetadataFilterRetriever:
                 "",
             )
 
-        if not metadata_filter:
+        if not metadata_filter or not self.allow_filter_relaxation:
             return (
                 strict_results,
                 metadata_filter,
@@ -737,7 +744,7 @@ class MetadataFilterRetriever:
                 "",
             )
 
-        if not metadata_filter:
+        if not metadata_filter or not self.allow_filter_relaxation:
             return (
                 strict_results,
                 metadata_filter,
@@ -1377,12 +1384,21 @@ class MetadataFilterRetriever:
                     )
             )
 
+            location_lines = []
+            page_number = chunk.metadata.get("page_number")
+            if type(page_number) is int and page_number >= 1:
+                location_lines = [
+                    f"title: {chunk.title}",
+                    f"page_number: {page_number}",
+                ]
+
             blocks.append(
                 "\n".join(
                     [
                         f"[Chunk {index + 1}]",
                         f"dog_name: {dog_name}",
                         f"source: {source}",
+                        *location_lines,
                         f"retrieval_score: {retrieved_chunk.retrieval_score}",
                         f"final_score: {retrieved_chunk.final_score}",
                         chunk.content,

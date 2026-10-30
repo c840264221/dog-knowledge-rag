@@ -11,6 +11,7 @@ from src.runtime.long_tasks.stream import (
 )
 from src.runtime.long_tasks.worker_handler import (
     LongTaskQueueMessageHandler,
+    LongTaskStepExceptionClassifier,
     LongTaskStepExecutor,
 )
 
@@ -26,6 +27,7 @@ async def run_long_task_worker(
     min_idle_time_ms: int = 30_000,
     recovery_interval_ms: int = 30_000,
     lease_duration_ms: int = 30_000,
+    exception_classifier: LongTaskStepExceptionClassifier | None = None,
 ) -> None:
     """
     组装长任务 Handler 与 Stream Worker，并持续处理后台消息。
@@ -54,6 +56,8 @@ async def run_long_task_worker(
             两次 Pending 恢复扫描之间的最小毫秒间隔。
         lease_duration_ms:
             Step 被领取后获得的租约有效毫秒数。
+        exception_classifier:
+            可选的执行异常分类函数，用于覆盖默认失败类别和错误代码。
 
     返回值含义：
         None：收到 stop_event 后正常退出；处理异常继续交给外层进程管理。
@@ -65,6 +69,7 @@ async def run_long_task_worker(
         worker_name=worker_name,
         lease_duration_ms=lease_duration_ms,
         queue_publisher=stream,
+        exception_classifier=exception_classifier,
     )
     worker = LongTaskStreamWorker(
         stream=stream,

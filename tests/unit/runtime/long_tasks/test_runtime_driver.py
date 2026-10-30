@@ -10,7 +10,9 @@ from src.runtime.long_tasks import (
     LongTask,
     LongTaskBatchResult,
     LongTaskBatchStepResult,
+    LongTaskCommitReceipt,
     LongTaskExecutionContext,
+    LongTaskFailureCommitRequest,
     LongTaskGoal,
     LongTaskRuntimeDriver,
     LongTaskStep,
@@ -68,6 +70,90 @@ class InMemoryDriverStore:
         self.task = task
         self.save_count += 1
         return task
+
+
+class ReliableFailureDriverStore(InMemoryDriverStore):
+    """模拟支持失败结果原子提交的可靠 Store。"""
+
+    def __init__(self, task: LongTask) -> None:
+        """
+        保存初始任务并创建失败请求和回执容器。
+
+        参数含义：
+            task:
+                测试开始前的权威运行中任务。
+
+        返回值含义：
+            None：初始化完成后由实例字段保存测试状态。
+        """
+
+        super().__init__(task)
+        self.failure_requests: list[LongTaskFailureCommitRequest] = []
+        self.receipts: dict[str, LongTaskCommitReceipt] = {}
+
+    async def load_receipt(
+        self,
+        *,
+        task_id: str,
+        commit_id: str,
+    ) -> LongTaskCommitReceipt | None:
+        """
+        按任务和提交编号读取模拟回执。
+
+        参数含义：
+            task_id/commit_id:
+                需要查询的任务编号和稳定提交编号。
+
+        返回值含义：
+            LongTaskCommitReceipt | None：找到时返回原回执，否则返回 None。
+        """
+
+        receipt = self.receipts.get(commit_id)
+        if receipt is None or receipt.task_id != task_id:
+            return None
+        return receipt
+
+    async def commit_failure(
+        self,
+        request: LongTaskFailureCommitRequest,
+    ) -> LongTaskCommitReceipt:
+        """
+        模拟原子保存失败任务、后续记录和提交回执。
+
+        参数含义：
+            request:
+                Driver 构造的完整失败提交请求。
+
+        返回值含义：
+            LongTaskCommitReceipt：包含重试计划或死信编号的模拟回执。
+        """
+
+        if self.task.version != request.expected_version:
+            raise LongTaskVersionConflictError("测试任务版本冲突")
+        self.task = request.task
+        self.failure_requests.append(request)
+        receipt = LongTaskCommitReceipt(
+            commit_id=request.commit_id,
+            request_fingerprint=request.request_fingerprint,
+            submission_fingerprint=request.submission_fingerprint,
+            task_id=request.task.task_id,
+            task_version=request.task.version,
+            event_ids=["EVENT-FAILURE-1"],
+            event_sequence_start=1,
+            event_sequence_end=1,
+            retry_plan_id=(
+                request.retry_plan.retry_plan_id
+                if request.retry_plan is not None
+                else None
+            ),
+            dead_letter_id=(
+                request.dead_letter_record.dead_letter_id
+                if request.dead_letter_record is not None
+                else None
+            ),
+        )
+        self.receipts[request.commit_id] = receipt
+        return receipt
 
 
 def build_running_task(
@@ -143,9 +229,17 @@ def build_batch_result(
     )
 
 
-def build_claimed_running_task() -> LongTask:
+def build_claimed_running_task(
+    *,
+    attempt_count: int = 1,
+    max_attempts: int = 2,
+) -> LongTask:
     """
     构建持有有效后台领取令牌的运行中任务。
+
+    参数含义：
+        attempt_count/max_attempts：
+            当前已经开始的执行次数和步骤最大允许次数。
 
     返回值含义：
         LongTask：可用于校验批次结果领取令牌的 durable 任务。
@@ -157,6 +251,8 @@ def build_claimed_running_task() -> LongTask:
         {
             "claimed_by": "worker-1",
             "claim_id": "claim-current",
+            "attempt_count": attempt_count,
+            "max_attempts": max_attempts,
             "lease_expires_at": datetime.now(timezone.utc)
             + timedelta(seconds=30),
         }
@@ -330,6 +426,83 @@ async def test_driver_should_reject_stale_claim_result() -> None:
 
     assert store.task == original_task
     assert store.save_count == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("attempt_count", "expected_action"),
+    [
+        (1, "retry"),
+        (2, "dead_letter"),
+    ],
+)
+async def test_driver_should_commit_retry_or_dead_letter_after_failure(
+    attempt_count: int,
+    expected_action: str,
+) -> None:
+    """
+    验证 Worker 临时失败会按剩余次数原子保存重试计划或死信。
+
+    参数含义：
+        attempt_count:
+            当前步骤本次失败对应的执行次数。
+        expected_action:
+            预期的 retry 或 dead_letter 失败处理动作。
+
+    返回值含义：
+        None：失败任务和后续治理记录符合次数条件时测试通过。
+    """
+
+    fixed_now = datetime(2026, 9, 11, 14, 0, tzinfo=timezone.utc)
+    store = ReliableFailureDriverStore(
+        build_claimed_running_task(
+            attempt_count=attempt_count,
+            max_attempts=2,
+        )
+    )
+    batch_result = LongTaskBatchResult(
+        batch_id=f"batch-failure-{attempt_count}",
+        task_id="task_001",
+        actor_type="worker",
+        actor_id="worker-1",
+        trace_id=f"trace-failure-{attempt_count}",
+        step_results=[
+            LongTaskBatchStepResult(
+                step_id="step_1",
+                status="failed",
+                error_code="UPSTREAM_TIMEOUT",
+                error_message="上游知识服务超时",
+                failure_category="transient",
+                claim_id="claim-current",
+                span_id=f"span-failure-{attempt_count}",
+            )
+        ],
+    )
+    driver = LongTaskRuntimeDriver(
+        store,
+        failure_base_delay_seconds=10,
+        failure_max_delay_seconds=60,
+        clock=lambda: fixed_now,
+    )
+
+    saved_task = await driver.handle_batch_result(
+        task_id="task_001",
+        batch_result=batch_result,
+        execution_context=execution_context(exhausted=True),
+    )
+
+    assert saved_task.status == "failed"
+    assert saved_task.steps[0].status == "failed"
+    assert saved_task.steps[0].claim_id is None
+    assert len(store.failure_requests) == 1
+    request = store.failure_requests[0]
+    assert request.failure_action == expected_action
+    if expected_action == "retry":
+        assert request.retry_plan is not None
+        assert request.dead_letter_record is None
+    else:
+        assert request.retry_plan is None
+        assert request.dead_letter_record is not None
 
 
 @pytest.mark.asyncio

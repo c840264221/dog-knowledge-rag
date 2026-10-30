@@ -1,0 +1,3 @@
+# PDF ingestion dependency, pinned to the version used by the local learning environment.
+pypdf==6.18.1
+pypdfium2==5.14.0

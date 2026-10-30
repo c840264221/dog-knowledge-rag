@@ -213,6 +213,7 @@ def create_initial_state(
 
         # ========= 工具调用字段 =========
         "tool_calls": [],
+        "tool_agent_execution_contract": {},
         "tool_results": [],
         "need_tool": False,
         "tool_round": 0,
@@ -238,6 +239,15 @@ def create_initial_state(
         "skill_profile_access_decision": {},
         "answer_profile_access_decision": {},
         "dog_query_understanding_result": {},
+        "rag_query_translation": {},
+        "rag_bilingual_retrieval": {},
+        "rag_sub_queries": [],
+        "rag_sub_query_scope": {},
+        "rag_sub_query_results": [],
+        "rag_sub_query_result_scope": {},
+        "rag_sub_query_coverage": [],
+        "rag_sub_query_citations": {},
+        "rag_sub_query_selection": [],
 
         # ========= 错误字段 =========
         "error": "",

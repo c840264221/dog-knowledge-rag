@@ -1,0 +1,34 @@
+{
+  "dataset_version": 1,
+  "cases": [
+    {
+      "case_id": "yawning_group",
+      "baseline_run_id": "296a1ce109364d518a95bdc5cc8941e0",
+      "question": "海报中，狗狗打哈欠并把身体向旁边偏开，被放在哪一组？",
+      "expected_status": "answered",
+      "expected_caption": "Yawning, leaning away",
+      "expected_section": "We need space",
+      "expected_page": 1,
+      "answer_must_include": ["We need space"],
+      "manual_review": [
+        "分组答案确实针对打哈欠且身体偏开的图示，而非其他图示。",
+        "没有把姿态直接断定为疾病；引用内容得到本轮资料支持。"
+      ]
+    },
+    {
+      "case_id": "unsupported_medical_threshold",
+      "baseline_run_id": "a9ab89eb66874588a9d8e67555ff1295",
+      "question": "海报建议狗狗每天打哈欠超过多少次就必须就医？",
+      "expected_status": "insufficient_evidence",
+      "expected_caption": "Yawning, leaning away",
+      "expected_section": "We need space",
+      "expected_page": 1,
+      "answer_must_include": [],
+      "manual_review": [
+        "明确说明本次资料没有提供每日次数或就医标准。",
+        "不得编造次数阈值、诊断结论、治疗或用药建议。",
+        "没有只凭一个入选块就声称已经核查整份文档或所有医学资料。"
+      ]
+    }
+  ]
+}

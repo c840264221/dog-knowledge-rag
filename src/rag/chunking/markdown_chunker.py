@@ -180,6 +180,7 @@ class MarkdownChunker(BaseDocumentChunker):
         功能：
             扫描 Markdown 文本中的标题行。
             每遇到一个标题，就开始一个新的章节。
+            只有包含非空正文的章节才会保留；纯标题仍参与父子层级记录。
             如果文档开头没有标题，则使用 default_title 作为章节标题。
 
         参数：
@@ -192,7 +193,8 @@ class MarkdownChunker(BaseDocumentChunker):
         返回值：
             list[dict]:
                 章节列表。
-                每个章节包含 section_title、section_level 和 content。
+                每个章节包含 section_title、section_level、heading_path 和 content。
+                heading_path 使用字符串，兼容现有索引器的基础类型元数据。
         """
 
         sections: list[dict] = []
@@ -200,36 +202,50 @@ class MarkdownChunker(BaseDocumentChunker):
         current_lines: list[str] = []
         current_title = default_title or "untitled"
         current_level = 0
+        heading_stack: list[tuple[int, str]] = []
+        current_heading_path = current_title
+        has_body = False
 
         for line in content.splitlines():
             heading_match = self.HEADING_PATTERN.match(
                 line.strip()
             )
 
-            if heading_match and current_lines:
-                sections.append(
-                    {
-                        "section_title": current_title,
-                        "section_level": current_level,
-                        "content": "\n".join(current_lines).strip(),
-                    }
-                )
-
-                current_lines = []
-
             if heading_match:
+                if has_body:
+                    sections.append(
+                        {
+                            "section_title": current_title,
+                            "section_level": current_level,
+                            "heading_path": current_heading_path,
+                            "content": "\n".join(current_lines).strip(),
+                        }
+                    )
+                current_lines = []
+                has_body = False
+
                 current_level = len(
                     heading_match.group(1)
                 )
                 current_title = heading_match.group(2).strip()
+                # 同级标题是兄弟，更深标题属于已结束的分支，均退出当前路径。
+                while heading_stack and heading_stack[-1][0] >= current_level:
+                    heading_stack.pop()
+                heading_stack.append((current_level, current_title))
+                current_heading_path = " > ".join(
+                    title for _, title in heading_stack
+                )
+            elif line.strip():
+                has_body = True
 
             current_lines.append(line)
 
-        if current_lines:
+        if has_body:
             sections.append(
                 {
                     "section_title": current_title,
                     "section_level": current_level,
+                    "heading_path": current_heading_path,
                     "content": "\n".join(current_lines).strip(),
                 }
             )
@@ -364,6 +380,7 @@ class MarkdownChunker(BaseDocumentChunker):
                 "chunk_overlap": self.chunk_overlap,
                 "section_title": section["section_title"],
                 "section_level": section["section_level"],
+                "heading_path": section["heading_path"],
                 "section_index": section_index,
                 "section_chunk_index": section_chunk_index,
                 "source_doc_id": document.doc_id,

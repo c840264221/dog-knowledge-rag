@@ -75,6 +75,10 @@ from src.agents.collaboration.scheduler import (
     WorkerHandler,
 )
 from src.agents.collaboration.workers import build_graph_agent_workers
+from src.agents.collaboration.workers.tool_agent_worker_adapter import (
+    ToolAgentWorkerAdapter,
+    build_tool_execution_guard,
+)
 from src.agents.collaboration.adapters import (
     build_default_multi_agent_clarification_field_resolver,
 )
@@ -164,6 +168,7 @@ class GraphRuntimeService:
             sqlite_mcp_provider=None,
             redis_provider=None,
             tool_parser=None,
+            mcp_provider=None,
     ):
         """
         初始化 GraphRuntimeService。
@@ -194,8 +199,7 @@ class GraphRuntimeService:
                 中文释义：统一管理 reranker 重排序模型能力。
 
             sqlite_mcp_provider:
-                SQLiteMcpProvider 实例。
-                中文释义：统一管理 SQLite MCP 工具定义和工具客户端能力。
+                旧调用方的兼容参数。未传mcp_provider时沿用该对象，新主链路请使用通用参数。
 
             redis_provider:
                 RedisProvider 实例。Redis 启用时为多智能体预算暂停交接提供
@@ -204,6 +208,9 @@ class GraphRuntimeService:
             tool_parser:
                 可选 ToolAgent Parser（工具解析器）。
                 默认使用 llm_provider 构建真实 LLM 解析链；测试或 Smoke 可注入固定解析器。
+
+            mcp_provider:
+                通用MCP入口，提供工具目录、客户端及可选目录扩展信息；可聚合任意数量的服务。
 
         返回值：
             None:
@@ -220,7 +227,9 @@ class GraphRuntimeService:
 
         self.reranker_provider = reranker_provider
 
-        self.sqlite_mcp_provider = sqlite_mcp_provider
+        if mcp_provider is not None and sqlite_mcp_provider is not None and mcp_provider is not sqlite_mcp_provider:
+            raise ValueError("通用与旧MCP参数不能同时注入不同对象。")
+        self.mcp_provider = mcp_provider if mcp_provider is not None else sqlite_mcp_provider
 
         self.redis_provider = redis_provider
 
@@ -456,7 +465,7 @@ class GraphRuntimeService:
         # 构建新版 ToolAgent 子图，用来承接 RootAgent 路由出的工具请求。
         tool_agent = self._build_tool_agent_node()
 
-        # 多 Agent Worker 暂时只使用无 interrupt 的知识与通用问答子图。
+        # 多智能体工具步骤使用独立的非中断运行器，由步骤结果保存确认快照。
         multi_agent_node = self._build_multi_agent_node(
             dog_knowledge_agent=dog_knowledge_agent,
             general_agent=general_agent,
@@ -615,7 +624,7 @@ class GraphRuntimeService:
 
         功能：
             创建 Planner、Scheduler 和 Aggregator，并用 Worker Adapter 包装
-            DogKnowledgeAgent 与 GeneralAgent，最后生成主图入口节点。
+            知识、通用与工具执行者；工具确认由专用步骤适配器负责。
 
         参数：
             dog_knowledge_agent:
@@ -632,10 +641,13 @@ class GraphRuntimeService:
             llm_provider=self.llm_provider,
             available_agents={
                 "dog_knowledge_agent": (
-                    "查询狗狗知识、健康、训练、护理和犬种推荐信息。"
+                    "统一查询犬种知识、猫狗通用养护、运输、环境适应和猫狗接触资料；内部支持多子查询与集合选择。"
                 ),
                 "general_agent": (
                     "整理通用资料、分析前置结果并生成综合方案。"
+                ),
+                "tool_agent": (
+                    "查询天气、日期等已注册工具；需要确认时暂停等待用户。"
                 ),
             },
         )
@@ -655,6 +667,9 @@ class GraphRuntimeService:
             },
             skill_runtime=skill_runtime,
             pet_profile_service=pet_profile_service,
+        )
+        collaboration_workers["tool_agent"] = ToolAgentWorkerAdapter(
+            runner=self._run_collaboration_tool_step,
         )
         self._collaboration_workers = collaboration_workers
         scheduler = MultiAgentTaskScheduler(
@@ -678,6 +693,24 @@ class GraphRuntimeService:
                 self._build_long_task_application_service()
             ),
         )
+
+    async def _run_collaboration_tool_step(self, state):
+        """运行非中断工具步骤。
+
+        参数state：由专用适配器构建的工具状态，确认只来自可信恢复快照。
+        返回值：工具图最终状态；待确认时正常返回，不抛图级中断。
+        每次构建轻量子图以隔离执行前检查闭包，复用现有Provider，不重建服务。
+        """
+        expected_calls = state.get("tool_calls") if state.get("tool_confirmed") == "confirmed" else None
+        graph = build_tool_agent_graph(
+            parser=self.tool_parser,
+            llm_provider=self.llm_provider,
+            mcp_provider=self.mcp_provider,
+            checkpoint_manager=None,
+            interrupt_func=None,
+            before_execute=build_tool_execution_guard(expected_calls, state.get("tool_agent_execution_contract")),
+        )
+        return await graph.ainvoke(state)
 
     def _build_long_task_application_service(
         self,
@@ -712,9 +745,8 @@ class GraphRuntimeService:
 
         功能：
             将 GraphRuntimeService 持有的运行时依赖注入 ToolAgent。
-            当前重点是把 sqlite_mcp_provider 传入 ToolAgent，
-            让工具目录节点可以读取 MCP 工具定义，
-            让工具执行节点可以读取 MCP tool_client。
+            注入宿主容器已装配的统一MCP入口，由同一ToolAgent读取多服务目录并分流执行。
+            本服务不识别具体MCP业务服务、不按用户问题切换Provider，也不创建分发器。
 
         参数：
             无。
@@ -731,9 +763,7 @@ class GraphRuntimeService:
             llm_provider=(
                 self.llm_provider
             ),
-            sqlite_mcp_provider=(
-                self.sqlite_mcp_provider
-            ),
+            mcp_provider=self.mcp_provider,
             checkpoint_manager=(
                 self.checkpoint_provider.manager
                 if self.checkpoint_provider is not None

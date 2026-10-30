@@ -162,3 +162,45 @@ async def test_bootstrap_should_shutdown_container_after_worker_failure(
         )
 
     assert container.events[-1] == "shutdown"
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_should_assemble_retry_scheduler_dependencies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """验证重试调度器 Bootstrap 会复用 Container 中的 Redis 客户端。"""
+
+    container = FakeRuntimeContainer()
+    captured: dict[str, Any] = {}
+
+    async def fake_run_long_task_retry_scheduler(**kwargs: Any) -> None:
+        """记录 Bootstrap 交给重试调度循环的依赖和运行参数。"""
+
+        captured.update(kwargs)
+
+    monkeypatch.setattr(
+        bootstrap,
+        "run_long_task_retry_scheduler",
+        fake_run_long_task_retry_scheduler,
+    )
+    stop_event = asyncio.Event()
+    await bootstrap.run_container_long_task_retry_scheduler(
+        runtime_container=container,
+        dispatcher_id="retry-dispatcher-1",
+        stop_event=stop_event,
+        poll_interval_seconds=0.5,
+        batch_limit=20,
+        lease_seconds=15.0,
+    )
+
+    assert container.events == [
+        "startup",
+        "get:redis",
+        "shutdown",
+    ]
+    assert isinstance(captured["store"], RedisLongTaskStore)
+    assert captured["dispatcher_id"] == "retry-dispatcher-1"
+    assert captured["stop_event"] is stop_event
+    assert captured["poll_interval_seconds"] == 0.5
+    assert captured["batch_limit"] == 20
+    assert captured["lease_seconds"] == 15.0

@@ -22,6 +22,7 @@ from src.graph.states.dog_state import (
     DogState,
 )
 from src.logger import logger
+from src.settings import settings
 from src.runtime.context import (
     runtime_ctx,
 )
@@ -37,6 +38,8 @@ from src.agents.root_agent.debug_report import (
 
 
 DOG_DOMAIN_KEYWORDS = [
+    # 保留旧变量与路由名，知识范围扩展到宠物通用养护。
+    "猫", "宠物", "cat", "kitten",
     "狗",
     "犬",
     "犬种",
@@ -490,6 +493,16 @@ def decide_root_route(
                 "matched_plan_keywords": multi_agent_plan_matches,
                 "matched_task_dimensions": multi_agent_task_dimensions,
             },
+        )
+
+    # 这里只识别显式操作意图，不读取Skill目录；业务规则在目标Agent内部选择。
+    action_matches = find_matched_keywords(question=question, keywords=settings.tool.action_request_hints)
+    if action_matches:
+        return RootRouteDecision(
+            route="tool_agent", query_type="tool_request", confidence=0.90,
+            reason="用户表达了显式工具操作意图，进入ToolAgent判断可用能力并规划。",
+            requires_rag=False, requires_tool=True, requires_memory=True,
+            hints={"matched_action_hints": action_matches},
         )
 
     recommendation_matches = find_matched_keywords(

@@ -86,6 +86,21 @@ class RagSettings(BaseAppSettings):
 
     quality_max_distance: float | None = 0.8
 
+    bilingual_enabled: bool = Field(
+        default=True,
+        description="是否使用查询理解生成的英文执行双语召回；False为中文单路对照。",
+    )
+
+    knowledge_collections: dict[str, dict[str, str]] = Field(default_factory=lambda: {
+        "dog_breeds": {"collection_name": "breed_no_heading_v1",
+                       "description": "犬种特点、运动、营养、护理、训练和犬种选择资料。"},
+        "pet_care": {"collection_name": "pet_care_v1",
+                     "description": "猫狗通用养护、新猫到家、运输、环境适应和猫狗接触指南。"},
+    }, description="可信公共集合目录；模型只能选择标识，不提供路径或物理集合名。")
+    max_sub_queries: int = Field(default=4, ge=1, le=8, description="每次知识查询最多拆分的子问题数。")
+    retrieval_concurrency: int = Field(default=2, ge=1, le=16, description="单请求实际向量查询的并发上限。")
+    context_max_characters: int = Field(default=16000, ge=1000, description="检索资料上下文字符预算，不含整个模型请求。")
+
     quality_enable_metadata_check: bool = True
 
     quality_enable_section_check: bool = True

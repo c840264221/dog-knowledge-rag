@@ -44,6 +44,20 @@ from src.runtime.context import runtime_ctx
 ToolConfirmNode = Callable[[Mapping[str, Any]], dict[str, Any]]
 
 
+def requires_confirmation_from_catalog(tool_name: str, state: Mapping[str, Any], tool_registry=None) -> bool:
+    """读取统一目录中的MCP确认要求，本地工具保持原注册表判断。
+
+    参数：tool_name为工具名；state含程序构建的目录；tool_registry为可选本地注册表。
+    返回值：是否必须确认；MCP条目只有明确False才免确认，不从外部文本推断授权。
+    """
+    catalog = state.get("tool_agent_tool_catalog", [])
+    if isinstance(catalog, list):
+        for item in catalog:
+            if isinstance(item, Mapping) and item.get("name") == tool_name and item.get("source") == "mcp":
+                return item.get("require_confirm") is not False
+    return tool_requires_confirmation(tool_name=tool_name, tool_registry=tool_registry)
+
+
 def build_tool_agent_tool_confirm_node(
     tool_registry: Any | None = None,
     checkpoint_manager: Any | None = None,
@@ -211,10 +225,7 @@ def build_tool_agent_tool_confirm_node(
         required_tool_calls = [
             tool_call
             for tool_call in tool_calls
-            if tool_requires_confirmation(
-                tool_name=tool_call.name,
-                tool_registry=tool_registry,
-            )
+            if requires_confirmation_from_catalog(tool_call.name, state, tool_registry)
         ]
 
         if not required_tool_calls:

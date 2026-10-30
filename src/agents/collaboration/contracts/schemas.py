@@ -14,6 +14,7 @@ V1.14 多 Agent 协作标准数据结构。
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -73,6 +74,10 @@ class AgentTaskStep(BaseModel):
             当前步骤需要完成的具体工作。
         assigned_agent:
             负责执行该步骤的 Agent 名称。
+        execution_mode:
+            capability允许执行者局部选择工具；tool固定绑定工具，不能静默替换。
+        tool_name:
+            tool模式绑定的目录名称；能力级任务必须为空。
         depends_on:
             当前步骤必须等待完成的前置步骤编号。
         input_data:
@@ -105,6 +110,10 @@ class AgentTaskStep(BaseModel):
         min_length=1,
         description="负责执行该步骤的 Agent 名称。",
     )
+    execution_mode: Literal["capability", "tool"] = Field(
+        default="capability", description="capability为能力级任务，执行者可选工具；tool为明确工具步骤，执行者不得换工具。",
+    )
+    tool_name: str | None = Field(default=None, min_length=1, description="tool模式绑定的工具目录名称；capability模式必须为空。")
     depends_on: list[str] = Field(
         default_factory=list,
         description="必须先完成的前置步骤编号。",
@@ -130,6 +139,36 @@ class AgentTaskStep(BaseModel):
         description="步骤扩展信息。",
     )
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_execution_contract(cls, value: Any) -> Any:
+        """兼容旧工具提示字段；value为原始步骤；返回单一正式工具绑定，冲突或不合法声明抛异常。"""
+        if not isinstance(value, Mapping):
+            return value
+        data = dict(value)
+        raw_inputs = data.get("input_data", {})
+        if not isinstance(raw_inputs, Mapping):
+            return data  # 保留原始非法类型，交由Pydantic字段校验，不能强行转换成业务字典。
+        inputs = dict(raw_inputs)
+        legacy_tool_step = data.get("assigned_agent") == "tool_agent"
+        names = [data.get("tool_name")]
+        if legacy_tool_step:
+            names.extend([inputs.get("tool_name"), inputs.get("tool")])
+        names = [name for name in names if name is not None]
+        if any(not isinstance(name, str) or not name.strip() for name in names):
+            raise ValueError("工具绑定名称必须是非空字符串。")
+        names = {name.strip() for name in names}
+        if len(names) > 1:
+            raise ValueError("步骤声明了互相冲突的工具名称。")
+        if names:
+            data["tool_name"] = next(iter(names))
+            data.setdefault("execution_mode", "tool")
+            if legacy_tool_step:
+                inputs.pop("tool_name", None)
+                inputs.pop("tool", None)
+                data["input_data"] = inputs
+        return data
+
     @model_validator(mode="after")
     def validate_dependencies(self) -> Self:
         """
@@ -148,6 +187,11 @@ class AgentTaskStep(BaseModel):
                 依赖合法时返回当前步骤；不合法时抛出 ValueError。
         """
 
+        if self.execution_mode == "tool":
+            if self.assigned_agent != "tool_agent" or not self.tool_name:
+                raise ValueError("tool模式必须绑定非空工具名称，并分配给tool_agent。")
+        elif self.tool_name is not None:
+            raise ValueError("capability模式不能同时声明工具绑定。")
         if self.step_id in self.depends_on:
             raise ValueError("任务步骤不能依赖自己")
         if len(self.depends_on) != len(set(self.depends_on)):

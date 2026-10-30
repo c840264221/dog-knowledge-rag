@@ -265,6 +265,8 @@ def build_dog_knowledge_agent(
         query_filter_parser=(
             retriever_provider.dog_query_filter_parser
         ),
+        collection_catalog=(retriever_provider.knowledge_catalog()
+                            if callable(getattr(retriever_provider, "knowledge_catalog", None)) else None),
     )
 
     memory_retrieve_node = None

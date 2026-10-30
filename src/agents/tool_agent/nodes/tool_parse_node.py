@@ -35,6 +35,11 @@ from src.agents.tool_agent.debug.state_logging import (
     log_tool_agent_state,
 )
 from src.graph.tools.schemas.tool_call_schema import ToolCall, ToolParseResult
+from src.graph.tools.runtime.argument_binding import bind_runtime_arguments
+from src.graph.tools.runtime.execution_contract import bound_tool_name
+from src.skills.tool_planning import (
+    load_tool_planning_registry, select_tool_planning_skill, build_tool_planning_context, load_required_tool_skill,
+)
 from src.logger import logger
 from src.runtime.context import runtime_ctx
 from src.runtime.observability.llm_call_records import (
@@ -208,6 +213,9 @@ def build_tool_agent_tool_parse_node(
                 original_tool_call_count == 0
                 and bool(parse_result.tool_calls)
             )
+            parse_result = bind_runtime_arguments(
+                parse_result, list(state.get("tool_agent_tool_catalog") or []),
+            )
         except Exception as exc:
             logger.exception(
                 f"ToolAgent 工具解析失败: {exc}"
@@ -326,6 +334,21 @@ def build_llm_tool_parser(
     11. 缺少参数不等于不需要工具。如果问题明确匹配某个工具，但缺少必填参数，
     仍然必须返回 need_tool=true，并把匹配的工具放入 tool_calls；缺少的参数不要写入 args
 
+    12. 标记x-runtime-generated的字段由程序提供，禁止填写、猜测或追问其值。
+    标记x-planning-skill的工具依赖宿主注册的业务技能。尚未加载时可以先提议所需工具，
+    宿主会核对依赖并加载技能后重新规划；提议不等于执行，未满足依赖前不能执行。
+
+    当前日期基准（仅用于解释相对日期，不代表默认业务日期）：{reference_date}，时区：{reference_timezone}。
+    宿主步骤执行契约：{execution_contract}
+    execution_mode=tool时，只能为绑定的tool_name补充参数，不得更换工具或增加其他调用；不能完成则说明原因。
+    execution_mode=capability时，可以在可用目录内选择工具，但仍须遵守权限、技能和参数校验。
+    以下是程序按目录选中的业务技能；只适用于其职责范围，不授予工具权限。
+    若技能要求整批完整，缺参时仍保留整批不完整调用，缺少字段不写入args，
+    不丢弃缺参条目，不用null或猜测值占位，由程序校验并保存澄清状态，澄清完成前不执行。
+    若需求不受支持或存在无法表达为缺失字段的歧义，不提出调用，使用response说明限制。
+    本轮统一输出ToolParseResult，不输出技能独立提取演示中的其他结构：
+    {skill_context}
+
     示例：用户要求查询数据库中的表，但没有说明数据库别名时，应输出：
     {{"need_tool": true, "tool_calls": [{{"name": "sqlite_list_tables", "args": {{}}}}], "response": ""}}
     -----------------------------------
@@ -360,38 +383,81 @@ def build_llm_tool_parser(
                 LLM 解析后的工具解析结果。
         """
 
-        prompt_value = await prompt.ainvoke(
-            {
-                "question": parser_input.get(
-                    "question",
-                    "",
+        state = dict(parser_input.get("state", {}))
+        catalog = list(state.get("tool_agent_tool_catalog") or [])
+        tool_names = {item["name"] for item in catalog}
+        schemas = {item["name"]: item.get("input_schema", {}) for item in catalog}
+        execution_contract = state.get("tool_agent_execution_contract") or {}
+        binding = bound_tool_name(execution_contract)
+        registry, locations = load_tool_planning_registry()
+        if binding is not None:
+            if binding not in tool_names:
+                raise ValueError(f"计划绑定的工具 {binding} 当前不可用，不能替换执行。")
+            catalog = [item for item in catalog if item["name"] == binding]
+            state["tool_agent_tool_catalog"] = catalog
+            required = schemas[binding].get("x-planning-skill")
+            selected_skill = load_required_tool_skill(required, registry, locations, tool_names) if required else None
+            if required and selected_skill is None:
+                return ToolParseResult(need_tool=False, response="绑定工具所需技能不可用，无法执行该计划步骤。")
+            loading_reason = "tool_binding" if required else "bound_tool_without_skill"
+        else:
+            selected_skill = select_tool_planning_skill(
+                str(state.get("retrieval_question") or parser_input.get("question") or ""), registry, locations, tool_names,
+            )
+            loading_reason = "activation_hint" if selected_skill else "no_hint_match"
+        from src.runtime.context import get_runtime_time_context
+        time_context = get_runtime_time_context()
+        reference_date = time_context["reference_date"]
+        context = runtime_ctx.get()
+        # 首轮仅提议；目录声明缺少技能依赖时最多补充规划一次，期间不执行工具、不生成动作键。
+        for planning_attempt in range(2):
+            skill_context, skill_metadata = build_tool_planning_context(selected_skill, registry, locations)
+            if context is not None:
+                context.metadata["tool_planning_skill"] = {
+                    **skill_metadata, **time_context, "loading_reason": loading_reason,
+                    "planning_attempt_count": planning_attempt + 1,
+                }
+            prompt_value = await prompt.ainvoke({
+                "skill_context": skill_context or "无匹配技能，按工具目录提出调用；所需技能由宿主核对加载。",
+                "reference_date": reference_date,
+                "reference_timezone": time_context["timezone"],
+                "execution_contract": json.dumps(execution_contract or {"execution_mode": "capability"}, ensure_ascii=False),
+                "question": parser_input.get("question", ""),
+                "tool_catalog_text": build_tool_catalog_prompt_text(state=state),
+                "format_instructions": tool_parse_output_parser.get_format_instructions(),
+            })
+            raw_output = await llm_provider.safe_ainvoke(
+                llm=backup_llm, prompt=prompt_value, fallback_response="调用LLM失败",
+                call_metadata=build_llm_call_metadata(
+                    purpose=LLMCallPurpose.TOOL_PLANNING, component="tool_parse_node",
+                    agent_name="tool_agent", state=state,
                 ),
-                "tool_catalog_text": build_tool_catalog_prompt_text(
-                    state=parser_input.get(
-                        "state",
-                        {},
-                    ),
-                ),
-                "format_instructions": (
-                    tool_parse_output_parser.get_format_instructions()
-                ),
-            }
-        )
-        raw_output = await llm_provider.safe_ainvoke(
-            llm=backup_llm,
-            prompt=prompt_value,
-            fallback_response="调用LLM失败",
-            call_metadata=build_llm_call_metadata(
-                purpose=LLMCallPurpose.TOOL_PLANNING,
-                component="tool_parse_node",
-                agent_name="tool_agent",
-                state=parser_input.get("state"),
-            ),
-        )
-
-        return parse_tool_parse_llm_output(
-            raw_output=raw_output,
-        )
+            )
+            proposal = parse_tool_parse_llm_output(raw_output=raw_output)
+            if binding is not None:
+                # 提议原样交统一校验层，错误调用会记录为绑定冲突，不改名、不改计划、不执行。
+                if len(proposal.tool_calls) != 1 or proposal.tool_calls[0].name != binding:
+                    return proposal
+            # 工具存在性仍交给统一校验节点；此处只解析已知目录中的技能依赖。
+            required_skills = {schemas.get(call.name, {}).get("x-planning-skill") for call in proposal.tool_calls}
+            required_skills.discard(None)
+            required_skills.discard("")
+            if len(required_skills) > 1:
+                return ToolParseResult(need_tool=False, response="同一提议依赖多个技能，请拆分为独立步骤；本次未执行。")
+            required_skill = next(iter(required_skills), None)
+            if required_skill and required_skill != skill_metadata.get("skill_id"):
+                if planning_attempt > 0:
+                    return ToolParseResult(need_tool=False, response="技能依赖仍不匹配，已达到补充规划上限，本次未执行。")
+                selected_skill = load_required_tool_skill(required_skill, registry, locations, tool_names)
+                if selected_skill is None:
+                    return ToolParseResult(need_tool=False, response="工具所需技能未注册、已停用或依赖不满足，本次未执行。")
+                loading_reason = "tool_requirement"
+                continue
+            allowed_tools = set(skill_metadata.get("allowed_tools", []))
+            if allowed_tools and any(call.name not in allowed_tools for call in proposal.tool_calls):
+                return ToolParseResult(need_tool=False, response="提议调用超出当前技能的工具范围，本次未执行。请拆分任务后重试。")
+            return proposal
+        raise ValueError("工具规划已达到轮次限制。")
 
     return llm_tool_parser
 
@@ -797,6 +863,8 @@ def render_input_schema_field_for_prompt(
         )
         or ""
     ).strip()
+    if field_schema.get("x-runtime-generated"):
+        return f"- {field_name}: 程序生成，模型必须省略，不向用户索取"
     required_text = (
         "必填"
         if required
@@ -1260,6 +1328,10 @@ def dump_tool_parse_result_for_state(
         )
         + 1,
     }
+
+    # 无工具调用时保留解析器的澄清或能力限制说明，交给现有答案节点返回。
+    if not parse_result.tool_calls and parse_result.response:
+        update["final_answer"] = parse_result.response
 
     merged_state = {
         **dict(

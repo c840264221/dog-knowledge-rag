@@ -53,6 +53,12 @@ LongTaskBatchStepResultStatus = Literal[
     "failed",
     "skipped",
 ]
+LongTaskFailureCategory = Literal[
+    "transient",
+    "permanent",
+    "business",
+    "unknown",
+]
 LongTaskExecutionAction = Literal[
     "advance_task",
     "await_user_input",
@@ -511,6 +517,9 @@ class LongTaskBatchStepResult(LongTaskContractModel):
             步骤失败时的具体错误说明。
         error_code:
             步骤失败时供程序治理使用的可选稳定错误代码。
+        failure_category:
+            步骤失败时的错误类别，用于决定自动重试、死信或业务失败；
+            兼容旧执行器而允许为空，Driver 会按 unknown 安全处理。
         span_id:
             当前步骤执行在批次 Trace 中的可选诊断片段编号。
         metadata:
@@ -531,6 +540,7 @@ class LongTaskBatchStepResult(LongTaskContractModel):
     user_prompt: str = ""
     error_code: str | None = Field(default=None, min_length=1)
     error_message: str | None = None
+    failure_category: LongTaskFailureCategory | None = None
     claim_id: str | None = None
     span_id: str | None = Field(default=None, min_length=1)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -567,9 +577,10 @@ class LongTaskBatchStepResult(LongTaskContractModel):
         elif (
             self.error_code is not None
             or self.error_message is not None
+            or self.failure_category is not None
         ):
             raise ValueError(
-                "只有 failed 批次步骤结果可以设置错误代码和说明"
+                "只有 failed 批次步骤结果可以设置错误代码、说明和类别"
             )
         return self
 
@@ -1054,6 +1065,8 @@ class LongTaskCommitReceipt(LongTaskContractModel):
             本次原子追加的事件身份和序号区间。
         queue_message_id:
             可选 Redis Stream 消息编号；未入队时为空。
+        retry_plan_id/dead_letter_id:
+            失败提交原子保存的可选重试计划或死信编号；普通提交时为空。
         committed_at:
             Store 接受该提交的 UTC 时间。
 
@@ -1071,6 +1084,8 @@ class LongTaskCommitReceipt(LongTaskContractModel):
     event_sequence_start: int = Field(..., ge=1)
     event_sequence_end: int = Field(..., ge=1)
     queue_message_id: str | None = None
+    retry_plan_id: str | None = Field(default=None, min_length=1)
+    dead_letter_id: str | None = Field(default=None, min_length=1)
     committed_at: datetime = Field(default_factory=utc_now)
 
     @model_validator(mode="after")
@@ -1088,4 +1103,6 @@ class LongTaskCommitReceipt(LongTaskContractModel):
         )
         if expected_count != len(self.event_ids):
             raise ValueError("回执事件数量与 sequence 区间不一致")
+        if self.retry_plan_id is not None and self.dead_letter_id is not None:
+            raise ValueError("同一次提交不能同时保存重试计划和死信")
         return self

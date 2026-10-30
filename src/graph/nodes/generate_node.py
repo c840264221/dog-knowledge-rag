@@ -1,3 +1,4 @@
+import json
 from typing import Any
 
 from langchain_core.messages import AIMessage
@@ -266,6 +267,9 @@ def build_generate_node(
         context, context_source = resolve_generation_context(
             state=state,
         )
+        if state.get("rag_sub_query_results") and not state.get("rag_sub_query_coverage"):
+            # 所有分组未通过质量检查时，不直接把未重排的合并池交给模型。
+            context, context_source = "", "grouped_evidence_unavailable"
 
         answer_strategy = resolve_answer_strategy(
             state=state,
@@ -324,6 +328,13 @@ def build_generate_node(
             memory_text=memory_text,
             history_text=history_text,
         )
+        if state.get("rag_sub_query_coverage"):
+            prompt_text += (
+                "\n本轮包含多个知识需求，请逐项回答原始问题。子问题证据分配仅表示候选已入选，"
+                "不代表事实已验证或资料充分；仍需判断原文是否支持。没有入选证据的子问题明确说明资料不足，"
+                "不能用另一题的资料冒充覆盖。引用使用上下文的[S编号]。\n"
+                + json.dumps(state["rag_sub_query_coverage"], ensure_ascii=False)
+            )
 
         main_llm = llm_provider.main_llm
 

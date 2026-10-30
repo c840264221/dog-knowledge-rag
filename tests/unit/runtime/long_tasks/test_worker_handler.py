@@ -10,7 +10,9 @@ import pytest
 from src.runtime.long_tasks import (
     InvalidLongTaskStepExecutionResultError,
     LongTask,
+    LongTaskBatchResult,
     LongTaskBatchStepResult,
+    LongTaskExecutionContext,
     LongTaskGoal,
     LongTaskQueueMessage,
     LongTaskQueueMessageHandler,
@@ -101,6 +103,55 @@ class FailingOnceQueuePublisher(RecordingQueuePublisher):
         if self.attempt_count == 1:
             raise ConnectionError("模拟 continued 消息首次发布失败")
         return await super().publish(message)
+
+
+class RecordingRuntimeDriver:
+    """记录 Handler 交给 Driver 的结构化批次结果。"""
+
+    def __init__(self, store: InMemoryHandlerStore) -> None:
+        """
+        保存测试 Store 并初始化空批次列表。
+
+        参数含义：
+            store:
+                Handler 领取步骤后保存最新任务的内存 Store。
+
+        返回值含义：
+            None：初始化结果保存在实例字段中。
+        """
+
+        self.store = store
+        self.batch_results: list[LongTaskBatchResult] = []
+
+    async def handle_batch_result(
+        self,
+        *,
+        task_id: str,
+        batch_result: LongTaskBatchResult,
+        execution_context: LongTaskExecutionContext,
+        publish_ready_message: bool = False,
+        correlation_id: str | None = None,
+    ) -> LongTask:
+        """
+        记录异常转换后的批次并返回当前测试任务。
+
+        参数含义：
+            task_id/batch_result:
+                当前任务编号和 Handler 准备提交的结构化结果。
+            execution_context:
+                Handler 记录的本批次耗时信息。
+            publish_ready_message/correlation_id:
+                与真实 Driver 保持一致的发布开关和业务关联编号。
+
+        返回值含义：
+            LongTask：Store 中完成步骤领取后的当前任务。
+        """
+
+        del execution_context, publish_ready_message, correlation_id
+        assert task_id == self.store.task.task_id
+        self.batch_results.append(batch_result)
+        return self.store.task
+
 
 def build_durable_task(
     *,
@@ -374,6 +425,61 @@ async def test_handler_should_reject_executor_result_with_wrong_claim() -> None:
         "running",
     ]
     assert store.save_count == 2
+
+
+@pytest.mark.asyncio
+async def test_handler_should_convert_timeout_to_transient_failure_result(
+) -> None:
+    """
+    验证单步骤执行器抛出超时后会生成带当前领取令牌的临时失败结果。
+
+    参数含义：
+        无。
+
+    返回值含义：
+        None：Driver 收到的错误类别、代码和 claim_id 正确时测试通过。
+    """
+
+    store = InMemoryHandlerStore(build_dependent_durable_task())
+    runtime_driver = RecordingRuntimeDriver(store)
+
+    async def executor(
+        _: LongTask,
+        __: LongTaskStep,
+        ___: str,
+    ) -> LongTaskBatchStepResult:
+        """
+        模拟单步骤调用上游服务时直接抛出超时异常。
+
+        参数含义：
+            _/__/___：当前测试不使用的任务、步骤和领取令牌。
+
+        返回值含义：
+            LongTaskBatchStepResult：本函数始终抛出异常，不会正常返回。
+        """
+
+        raise TimeoutError("上游知识服务响应超时")
+
+    await LongTaskQueueMessageHandler(
+        store=store,
+        step_executor=executor,
+        worker_name="worker-1",
+        runtime_driver=runtime_driver,  # type: ignore[arg-type]
+        claim_id_factory=lambda: "claim-timeout-1",
+        batch_id_factory=lambda: "batch-timeout-1",
+    )(build_dependent_message())
+
+    assert len(runtime_driver.batch_results) == 1
+    batch_result = runtime_driver.batch_results[0]
+    assert batch_result.actor_type == "worker"
+    assert batch_result.actor_id == "worker-1"
+    assert len(batch_result.step_results) == 1
+    failed_result = batch_result.step_results[0]
+    assert failed_result.status == "failed"
+    assert failed_result.failure_category == "transient"
+    assert failed_result.error_code == "LONG_TASK_STEP_TIMEOUT"
+    assert failed_result.error_message == "上游知识服务响应超时"
+    assert failed_result.claim_id == "claim-timeout-1"
 
 
 @pytest.mark.asyncio

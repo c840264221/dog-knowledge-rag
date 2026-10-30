@@ -1,0 +1,342 @@
+{
+  "dataset_version": "tool_real_development_v1",
+  "description": "12正常任务、8异常或恢复任务。日期由可信时间快照展开；description仅核查非空及保留用途，分类与金额严格核验。异常执行层不计自然语言理解能力。",
+  "cases": [
+    {
+      "case_id": "T01",
+      "kind": "normal",
+      "scenario": "budget",
+      "question": "预算100元，猫砂每袋30元买2袋，食碗每个15元买1个，单价都是我提供的，帮我算用品预算。",
+      "tool": "calculate_supply_budget",
+      "expected_args": {
+        "budget": "100.00",
+        "currency": "CNY",
+        "price_source": "user_provided",
+        "items": [
+          {
+            "name": "猫砂",
+            "unit_price": "30.00",
+            "quantity": 2
+          },
+          {
+            "name": "食碗",
+            "unit_price": "15.00",
+            "quantity": 1
+          }
+        ]
+      },
+      "expected_output": {
+        "total": "75.00",
+        "remaining_budget": "25.00",
+        "over_budget_amount": "0.00"
+      }
+    },
+    {
+      "case_id": "T02",
+      "kind": "normal",
+      "scenario": "budget",
+      "question": "帮我算用品预算：预算80元，猫砂每袋40元买2袋，食水碗每个19.9元买1个，都是我提供的单价。",
+      "tool": "calculate_supply_budget",
+      "expected_args": {
+        "budget": "80.00",
+        "currency": "CNY",
+        "price_source": "user_provided",
+        "items": [
+          {
+            "name": "猫砂",
+            "unit_price": "40.00",
+            "quantity": 2
+          },
+          {
+            "name": "食水碗",
+            "unit_price": "19.90",
+            "quantity": 1
+          }
+        ]
+      },
+      "expected_output": {
+        "total": "99.90",
+        "remaining_budget": "0.00",
+        "over_budget_amount": "19.90"
+      }
+    },
+    {
+      "case_id": "T03",
+      "kind": "normal",
+      "scenario": "budget",
+      "question": "帮我算用品预算：预算60元，猫粮每袋30元买2袋，单价由我提供。",
+      "tool": "calculate_supply_budget",
+      "expected_args": {
+        "budget": "60.00",
+        "currency": "CNY",
+        "price_source": "user_provided",
+        "items": [
+          {
+            "name": "猫粮",
+            "unit_price": "30.00",
+            "quantity": 2
+          }
+        ]
+      },
+      "expected_output": {
+        "total": "60.00",
+        "remaining_budget": "0.00",
+        "over_budget_amount": "0.00"
+      }
+    },
+    {
+      "case_id": "T04",
+      "kind": "normal",
+      "scenario": "budget",
+      "question": "帮我算用品预算：预算100元，逗猫棒单价19.9元买3个，单价由我提供。",
+      "tool": "calculate_supply_budget",
+      "expected_args": {
+        "budget": "100.00",
+        "currency": "CNY",
+        "price_source": "user_provided",
+        "items": [
+          {
+            "name": "逗猫棒",
+            "unit_price": "19.90",
+            "quantity": 3
+          }
+        ]
+      },
+      "expected_output": {
+        "total": "59.70",
+        "remaining_budget": "40.30",
+        "over_budget_amount": "0.00"
+      }
+    },
+    {
+      "case_id": "T05",
+      "kind": "normal",
+      "scenario": "record",
+      "question": "昨天吃饭20元，帮我记账。",
+      "tool": "record_expense",
+      "expected_args": {
+        "amount": "20.00",
+        "currency": "CNY",
+        "category": "生活",
+        "subcategory": "餐饮",
+        "description": "吃饭",
+        "expense_date": "yesterday"
+      }
+    },
+    {
+      "case_id": "T06",
+      "kind": "normal",
+      "scenario": "record",
+      "question": "今天打车去宠物医院35元，帮我记账。",
+      "tool": "record_expense",
+      "expected_args": {
+        "amount": "35.00",
+        "currency": "CNY",
+        "category": "出行",
+        "subcategory": "打车",
+        "description": "去宠物医院",
+        "expense_date": "today"
+      }
+    },
+    {
+      "case_id": "T07",
+      "kind": "normal",
+      "scenario": "record",
+      "question": "昨天狗子洗澡80元，帮我记账。",
+      "tool": "record_expense",
+      "expected_args": {
+        "amount": "80.00",
+        "currency": "CNY",
+        "category": "宠物",
+        "subcategory": "洗护",
+        "description": "狗子洗澡",
+        "expense_date": "yesterday"
+      }
+    },
+    {
+      "case_id": "T08",
+      "kind": "normal",
+      "scenario": "record",
+      "question": "今天买猫砂45元，帮我记账。",
+      "tool": "record_expense",
+      "expected_args": {
+        "amount": "45.00",
+        "currency": "CNY",
+        "category": "宠物",
+        "subcategory": "用品",
+        "description": "买猫砂",
+        "expense_date": "today"
+      }
+    },
+    {
+      "case_id": "T09",
+      "kind": "normal",
+      "scenario": "record",
+      "question": "今天给狗看病的诊疗费120元，帮我记账。",
+      "tool": "record_expense",
+      "expected_args": {
+        "amount": "120.00",
+        "currency": "CNY",
+        "category": "宠物",
+        "subcategory": "医疗",
+        "description": "给狗看病的诊疗费",
+        "expense_date": "today"
+      }
+    },
+    {
+      "case_id": "T10",
+      "kind": "normal",
+      "scenario": "batch",
+      "question": "昨天吃饭20元、打车15元、狗子洗澡80元，这三笔都是昨天的实际消费，帮我记账。",
+      "tool": "record_expenses",
+      "expected_args": {
+        "items": [
+          {
+            "amount": "20.00",
+            "currency": "CNY",
+            "category": "生活",
+            "subcategory": "餐饮",
+            "description": "吃饭",
+            "expense_date": "yesterday"
+          },
+          {
+            "amount": "15.00",
+            "currency": "CNY",
+            "category": "出行",
+            "subcategory": "打车",
+            "description": "打车",
+            "expense_date": "yesterday"
+          },
+          {
+            "amount": "80.00",
+            "currency": "CNY",
+            "category": "宠物",
+            "subcategory": "洗护",
+            "description": "狗子洗澡",
+            "expense_date": "yesterday"
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "T11",
+      "kind": "normal",
+      "scenario": "query",
+      "question": "查一下宠物分类最近5条支出，只查询，不新增或修改账单。",
+      "tool": "query_expenses",
+      "expected_args": {
+        "category": "宠物",
+        "limit": 5
+      }
+    },
+    {
+      "case_id": "T12",
+      "kind": "normal",
+      "scenario": "query",
+      "question": "查一下出行分类最近3条支出，只查询，不新增或修改账单。",
+      "tool": "query_expenses",
+      "expected_args": {
+        "category": "出行",
+        "limit": 3
+      }
+    },
+    {
+      "case_id": "E01",
+      "kind": "exception",
+      "scenario": "clarification",
+      "question": "昨天狗子洗澡，帮我记账。",
+      "reply": "80",
+      "missing_field": "amount",
+      "tool": "record_expense",
+      "expected_args": {
+        "amount": "80.00",
+        "currency": "CNY",
+        "category": "宠物",
+        "subcategory": "洗护",
+        "description": "狗子洗澡",
+        "expense_date": "yesterday"
+      },
+      "recoverable": true
+    },
+    {
+      "case_id": "E02",
+      "kind": "exception",
+      "scenario": "clarification",
+      "question": "狗子洗澡80元，帮我记账。",
+      "reply": "today",
+      "missing_field": "expense_date",
+      "tool": "record_expense",
+      "expected_args": {
+        "amount": "80.00",
+        "currency": "CNY",
+        "category": "宠物",
+        "subcategory": "洗护",
+        "description": "狗子洗澡",
+        "expense_date": "today"
+      },
+      "recoverable": true
+    },
+    {
+      "case_id": "E03",
+      "kind": "exception",
+      "scenario": "reject",
+      "question": "今天买猫砂30元，帮我记账。",
+      "tool": "record_expense",
+      "expected_args": {
+        "amount": "30.00",
+        "currency": "CNY",
+        "category": "宠物",
+        "subcategory": "用品",
+        "description": "买猫砂",
+        "expense_date": "today"
+      },
+      "recoverable": false
+    },
+    {
+      "case_id": "E04",
+      "kind": "exception",
+      "scenario": "unsupported",
+      "question": "明天准备买100元猫粮，帮我记账。",
+      "tool": null,
+      "expected_args": {},
+      "recoverable": false
+    },
+    {
+      "case_id": "E05",
+      "kind": "exception",
+      "scenario": "duplicate",
+      "layer": "mcp_execution",
+      "recoverable": true
+    },
+    {
+      "case_id": "E06",
+      "kind": "exception",
+      "scenario": "conflict",
+      "layer": "mcp_execution",
+      "recoverable": false
+    },
+    {
+      "case_id": "E07",
+      "kind": "exception",
+      "scenario": "checkpoint",
+      "question": "今天买猫砂32元，帮我记账。",
+      "tool": "record_expense",
+      "expected_args": {
+        "amount": "32.00",
+        "currency": "CNY",
+        "category": "宠物",
+        "subcategory": "用品",
+        "description": "买猫砂",
+        "expense_date": "today"
+      },
+      "recoverable": true
+    },
+    {
+      "case_id": "E08",
+      "kind": "exception",
+      "scenario": "discard_response",
+      "layer": "mcp_execution",
+      "recoverable": true
+    }
+  ]
+}

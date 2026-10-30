@@ -20,6 +20,7 @@ from src.agents.collaboration.aggregator.prompts import (
     build_result_aggregation_repair_prompt,
 )
 from src.agents.collaboration.contracts import MultiAgentTaskResult
+from src.agents.collaboration.aggregator.evidence_presentation import present_evidence
 from src.logger import logger
 from src.runtime.observability.llm_call_records import (
     LLMCallPurpose,
@@ -162,13 +163,18 @@ class ResultAggregator:
                     expected_used_step_ids=completed_step_ids,
                     requires_limitations=bool(incomplete_step_ids),
                 )
+                final_answer, limitations, citation_map = present_evidence(
+                    task_result, draft.final_answer, draft.limitations,
+                )
                 aggregated_result = _build_aggregated_task_result(
                     task_result=task_result,
-                    final_answer=draft.final_answer,
+                    final_answer=final_answer,
                     used_step_ids=draft.used_step_ids,
-                    limitations=draft.limitations,
+                    limitations=limitations,
                     attempt_count=attempt_number,
                 )
+                if citation_map:
+                    aggregated_result.metadata["result_aggregation"]["citation_map"] = citation_map
                 _log_aggregation_event(
                     level="info",
                     event="result_aggregation_completed",

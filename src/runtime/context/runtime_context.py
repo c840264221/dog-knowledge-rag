@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from src.runtime.context.time_context import RuntimeTimeContext
 
 from typing import Any
 
@@ -80,6 +81,9 @@ class RuntimeContext:
     hook_manager: RuntimeHookManager = field(
         default_factory=RuntimeHookManager
     )
+
+    # 统一请求环境；各Agent共享同一日期基准，不能从用户或Planner的业务字段覆盖。
+    time_context: RuntimeTimeContext = field(default_factory=RuntimeTimeContext.capture)
 
 
     def __post_init__(self):
