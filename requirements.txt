@@ -39,7 +39,8 @@ httptools==0.7.1
 httpx==0.28.1
 httpx-sse==0.4.3
 huggingface_hub==1.12.0
-idna==3.13
+# MCP 使用的 httpx2 要求 idna>=3.18；与本地验证版本保持一致。
+idna==3.20
 immutables==0.21
 importlib_metadata==8.7.1
 importlib_resources==7.1.0
